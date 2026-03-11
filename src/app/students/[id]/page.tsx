@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { Mail, Phone, Calendar, Dumbbell, History, Award, Edit } from "lucide-react";
+import { Mail, Phone, Calendar, Dumbbell, History, Award } from "lucide-react";
 import Link from "next/link";
 
 const weightData = [
