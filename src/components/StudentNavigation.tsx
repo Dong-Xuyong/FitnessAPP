@@ -14,14 +14,17 @@ import {
   Play,
   CreditCard,
   Calendar,
-  User
+  User,
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useAuth, useUser } from "@/firebase";
+import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
+import { collection, query, where, getDocs, limit } from "firebase/firestore";
+import { useEffect, useState } from "react";
 
 const navItems = [
   { name: "My Dashboard", href: "/student/dashboard", icon: LayoutDashboard },
@@ -41,7 +44,35 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const auth = useAuth();
+  const db = useFirestore();
   const { user } = useUser();
+  const [profile, setProfile] = useState<{ firstName?: string; photoUrl?: string } | null>(null);
+
+  useEffect(() => {
+    if (!db || !user?.email) return;
+
+    async function fetchStudentProfile() {
+      try {
+        const trainersCol = collection(db, "personalTrainers");
+        const trainersSnapshot = await getDocs(trainersCol);
+        
+        for (const trainerDoc of trainersSnapshot.docs) {
+          const studentsCol = collection(db, "personalTrainers", trainerDoc.id, "students");
+          const q = query(studentsCol, where("email", "==", user?.email), limit(1));
+          const studentSnapshot = await getDocs(q);
+          
+          if (!studentSnapshot.empty) {
+            setProfile(studentSnapshot.docs[0].data());
+            break;
+          }
+        }
+      } catch (e) {
+        console.error("Error fetching profile for navigation", e);
+      }
+    }
+
+    fetchStudentProfile();
+  }, [db, user?.email, pathname]); // Re-fetch on pathname change to catch updates after saving profile
 
   const handleSignOut = () => {
     if (!auth) return;
@@ -82,12 +113,14 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
 
         <div className="p-4 border-t mt-auto">
           <div className="flex items-center gap-3 px-4 py-2 mb-4">
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={user?.photoURL || `https://picsum.photos/seed/${user?.uid || 's1'}/100/100`} />
-              <AvatarFallback>{user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
+            <Avatar className="h-8 w-8 ring-2 ring-accent/10">
+              <AvatarImage src={profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || 's1'}/100/100`} />
+              <AvatarFallback>{profile?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
             </Avatar>
             <div className="overflow-hidden">
-              <p className="text-sm font-medium leading-none truncate">{user?.displayName || "Student"}</p>
+              <p className="text-sm font-medium leading-none truncate">
+                {profile?.firstName || user?.displayName || "Student"}
+              </p>
               <p className="text-xs text-muted-foreground truncate">{user?.email || "Account"}</p>
             </div>
           </div>
