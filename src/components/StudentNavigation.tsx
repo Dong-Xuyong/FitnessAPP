@@ -43,13 +43,13 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
 
   const handleSignOut = () => {
     if (!auth) return;
-    initiateSignOut(auth);
-    router.push("/");
+    initiateSignOut(auth).then(() => {
+      router.push("/");
+    });
   };
 
   return (
     <div className="flex min-h-screen bg-background">
-      {/* Sidebar */}
       <aside className="w-64 border-r bg-card hidden md:flex flex-col fixed inset-y-0">
         <div className="p-6">
           <Link href="/student/dashboard" className="flex items-center gap-2">
@@ -81,7 +81,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
         <div className="p-4 border-t mt-auto">
           <div className="flex items-center gap-3 px-4 py-2 mb-4">
             <Avatar className="h-8 w-8">
-              <AvatarImage src={user?.photoURL || "https://picsum.photos/seed/s1/100/100"} />
+              <AvatarImage src={user?.photoURL || `https://picsum.photos/seed/${user?.uid || 's1'}/100/100`} />
               <AvatarFallback>{user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
             </Avatar>
             <div className="overflow-hidden">
@@ -100,9 +100,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main Content */}
       <div className="flex-1 md:ml-64 flex flex-col">
-        {/* Header */}
         <header className="h-16 border-b bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-6">
           <div className="flex items-center gap-4">
             <h1 className="text-lg font-semibold capitalize">

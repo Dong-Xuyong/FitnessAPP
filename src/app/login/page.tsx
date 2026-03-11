@@ -1,22 +1,22 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Dumbbell, Mail, Lock, Loader2, UserCircle, GraduationCap } from "lucide-react";
+import { Dumbbell, Mail, Lock, Loader2, User, GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useAuth, useUser, useFirestore, setDocumentNonBlocking } from "@/firebase";
+import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateEmailSignIn, initiateEmailSignUp, initiateGoogleSignIn } from "@/firebase/non-blocking-login";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useAuth();
@@ -39,8 +39,6 @@ export default function LoginPage() {
           if (ptDoc.exists()) {
             router.push("/dashboard");
           } else {
-            // If they signed up as a trainer but doc doesn't exist yet, we handle it in handleEmailSignUp
-            // Otherwise, default to student portal
             router.push("/student/dashboard");
           }
         } catch (error) {
@@ -77,10 +75,9 @@ export default function LoginPage() {
       const userCredential = await initiateEmailSignUp(auth, email, password);
       
       if (isTrainer) {
-        // Initialize Trainer Profile
         const trainerData = {
           id: userCredential.user.uid,
-          firstName: email.split('@')[0], // Default placeholder
+          firstName: email.split('@')[0],
           lastName: "Trainer",
           email: email,
           dateJoined: new Date().toISOString(),
@@ -136,7 +133,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md shadow-xl border-t-4 border-t-primary">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold font-headline">
-            {isTrainer ? "Coach Login" : "Student Login"}
+            {isTrainer ? "Coach Access" : "Student Access"}
           </CardTitle>
           <CardDescription>
             {isTrainer 
@@ -279,5 +276,17 @@ export default function LoginPage() {
         </CardFooter>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }

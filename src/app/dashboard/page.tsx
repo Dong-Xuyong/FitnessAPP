@@ -1,6 +1,7 @@
 
 "use client";
 
+import { Suspense } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Users, Dumbbell, Activity, Calendar, ArrowUpRight, TrendingUp, Loader2 } from "lucide-react";
@@ -8,10 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, query, limit, orderBy } from "firebase/firestore";
+import { collection, query, orderBy } from "firebase/firestore";
 
-export default function DashboardPage() {
-  const { user } = useUser();
+function DashboardContent() {
+  const { user, isUserLoading } = useUser();
   const db = useFirestore();
 
   const studentsQuery = useMemoFirebase(() => {
@@ -30,6 +31,14 @@ export default function DashboardPage() {
     { label: "Total Sessions", value: "124", icon: Activity, change: "+12% vs last month" },
     { label: "Scheduled Today", value: "4", icon: Calendar, change: "Next: Sarah (2 PM)" },
   ];
+
+  if (isUserLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <Navigation>
@@ -76,7 +85,7 @@ export default function DashboardPage() {
                         </Avatar>
                         <div>
                           <p className="text-sm font-medium leading-none">{student.firstName} {student.lastName}</p>
-                          <p className="text-xs text-muted-foreground">{student.goals}</p>
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{student.goals}</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -114,5 +123,13 @@ export default function DashboardPage() {
         </div>
       </div>
     </Navigation>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<Loader2 className="h-8 w-8 animate-spin text-primary m-auto" />}>
+      <DashboardContent />
+    </Suspense>
   );
 }
