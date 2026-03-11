@@ -12,7 +12,6 @@ import {
   MessageSquare,
   Play,
   CreditCard,
-  CheckCircle2,
   Calendar
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
