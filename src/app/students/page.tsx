@@ -60,11 +60,11 @@ export default function StudentsPage() {
 
   const { data: myStudents, isLoading: isLoadingRoster } = useCollection(myStudentsQuery);
 
-  // Global Directory Query
+  // Global Directory Query - Gated by user existence to avoid permission errors
   const globalStudentsQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !user) return null;
     return collection(db, "students");
-  }, [db]);
+  }, [db, user]);
 
   const { data: allStudents, isLoading: isLoadingGlobal } = useCollection(globalStudentsQuery);
 

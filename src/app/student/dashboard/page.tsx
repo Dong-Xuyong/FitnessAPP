@@ -1,3 +1,4 @@
+
 "use client";
 
 import { StudentNavigation } from "@/components/StudentNavigation";
@@ -24,10 +25,11 @@ export default function StudentDashboardPage() {
   const [isJoining, setIsJoining] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Gated by user existence to avoid permission errors
   const coachesQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !user) return null;
     return collection(db, "personalTrainers");
-  }, [db]);
+  }, [db, user]);
 
   const { data: coaches, isLoading: isLoadingCoaches } = useCollection(coachesQuery);
 
@@ -124,8 +126,8 @@ export default function StudentDashboardPage() {
   }
 
   if (!studentData) {
-    const filteredCoaches = coaches?.filter(c => 
-      `${c.firstName} ${c.lastName}`.toLowerCase().includes(searchQuery.toLowerCase())
+    const filteredCoaches = coaches?.filter(coach => 
+      `${coach.firstName} ${coach.lastName}`.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
 
     return (
