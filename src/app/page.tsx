@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Dumbbell, ArrowRight, ShieldCheck, Zap, Users } from "lucide-react";
+import { Dumbbell, ArrowRight, ShieldCheck, Zap, Users, GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Home() {
@@ -35,8 +35,10 @@ export default function Home() {
                   Trainer Dashboard <ArrowRight className="h-5 w-5" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" className="h-12 px-8 text-lg">
-                View Demo
+              <Button size="lg" variant="outline" className="h-12 px-8 text-lg gap-2" asChild>
+                <Link href="/student/dashboard">
+                  <GraduationCap className="h-5 w-5" /> Student Portal
+                </Link>
               </Button>
             </div>
           </div>
