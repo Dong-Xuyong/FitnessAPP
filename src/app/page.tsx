@@ -1,3 +1,4 @@
+
 import Link from "next/link";
 import { Dumbbell, ArrowRight, ShieldCheck, Zap, Users, GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,10 +13,10 @@ export default function Home() {
         </Link>
         <nav className="ml-auto flex gap-4">
           <Button variant="ghost" asChild>
-            <Link href="/dashboard">Login</Link>
+            <Link href="/login">Login</Link>
           </Button>
           <Button asChild>
-            <Link href="/dashboard">Get Started</Link>
+            <Link href="/login">Get Started</Link>
           </Button>
         </nav>
       </header>
@@ -31,12 +32,12 @@ export default function Home() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Button size="lg" className="h-12 px-8 text-lg gap-2" asChild>
-                <Link href="/dashboard">
+                <Link href="/login">
                   Trainer Dashboard <ArrowRight className="h-5 w-5" />
                 </Link>
               </Button>
               <Button size="lg" variant="outline" className="h-12 px-8 text-lg gap-2" asChild>
-                <Link href="/student/dashboard">
+                <Link href="/login">
                   <GraduationCap className="h-5 w-5" /> Student Portal
                 </Link>
               </Button>

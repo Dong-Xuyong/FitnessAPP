@@ -1,7 +1,8 @@
+
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { 
   LayoutDashboard, 
@@ -19,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useAuth, useUser } from "@/firebase";
+import { initiateSignOut } from "@/firebase/non-blocking-login";
 
 const navItems = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -36,6 +39,15 @@ const mockNotifications = [
 
 export function Navigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const auth = useAuth();
+  const { user } = useUser();
+
+  const handleSignOut = () => {
+    if (!auth) return;
+    initiateSignOut(auth);
+    router.push("/");
+  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -71,19 +83,21 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         <div className="p-4 border-t mt-auto">
           <div className="flex items-center gap-3 px-4 py-2 mb-4">
             <Avatar className="h-8 w-8">
-              <AvatarImage src="https://picsum.photos/seed/trainer1/100/100" />
-              <AvatarFallback>JD</AvatarFallback>
+              <AvatarImage src={user?.photoURL || "https://picsum.photos/seed/trainer1/100/100"} />
+              <AvatarFallback>{user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
             </Avatar>
             <div className="overflow-hidden">
-              <p className="text-sm font-medium leading-none">John Doe</p>
-              <p className="text-xs text-muted-foreground truncate">Head Trainer</p>
+              <p className="text-sm font-medium leading-none truncate">{user?.displayName || "Trainer"}</p>
+              <p className="text-xs text-muted-foreground truncate">{user?.email || "Account"}</p>
             </div>
           </div>
-          <Button variant="ghost" className="w-full justify-start gap-3 text-muted-foreground" asChild>
-            <Link href="/">
-              <LogOut className="h-5 w-5" />
-              Logout
-            </Link>
+          <Button 
+            variant="ghost" 
+            className="w-full justify-start gap-3 text-muted-foreground" 
+            onClick={handleSignOut}
+          >
+            <LogOut className="h-5 w-5" />
+            Logout
           </Button>
         </div>
       </aside>
