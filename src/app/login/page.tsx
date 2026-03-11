@@ -13,18 +13,19 @@ import { Label } from "@/components/ui/label";
 import { useAuth, useUser, useFirestore, setDocumentNonBlocking } from "@/firebase";
 import { initiateEmailSignIn, initiateEmailSignUp, initiateGoogleSignIn } from "@/firebase/non-blocking-login";
 import { doc, getDoc } from "firebase/firestore";
+import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
   const router = useRouter();
   const auth = useAuth();
   const db = useFirestore();
   const { user, isUserLoading } = useUser();
+  const { toast } = useToast();
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Redirect and Initialize Profile
   useEffect(() => {
     async function checkProfile() {
       if (user && !isUserLoading && db) {
@@ -32,7 +33,6 @@ export default function LoginPage() {
         const trainerSnap = await getDoc(trainerRef);
         
         if (!trainerSnap.exists()) {
-          // Initialize Trainer Profile if it doesn't exist
           const names = user.displayName?.split(" ") || ["Trainer", ""];
           setDocumentNonBlocking(trainerRef, {
             id: user.uid,
@@ -48,24 +48,51 @@ export default function LoginPage() {
     checkProfile();
   }, [user, isUserLoading, router, db]);
 
-  const handleEmailSignIn = (e: React.FormEvent) => {
+  const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth) return;
     setIsSubmitting(true);
-    initiateEmailSignIn(auth, email, password);
+    try {
+      await initiateEmailSignIn(auth, email, password);
+    } catch (error: any) {
+      setIsSubmitting(false);
+      toast({
+        variant: "destructive",
+        title: "Login Failed",
+        description: "Invalid email or password. Please try again or sign up if you don't have an account.",
+      });
+    }
   };
 
-  const handleEmailSignUp = (e: React.FormEvent) => {
+  const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth) return;
     setIsSubmitting(true);
-    initiateEmailSignUp(auth, email, password);
+    try {
+      await initiateEmailSignUp(auth, email, password);
+    } catch (error: any) {
+      setIsSubmitting(false);
+      toast({
+        variant: "destructive",
+        title: "Registration Failed",
+        description: error.message || "Could not create account. Please try a different email.",
+      });
+    }
   };
 
-  const handleGoogleSignIn = () => {
+  const handleGoogleSignIn = async () => {
     if (!auth) return;
     setIsSubmitting(true);
-    initiateGoogleSignIn(auth);
+    try {
+      await initiateGoogleSignIn(auth);
+    } catch (error: any) {
+      setIsSubmitting(false);
+      toast({
+        variant: "destructive",
+        title: "Google Sign-In Failed",
+        description: "An error occurred during Google authentication. Please try again.",
+      });
+    }
   };
 
   if (isUserLoading) {
