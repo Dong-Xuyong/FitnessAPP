@@ -1,3 +1,4 @@
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -26,34 +27,35 @@ service cloud.firestore {
       return request.resource.data[field] == resource.data[field];
     }
 
+    // Global Students Directory
+    match /students/{studentId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(studentId);
+      allow update: if isOwner(studentId);
+      allow delete: if false;
+    }
+
     match /personalTrainers/{personalTrainerId} {
-      allow get, list: if isSignedIn(); // Allow students to browse coaches
+      allow get, list: if isSignedIn();
       allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId);
       allow update: if isExistingOwner(personalTrainerId) && isImmutable('id');
       allow delete: if false;
 
       match /students/{studentId} {
-        // Allow access if user is the PT or if the student's email matches the auth token
         allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email);
-        
-        // PT can create student records OR students can join a coach themselves
         allow create: if (isOwner(personalTrainerId) && matchesPath('personalTrainerId', personalTrainerId)) || 
                       (isSignedIn() && request.auth.uid == studentId);
-        
         allow update: if (isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email)) && isImmutable('personalTrainerId');
         allow delete: if isOwner(personalTrainerId);
 
         match /workoutPlans/{workoutPlanId} {
           allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
-          allow create: if isOwner(personalTrainerId);
-          allow update: if isOwner(personalTrainerId);
-          allow delete: if isOwner(personalTrainerId);
+          allow create, update, delete: if isOwner(personalTrainerId);
         }
 
         match /workoutSessions/{workoutSessionId} {
           allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
-          allow create: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
-          allow update: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow create, update: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
           allow delete: if isOwner(personalTrainerId);
         }
       }

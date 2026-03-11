@@ -1,3 +1,4 @@
+
 {
   "entities": {
     "PersonalTrainer": {
@@ -57,7 +58,7 @@
         },
         "userId": {
           "type": "string",
-          "description": "The Auth UID of the student if they have registered."
+          "description": "The Auth UID of the student."
         },
         "firstName": {
           "type": "string",
@@ -75,10 +76,6 @@
         "photoUrl": {
           "type": "string",
           "description": "URL to the student's profile photo."
-        },
-        "password": {
-          "type": "string",
-          "description": "Initial password assigned by the trainer."
         },
         "age": {
           "type": "number",
@@ -112,28 +109,18 @@
           "type": "string",
           "format": "date-time"
         },
-        "currentProgramId": {
-          "type": "string"
-        },
         "subscriptionStatus": {
           "type": "string",
           "enum": ["active", "expired", "pending"]
         },
         "currentStreakDays": {
           "type": "number"
-        },
-        "lastWorkoutAt": {
-          "type": "string",
-          "format": "date-time"
         }
       },
       "required": [
-        "personalTrainerId",
         "firstName",
         "lastName",
-        "email",
-        "age",
-        "joinedAt"
+        "email"
       ]
     }
   },
@@ -164,6 +151,16 @@
             "$ref": "#/backend/entities/Student"
           },
           "description": "Students managed by trainers."
+        }
+      },
+      {
+        "path": "/students/{studentId}",
+        "definition": {
+          "entityName": "Student",
+          "schema": {
+            "$ref": "#/backend/entities/Student"
+          },
+          "description": "Global directory of student profiles."
         }
       }
     ]

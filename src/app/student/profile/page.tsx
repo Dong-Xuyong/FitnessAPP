@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -9,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser, useFirestore, updateDocumentNonBlocking } from "@/firebase";
-import { collection, query, where, getDocs, limit, doc } from "firebase/firestore";
+import { collection, query, where, getDocs, limit, doc, getDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, UserCircle, Camera } from "lucide-react";
 
@@ -20,7 +21,7 @@ export default function StudentProfilePage() {
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [studentDocInfo, setStudentDocInfo] = useState<{ id: string; trainerId: string } | null>(null);
+  const [studentDocInfo, setStudentDocInfo] = useState<{ id: string; trainerId?: string } | null>(null);
   
   const [formData, setFormData] = useState({
     firstName: "",
@@ -35,35 +36,29 @@ export default function StudentProfilePage() {
   });
 
   useEffect(() => {
-    if (!db || !user?.email) return;
+    if (!db || !user?.uid) return;
 
     async function fetchProfile() {
       setIsLoadingProfile(true);
       try {
-        const trainersCol = collection(db, "personalTrainers");
-        const trainersSnapshot = await getDocs(trainersCol);
+        // First try the global collection
+        const globalDocRef = doc(db, "students", user.uid);
+        const globalDocSnap = await getDoc(globalDocRef);
         
-        for (const trainerDoc of trainersSnapshot.docs) {
-          const studentsCol = collection(db, "personalTrainers", trainerDoc.id, "students");
-          const q = query(studentsCol, where("email", "==", user?.email), limit(1));
-          const studentSnapshot = await getDocs(q);
-          
-          if (!studentSnapshot.empty) {
-            const data = studentSnapshot.docs[0].data();
-            setStudentDocInfo({ id: studentSnapshot.docs[0].id, trainerId: trainerDoc.id });
-            setFormData({
-              firstName: data.firstName || "",
-              lastName: data.lastName || "",
-              photoUrl: data.photoUrl || "",
-              age: data.age?.toString() || "",
-              sex: data.sex || "male",
-              weightKg: data.weightKg?.toString() || "",
-              heightCm: data.heightCm?.toString() || "",
-              goalType: data.goalType || "muscle_gain",
-              goalWeightKg: data.goalWeightKg?.toString() || ""
-            });
-            break;
-          }
+        if (globalDocSnap.exists()) {
+          const data = globalDocSnap.data();
+          setStudentDocInfo({ id: user.uid, trainerId: data.personalTrainerId });
+          setFormData({
+            firstName: data.firstName || "",
+            lastName: data.lastName || "",
+            photoUrl: data.photoUrl || "",
+            age: data.age?.toString() || "",
+            sex: data.sex || "male",
+            weightKg: data.weightKg?.toString() || "",
+            heightCm: data.heightCm?.toString() || "",
+            goalType: data.goalType || "muscle_gain",
+            goalWeightKg: data.goalWeightKg?.toString() || ""
+          });
         }
       } catch (e) {
         console.error("Error fetching profile", e);
@@ -73,14 +68,13 @@ export default function StudentProfilePage() {
     }
 
     fetchProfile();
-  }, [db, user?.email]);
+  }, [db, user?.uid]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!db || !studentDocInfo) return;
+    if (!db || !user) return;
 
     setIsSaving(true);
-    const studentRef = doc(db, "personalTrainers", studentDocInfo.trainerId, "students", studentDocInfo.id);
 
     const updateData = {
       firstName: formData.firstName,
@@ -95,7 +89,16 @@ export default function StudentProfilePage() {
     };
 
     try {
-      updateDocumentNonBlocking(studentRef, updateData);
+      // Update global profile
+      const globalRef = doc(db, "students", user.uid);
+      updateDocumentNonBlocking(globalRef, updateData);
+
+      // Update subcollection profile if it exists
+      if (studentDocInfo?.trainerId) {
+        const subRef = doc(db, "personalTrainers", studentDocInfo.trainerId, "students", user.uid);
+        updateDocumentNonBlocking(subRef, updateData);
+      }
+
       toast({
         title: "Profile Updated",
         description: "Your information has been successfully saved.",
@@ -121,17 +124,6 @@ export default function StudentProfilePage() {
     );
   }
 
-  if (!studentDocInfo) {
-    return (
-      <StudentNavigation>
-        <div className="text-center py-20">
-          <h2 className="text-2xl font-bold">No Profile Linked</h2>
-          <p className="text-muted-foreground mt-2">Please join a coach from the dashboard first.</p>
-        </div>
-      </StudentNavigation>
-    );
-  }
-
   return (
     <StudentNavigation>
       <div className="max-w-2xl mx-auto space-y-6">
@@ -149,7 +141,7 @@ export default function StudentProfilePage() {
                 </div>
                 <div>
                   <CardTitle>Personal Information</CardTitle>
-                  <CardDescription>Updates are visible to your personal trainer.</CardDescription>
+                  <CardDescription>Updates are visible to your personal trainer and reachable via search.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -157,7 +149,7 @@ export default function StudentProfilePage() {
               <div className="flex flex-col items-center gap-4 mb-6">
                 <div className="relative group">
                   <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg">
-                    <AvatarImage src={formData.photoUrl || `https://picsum.photos/seed/${studentDocInfo.id}/200/200`} data-ai-hint="student portrait" />
+                    <AvatarImage src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`} />
                     <AvatarFallback className="text-xl font-bold">{formData.firstName[0]}{formData.lastName[0]}</AvatarFallback>
                   </Avatar>
                   <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -172,7 +164,6 @@ export default function StudentProfilePage() {
                     value={formData.photoUrl} 
                     onChange={(e) => setFormData({...formData, photoUrl: e.target.value})} 
                   />
-                  <p className="text-[10px] text-muted-foreground text-center italic">Provide a link to your profile image</p>
                 </div>
               </div>
 
@@ -278,6 +269,6 @@ export default function StudentProfilePage() {
           </Card>
         </form>
       </div>
-    </StudentNavigation>
+    </Navigation>
   );
 }

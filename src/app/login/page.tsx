@@ -4,7 +4,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Dumbbell, Mail, Lock, Loader2, User, GraduationCap } from "lucide-react";
+import { Dumbbell, Mail, Lock, Loader2, User, GraduationCap, UserCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,18 +73,28 @@ function LoginContent() {
     setIsSubmitting(true);
     try {
       const userCredential = await initiateEmailSignUp(auth, email, password);
+      const uid = userCredential.user.uid;
       
       if (isTrainer) {
         const trainerData = {
-          id: userCredential.user.uid,
+          id: uid,
           firstName: email.split('@')[0],
           lastName: "Trainer",
           email: email,
           dateJoined: new Date().toISOString(),
         };
-        await setDoc(doc(db, "personalTrainers", userCredential.user.uid), trainerData);
+        await setDoc(doc(db, "personalTrainers", uid), trainerData);
         router.push("/dashboard");
       } else {
+        const studentData = {
+          userId: uid,
+          firstName: email.split('@')[0],
+          lastName: "Student",
+          email: email,
+          joinedAt: new Date().toISOString(),
+          activityStatus: "active",
+        };
+        await setDoc(doc(db, "students", uid), studentData);
         router.push("/student/dashboard");
       }
     } catch (error: any) {

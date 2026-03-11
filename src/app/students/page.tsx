@@ -1,107 +1,230 @@
+
 "use client";
 
 import { useState } from "react";
 import { Navigation } from "@/components/Navigation";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, Filter, ChevronRight, Loader2, Users } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Search, Filter, ChevronRight, Loader2, Users, SearchIcon, PlusCircle, Target, Weight } from "lucide-react";
 import Link from "next/link";
-import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
-import { collection } from "firebase/firestore";
+import { useUser, useFirestore, useCollection, useMemoFirebase, setDocumentNonBlocking } from "@/firebase";
+import { collection, doc } from "firebase/firestore";
+import { useToast } from "@/hooks/use-toast";
 
 export default function StudentsPage() {
   const { user } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
+  
   const [searchQuery, setSearchQuery] = useState("");
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [isAdding, setIsAdding] = useState<string | null>(null);
 
-  const studentsQuery = useMemoFirebase(() => {
+  // My Roster Query
+  const myStudentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collection(db, "personalTrainers", user.uid, "students");
   }, [db, user]);
 
-  const { data: students, isLoading } = useCollection(studentsQuery);
+  const { data: myStudents, isLoading: isLoadingRoster } = useCollection(myStudentsQuery);
 
-  const filteredStudents = students?.filter((student) => {
-    const fullName = `${student.firstName} ${student.lastName}`.toLowerCase();
+  // Global Directory Query
+  const globalStudentsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, "students");
+  }, [db]);
+
+  const { data: allStudents, isLoading: isLoadingGlobal } = useCollection(globalStudentsQuery);
+
+  const filteredRoster = myStudents?.filter((s) => {
+    const fullName = `${s.firstName} ${s.lastName}`.toLowerCase();
     return fullName.includes(searchQuery.toLowerCase());
   }) || [];
+
+  const filteredGlobal = allStudents?.filter((s) => {
+    const fullName = `${s.firstName} ${s.lastName}`.toLowerCase();
+    const isAlreadyInRoster = myStudents?.some(ms => ms.id === s.id);
+    return fullName.includes(globalSearch.toLowerCase()) && !isAlreadyInRoster && s.id !== user?.uid;
+  }) || [];
+
+  const handleAddStudent = async (student: any) => {
+    if (!db || !user) return;
+    setIsAdding(student.id);
+
+    try {
+      const studentRef = doc(db, "personalTrainers", user.uid, "students", student.id);
+      const studentData = {
+        ...student,
+        personalTrainerId: user.uid,
+        joinedAt: new Date().toISOString(),
+      };
+
+      setDocumentNonBlocking(studentRef, studentData, { merge: true });
+      
+      toast({
+        title: "Student Added",
+        description: `${student.firstName} is now part of your roster.`,
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to add student.",
+      });
+    } finally {
+      setIsAdding(null);
+    }
+  };
 
   return (
     <Navigation>
       <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-          <div className="relative w-full sm:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input 
-              placeholder="Search students..." 
-              className="pl-10" 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-2 w-full sm:w-auto">
-            <Button variant="outline" className="gap-2">
-              <Filter className="h-4 w-4" />
-              Filter
-            </Button>
-          </div>
-        </div>
+        <Tabs defaultValue="roster" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 max-w-md mb-8">
+            <TabsTrigger value="roster">My Roster</TabsTrigger>
+            <TabsTrigger value="discover">Discover Students</TabsTrigger>
+          </TabsList>
 
-        {isLoading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : (
-          <div className="grid gap-4">
-            {filteredStudents.map((student) => (
-              <Card key={student.id} className="hover:shadow-md transition-shadow cursor-pointer group">
-                <CardContent className="p-0">
-                  <Link href={`/students/${student.id}`} className="flex items-center gap-4 p-4">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/100/100`} />
-                      <AvatarFallback>{student.firstName[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4 items-center">
-                      <div>
-                        <h3 className="font-semibold group-hover:text-primary transition-colors">
-                          {student.firstName} {student.lastName}
-                        </h3>
-                        <p className="text-xs text-muted-foreground truncate max-w-[150px]">{student.email}</p>
-                      </div>
-                      <div className="hidden md:block text-center">
-                        <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Goal</p>
-                        <p className="text-sm font-medium capitalize">{student.goalType?.replace('_', ' ')}</p>
-                      </div>
-                      <div className="hidden md:block text-center">
-                        <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Weight</p>
-                        <p className="text-sm font-medium">{student.weightKg} kg</p>
-                      </div>
-                      <div className="text-right flex items-center justify-end gap-4">
-                        <div className="hidden md:block text-right">
-                          <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Status</p>
-                          <div className="flex items-center gap-1.5 justify-end">
-                            <div className={`w-2 h-2 rounded-full ${student.activityStatus === 'active' ? 'bg-accent' : 'bg-muted'}`} />
-                            <span className="text-sm capitalize">{student.activityStatus}</span>
+          <TabsContent value="roster">
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                <div className="relative w-full sm:w-96">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input 
+                    placeholder="Search your students..." 
+                    className="pl-10" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {isLoadingRoster ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {filteredRoster.map((student) => (
+                    <Card key={student.id} className="hover:shadow-md transition-shadow cursor-pointer group">
+                      <CardContent className="p-0">
+                        <Link href={`/students/${student.id}`} className="flex items-center gap-4 p-4">
+                          <Avatar className="h-12 w-12">
+                            <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/100/100`} />
+                            <AvatarFallback>{student.firstName[0]}</AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4 items-center">
+                            <div>
+                              <h3 className="font-semibold group-hover:text-primary transition-colors">
+                                {student.firstName} {student.lastName}
+                              </h3>
+                              <p className="text-xs text-muted-foreground truncate max-w-[150px]">{student.email}</p>
+                            </div>
+                            <div className="hidden md:block text-center">
+                              <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Goal</p>
+                              <p className="text-sm font-medium capitalize">{student.goalType?.replace('_', ' ')}</p>
+                            </div>
+                            <div className="hidden md:block text-center">
+                              <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Weight</p>
+                              <p className="text-sm font-medium">{student.weightKg} kg</p>
+                            </div>
+                            <div className="text-right flex items-center justify-end gap-4">
+                              <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                            </div>
+                          </div>
+                        </Link>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {filteredRoster.length === 0 && (
+                    <div className="text-center py-20 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
+                      <Users className="h-10 w-10 mx-auto mb-4 opacity-20" />
+                      <p className="text-lg font-medium">Your roster is empty</p>
+                      <p className="text-sm">Go to the 'Discover' tab to find students looking for a coach.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="discover">
+            <div className="space-y-6">
+              <div className="bg-primary/5 p-6 rounded-xl border-2 border-primary/10 flex flex-col md:flex-row items-center gap-6">
+                <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center shrink-0">
+                  <SearchIcon className="h-8 w-8 text-primary" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-xl font-bold">Global Student Directory</h3>
+                  <p className="text-sm text-muted-foreground">Search through all student accounts on ElevateFit. Find students who match your coaching style and invite them to your program.</p>
+                </div>
+                <div className="relative w-full md:w-96 md:ml-auto">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input 
+                    placeholder="Search by name, email, or goals..." 
+                    className="pl-10 h-12 bg-background shadow-lg" 
+                    value={globalSearch}
+                    onChange={(e) => setGlobalSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {isLoadingGlobal ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredGlobal.map((student) => (
+                    <Card key={student.id} className="hover:border-primary transition-all group overflow-hidden">
+                      <CardHeader className="text-center pb-2">
+                        <Avatar className="h-20 w-20 mx-auto mb-2 border-2 border-primary/10 group-hover:scale-105 transition-transform">
+                          <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/200/200`} />
+                          <AvatarFallback>{student.firstName[0]}</AvatarFallback>
+                        </Avatar>
+                        <CardTitle className="text-lg">{student.firstName} {student.lastName}</CardTitle>
+                        <CardDescription className="flex items-center justify-center gap-1">
+                          <Target className="h-3 w-3" /> {student.goalType?.replace('_', ' ') || 'General Fitness'}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4 pt-2">
+                        <div className="grid grid-cols-2 gap-2 text-xs text-center">
+                          <div className="bg-muted p-2 rounded-md">
+                            <Weight className="h-3 w-3 mx-auto mb-1 opacity-50" />
+                            <p className="font-bold">{student.weightKg || '--'}kg</p>
+                            <p className="text-[10px] text-muted-foreground">Current</p>
+                          </div>
+                          <div className="bg-muted p-2 rounded-md">
+                            <Target className="h-3 w-3 mx-auto mb-1 opacity-50" />
+                            <p className="font-bold">{student.goalWeightKg || '--'}kg</p>
+                            <p className="text-[10px] text-muted-foreground">Goal</p>
                           </div>
                         </div>
-                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
-                      </div>
+                        <Button 
+                          className="w-full gap-2" 
+                          variant="outline"
+                          onClick={() => handleAddStudent(student)}
+                          disabled={isAdding === student.id}
+                        >
+                          {isAdding === student.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+                          Add to Roster
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {filteredGlobal.length === 0 && (
+                    <div className="col-span-full py-20 text-center border-2 border-dashed rounded-xl bg-muted/5">
+                      <p className="text-muted-foreground">No students found matching your criteria.</p>
                     </div>
-                  </Link>
-                </CardContent>
-              </Card>
-            ))}
-            {!isLoading && filteredStudents.length === 0 && (
-              <div className="text-center py-20 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
-                <Users className="h-10 w-10 mx-auto mb-4 opacity-20" />
-                <p className="text-lg font-medium">No students on your roster yet</p>
-                <p className="text-sm">Students can join your team by searching for you in their dashboard.</p>
-              </div>
-            )}
-          </div>
-        )}
+                  )}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </Navigation>
   );
