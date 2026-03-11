@@ -81,10 +81,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   }, [student]);
 
   const handleUpdateStudent = async () => {
-    if (!studentRef) return;
+    if (!studentRef || !user) return;
     setIsSaving(true);
     try {
       updateDocumentNonBlocking(studentRef, {
+        trainerId: user.uid,
         coachingNotes,
         goalWeightKg: Number(editStats.goalWeightKg) || 0,
         goalType: editStats.goalType,
@@ -138,7 +139,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             </Avatar>
             <div className="space-y-1">
               <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-bold font-headline">{student.firstName} {student.lastName}</h1>
+                <h1 className="text-3xl font-bold font-headline">{student.firstName || student.name}</h1>
                 <Badge className="bg-accent text-accent-foreground capitalize">{student.activityStatus}</Badge>
               </div>
               <p className="text-sm text-muted-foreground flex items-center gap-2">

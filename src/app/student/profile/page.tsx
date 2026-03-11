@@ -75,6 +75,7 @@ export default function StudentProfilePage() {
 
     const updateData = {
       userId: user.uid,
+      trainerId: trainerId,
       name: formData.name,
       photoUrl: formData.photoUrl,
       age: Number(formData.age) || 0,
@@ -146,7 +147,7 @@ export default function StudentProfilePage() {
                 <div className="relative group">
                   <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg">
                     <AvatarImage src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`} />
-                    <AvatarFallback className="text-xl font-bold">{formData.name[0]}</AvatarFallback>
+                    <AvatarFallback className="text-xl font-bold">{formData.name?.[0] || "U"}</AvatarFallback>
                   </Avatar>
                   <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <Camera className="h-6 w-6 text-white" />
