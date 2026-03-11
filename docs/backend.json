@@ -65,6 +65,10 @@
           "description": "The email address of the student, used for communication.",
           "format": "email"
         },
+        "password": {
+          "type": "string",
+          "description": "Initial password assigned by the trainer for the student's account."
+        },
         "age": {
           "type": "number",
           "description": "The age of the student."

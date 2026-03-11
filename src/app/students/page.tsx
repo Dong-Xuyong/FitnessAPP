@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -16,7 +17,7 @@ import {
   DialogTrigger 
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Search, Filter, UserPlus, ChevronRight, Loader2 } from "lucide-react";
+import { Search, Filter, UserPlus, ChevronRight, Loader2, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBlocking } from "@/firebase";
 import { collection } from "firebase/firestore";
@@ -29,10 +30,13 @@ export default function StudentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [open, setOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  
   const [newStudent, setNewStudent] = useState({
     firstName: "",
     lastName: "",
     email: "",
+    password: "",
     age: "",
     currentWeightKg: "",
     goals: ""
@@ -53,11 +57,11 @@ export default function StudentsPage() {
   const handleAddStudent = () => {
     if (!db || !user) return;
     
-    if (!newStudent.firstName || !newStudent.lastName || !newStudent.email) {
+    if (!newStudent.firstName || !newStudent.lastName || !newStudent.email || !newStudent.password) {
       toast({
         variant: "destructive",
         title: "Missing Information",
-        description: "Please fill in the student's name and email.",
+        description: "Please fill in all required fields, including the student's password.",
       });
       return;
     }
@@ -80,6 +84,7 @@ export default function StudentsPage() {
           firstName: "",
           lastName: "",
           email: "",
+          password: "",
           age: "",
           currentWeightKg: "",
           goals: ""
@@ -129,7 +134,7 @@ export default function StudentsPage() {
                 <DialogHeader>
                   <DialogTitle>Add New Student</DialogTitle>
                   <DialogDescription>
-                    Register a student in your database. They can claim their account later using this email.
+                    Register a student in your database. They can claim their account later using this email and password.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -160,6 +165,27 @@ export default function StudentsPage() {
                       value={newStudent.email} 
                       onChange={(e) => setNewStudent({...newStudent, email: e.target.value})} 
                     />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="password">Initial Password</Label>
+                    <div className="relative">
+                      <Input 
+                        id="password" 
+                        type={showPassword ? "text" : "password"}
+                        value={newStudent.password} 
+                        onChange={(e) => setNewStudent({...newStudent, password: e.target.value})} 
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                      </Button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="grid gap-2">
