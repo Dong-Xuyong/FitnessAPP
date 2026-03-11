@@ -8,14 +8,17 @@ import {
   Users, 
   Dumbbell, 
   LineChart, 
-  Settings, 
-  Bell, 
   LogOut, 
   Search,
-  Plus
+  Plus,
+  Bell,
+  CheckCircle2,
+  AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const navItems = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -23,6 +26,12 @@ const navItems = [
   { name: "Programs", href: "/workouts", icon: Dumbbell },
   { name: "Exercises", href: "/exercises", icon: Search },
   { name: "Progress", href: "/progress", icon: LineChart },
+];
+
+const mockNotifications = [
+  { id: 1, title: "Workout Logged", description: "Alex Johnson completed 'Upper Body Push A'", time: "10m ago", icon: CheckCircle2, type: "success" },
+  { id: 2, title: "New PR Alert", description: "Sarah Williams hit a new Squat PR: 65kg!", time: "45m ago", icon: Bell, type: "info" },
+  { id: 3, title: "Pending Program", description: "Mike Tyson is waiting for his new routine", time: "2h ago", icon: AlertCircle, type: "warning" },
 ];
 
 export function Navigation({ children }: { children: React.ReactNode }) {
@@ -89,13 +98,47 @@ export function Navigation({ children }: { children: React.ReactNode }) {
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-            </Button>
-            <Button className="hidden sm:flex gap-2">
-              <Plus className="h-4 w-4" />
-              New Program
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="icon" className="relative">
+                  <Bell className="h-5 w-5" />
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="end">
+                <div className="p-4 border-b">
+                  <h3 className="font-bold">Notifications</h3>
+                </div>
+                <ScrollArea className="h-[300px]">
+                  <div className="divide-y">
+                    {mockNotifications.map((notif) => (
+                      <div key={notif.id} className="p-4 hover:bg-accent/5 flex gap-3">
+                        <div className={cn(
+                          "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
+                          notif.type === 'success' ? 'bg-accent/10 text-accent' :
+                          notif.type === 'warning' ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'
+                        )}>
+                          <notif.icon className="w-4 h-4" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold leading-none">{notif.title}</p>
+                          <p className="text-xs text-muted-foreground">{notif.description}</p>
+                          <p className="text-[10px] text-muted-foreground">{notif.time}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+                <div className="p-2 border-t text-center">
+                  <Button variant="ghost" size="sm" className="w-full text-xs text-primary">Mark all as read</Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Button className="hidden sm:flex gap-2" asChild>
+              <Link href="/workouts/builder">
+                <Plus className="h-4 w-4" />
+                New Program
+              </Link>
             </Button>
           </div>
         </header>
