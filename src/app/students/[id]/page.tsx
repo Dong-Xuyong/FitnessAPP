@@ -8,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { Mail, Calendar, Dumbbell, History, Award } from "lucide-react";
+import { Mail, Calendar, Dumbbell, History, Award, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
+import { doc } from "firebase/firestore";
 
 const weightData = [
   { date: 'Jan 1', weight: 82 },
@@ -28,7 +30,39 @@ const strengthData = [
 
 export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = use(params);
-  const id = unwrappedParams.id;
+  const { id } = unwrappedParams;
+  const { user } = useUser();
+  const db = useFirestore();
+
+  const studentRef = useMemoFirebase(() => {
+    if (!db || !user || !id) return null;
+    return doc(db, "personalTrainers", user.uid, "students", id);
+  }, [db, user, id]);
+
+  const { data: student, isLoading } = useDoc(studentRef);
+
+  if (isLoading) {
+    return (
+      <Navigation>
+        <div className="flex items-center justify-center h-[60vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </Navigation>
+    );
+  }
+
+  if (!student) {
+    return (
+      <Navigation>
+        <div className="text-center py-20">
+          <h2 className="text-2xl font-bold">Student not found</h2>
+          <Button className="mt-4" asChild>
+            <Link href="/students">Back to Roster</Link>
+          </Button>
+        </div>
+      </Navigation>
+    );
+  }
 
   return (
     <Navigation>
@@ -36,30 +70,30 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         <header className="flex flex-col md:flex-row gap-6 items-start justify-between bg-card p-6 rounded-xl border">
           <div className="flex gap-6 items-center">
             <Avatar className="h-24 w-24 ring-4 ring-secondary">
-              <AvatarImage src={`https://picsum.photos/seed/s${id}/200/200`} />
-              <AvatarFallback>S</AvatarFallback>
+              <AvatarImage src={`https://picsum.photos/seed/${student.id}/200/200`} />
+              <AvatarFallback>{student.firstName[0]}</AvatarFallback>
             </Avatar>
             <div className="space-y-1">
               <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-bold font-headline">Alex Johnson</h1>
-                <Badge className="bg-accent text-accent-foreground">Intermediate</Badge>
+                <h1 className="text-3xl font-bold font-headline">{student.firstName} {student.lastName}</h1>
+                <Badge className="bg-accent text-accent-foreground">Active</Badge>
               </div>
               <p className="text-muted-foreground flex items-center gap-2">
-                <Calendar className="h-4 w-4" /> Member since Jan 2024
+                <Calendar className="h-4 w-4" /> Member since {new Date(student.dateJoined).toLocaleDateString()}
               </p>
               <div className="flex gap-4 pt-2">
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Goal:</span> <span className="font-semibold">Hypertrophy</span>
+                  <span className="text-muted-foreground">Goal:</span> <span className="font-semibold">{student.goals}</span>
                 </div>
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Weight:</span> <span className="font-semibold">78.0 kg</span>
+                  <span className="text-muted-foreground">Weight:</span> <span className="font-semibold">{student.currentWeightKg} kg</span>
                 </div>
               </div>
             </div>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="gap-2">
-              <Mail className="h-4 w-4" /> Message
+              <Mail className="h-4 w-4" /> Email
             </Button>
             <Button size="sm" className="gap-2" asChild>
               <Link href="/workouts/builder">
@@ -81,7 +115,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               <Card>
                 <CardHeader>
                   <CardTitle>Weight Tracking</CardTitle>
-                  <CardDescription>Target: 75 kg</CardDescription>
+                  <CardDescription>Target: Maintain Health</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -132,8 +166,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                     <Award className="h-6 w-6" />
                   </div>
                   <div>
-                    <p className="font-bold">Consistency King</p>
-                    <p className="text-xs text-muted-foreground">14 sessions this month</p>
+                    <p className="font-bold">Consistency</p>
+                    <p className="text-xs text-muted-foreground">Recent sessions logged</p>
                   </div>
                 </div>
                 <div className="p-4 border rounded-lg flex items-center gap-4 bg-primary/5">
@@ -141,8 +175,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                     <History className="h-6 w-6" />
                   </div>
                   <div>
-                    <p className="font-bold">New Squat PR</p>
-                    <p className="text-xs text-muted-foreground">105kg reached today</p>
+                    <p className="font-bold">Strength Milestone</p>
+                    <p className="text-xs text-muted-foreground">New personal best recorded</p>
                   </div>
                 </div>
               </CardContent>
@@ -152,20 +186,19 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           <TabsContent value="workouts">
             <Card>
               <CardContent className="pt-6 space-y-4">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/5 transition-colors cursor-pointer">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-secondary rounded-lg flex items-center justify-center text-primary font-bold">
-                        {i + 14}
-                      </div>
-                      <div>
-                        <p className="font-medium">Upper Body Push A</p>
-                        <p className="text-xs text-muted-foreground">Duration: 65m • Volume: 12,400kg</p>
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="sm">View Log</Button>
-                  </div>
-                ))}
+                <div className="text-center py-12 text-muted-foreground">
+                  No session history available yet.
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="notes">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-center py-12 text-muted-foreground">
+                  No coaching notes recorded yet.
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
