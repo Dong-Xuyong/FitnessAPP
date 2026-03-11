@@ -1,3 +1,4 @@
+
 "use client";
 
 import { use } from "react";
@@ -76,17 +77,17 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             <div className="space-y-1">
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold font-headline">{student.firstName} {student.lastName}</h1>
-                <Badge className="bg-accent text-accent-foreground">Active</Badge>
+                <Badge className="bg-accent text-accent-foreground capitalize">{student.activityStatus}</Badge>
               </div>
               <p className="text-muted-foreground flex items-center gap-2">
-                <Calendar className="h-4 w-4" /> Member since {new Date(student.dateJoined).toLocaleDateString()}
+                <Calendar className="h-4 w-4" /> Member since {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
               </p>
               <div className="flex gap-4 pt-2">
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Goal:</span> <span className="font-semibold">{student.goals}</span>
+                  <span className="text-muted-foreground">Goal:</span> <span className="font-semibold capitalize">{student.goalType?.replace('_', ' ')}</span>
                 </div>
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Weight:</span> <span className="font-semibold">{student.currentWeightKg} kg</span>
+                  <span className="text-muted-foreground">Weight:</span> <span className="font-semibold">{student.weightKg} kg</span>
                 </div>
               </div>
             </div>
@@ -115,7 +116,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               <Card>
                 <CardHeader>
                   <CardTitle>Weight Tracking</CardTitle>
-                  <CardDescription>Target: Maintain Health</CardDescription>
+                  <CardDescription>Target: {student.goalWeightKg}kg ({student.goalType?.replace('_', ' ')})</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -167,7 +168,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                   <div>
                     <p className="font-bold">Consistency</p>
-                    <p className="text-xs text-muted-foreground">Recent sessions logged</p>
+                    <p className="text-xs text-muted-foreground">{student.currentStreakDays} day streak logged</p>
                   </div>
                 </div>
                 <div className="p-4 border rounded-lg flex items-center gap-4 bg-primary/5">
@@ -187,7 +188,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             <Card>
               <CardContent className="pt-6 space-y-4">
                 <div className="text-center py-12 text-muted-foreground">
-                  No session history available yet.
+                  No session history available yet for {student.firstName}.
                 </div>
               </CardContent>
             </Card>

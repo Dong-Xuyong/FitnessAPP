@@ -19,7 +19,7 @@ function DashboardContent() {
     if (!db || !user) return null;
     return query(
       collection(db, "personalTrainers", user.uid, "students"),
-      orderBy("dateJoined", "desc")
+      orderBy("joinedAt", "desc")
     );
   }, [db, user]);
 
@@ -85,11 +85,11 @@ function DashboardContent() {
                         </Avatar>
                         <div>
                           <p className="text-sm font-medium leading-none">{student.firstName} {student.lastName}</p>
-                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{student.goals}</p>
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px] capitalize">{student.goalType?.replace('_', ' ')}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-medium">{student.currentWeightKg}kg</p>
+                        <p className="text-sm font-medium">{student.weightKg}kg</p>
                         <p className="text-xs text-primary font-semibold">Active</p>
                       </div>
                     </Link>
