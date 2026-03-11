@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from "next/link";
@@ -88,9 +87,11 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" className="relative">
-              <MessageSquare className="h-5 w-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full" />
+            <Button variant="outline" size="icon" className="relative" asChild>
+              <Link href="/student/messages">
+                <MessageSquare className="h-5 w-5" />
+                <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full" />
+              </Link>
             </Button>
             <Button variant="outline" size="icon">
               <Bell className="h-5 w-5" />

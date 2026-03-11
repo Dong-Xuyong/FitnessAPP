@@ -27,8 +27,7 @@ const strengthData = [
 ];
 
 export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const unwrappedParams = use(params);
-  const id = unwrappedParams.id;
+  const { id } = use(params);
 
   return (
     <Navigation>
