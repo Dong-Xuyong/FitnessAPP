@@ -1,8 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Info } from "lucide-react";
 
 const categories = ["All", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core"];
@@ -21,6 +24,15 @@ const exercises = [
 ];
 
 export default function ExercisesPage() {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+
+  const filteredExercises = exercises.filter((ex) => {
+    const matchesSearch = ex.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === "All" || ex.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
   return (
     <Navigation>
       <div className="space-y-6">
@@ -28,11 +40,16 @@ export default function ExercisesPage() {
           <h2 className="text-2xl font-bold font-headline">Exercise Library</h2>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search exercises..." className="pl-10 h-12 text-lg" />
+            <Input 
+              placeholder="Search exercises..." 
+              className="pl-10 h-12 text-lg" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
         </div>
 
-        <Tabs defaultValue="All" className="w-full">
+        <Tabs defaultValue="All" onValueChange={setSelectedCategory} className="w-full">
           <TabsList className="w-full justify-start overflow-x-auto h-12 bg-card border mb-6">
             {categories.map((cat) => (
               <TabsTrigger key={cat} value={cat} className="px-6 h-10 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
@@ -42,7 +59,7 @@ export default function ExercisesPage() {
           </TabsList>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {exercises.map((ex, i) => (
+            {filteredExercises.map((ex, i) => (
               <Card key={i} className="group hover:border-primary transition-colors">
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
@@ -61,6 +78,11 @@ export default function ExercisesPage() {
                 </CardContent>
               </Card>
             ))}
+            {filteredExercises.length === 0 && (
+              <div className="col-span-full py-12 text-center text-muted-foreground">
+                No exercises found matching your criteria.
+              </div>
+            )}
           </div>
         </Tabs>
       </div>
