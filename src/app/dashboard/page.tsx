@@ -1,21 +1,19 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Users, Dumbbell, Activity, Calendar, ArrowUpRight, TrendingUp, Loader2, Weight, Target, Hash, RefreshCcw } from "lucide-react";
+import { Users, Activity, Calendar, TrendingUp, Loader2, Weight, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { useUser, useFirestore, useCollection, useMemoFirebase, updateDocumentNonBlocking, useDoc } from "@/firebase";
+import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from "@/firebase";
 import { collection, query, orderBy, doc } from "firebase/firestore";
-import { useToast } from "@/hooks/use-toast";
 
 function DashboardContent() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
-  const { toast } = useToast();
 
   const trainerRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -89,8 +87,8 @@ function DashboardContent() {
                     <Link key={student.id} href={`/students/${student.id}`} className="flex items-center justify-between hover:bg-accent/5 p-3 rounded-xl border border-transparent hover:border-border transition-all">
                       <div className="flex items-center gap-4">
                         <Avatar className="h-12 w-12 ring-2 ring-primary/5">
-                          <AvatarImage src={`https://picsum.photos/seed/${student.id}/100/100`} />
-                          <AvatarFallback>{student.firstName[0]}</AvatarFallback>
+                          <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/100/100`} />
+                          <AvatarFallback>{student.firstName?.[0]}</AvatarFallback>
                         </Avatar>
                         <div>
                           <p className="text-sm font-bold leading-none">{student.firstName} {student.lastName}</p>
@@ -116,10 +114,7 @@ function DashboardContent() {
                   {students?.length === 0 && (
                     <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
                       <Users className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                      <p className="text-sm">No students yet. Start by adding one!</p>
-                      <Button variant="link" size="sm" asChild>
-                        <Link href="/students">Register Student</Link>
-                      </Button>
+                      <p className="text-sm">No students yet. Students can find you in their dashboard!</p>
                     </div>
                   )}
                 </div>
