@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -94,9 +95,11 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             <Button variant="outline" size="icon">
               <Bell className="h-5 w-5" />
             </Button>
-            <Button className="hidden sm:flex gap-2 bg-accent text-accent-foreground hover:bg-accent/90">
-              <Play className="h-4 w-4" />
-              Log Workout
+            <Button className="hidden sm:flex gap-2 bg-accent text-accent-foreground hover:bg-accent/90" asChild>
+              <Link href="/student/workouts">
+                <Play className="h-4 w-4" />
+                Log Workout
+              </Link>
             </Button>
           </div>
         </header>

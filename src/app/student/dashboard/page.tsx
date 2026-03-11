@@ -1,3 +1,4 @@
+
 "use client";
 
 import { StudentNavigation } from "@/components/StudentNavigation";
@@ -10,6 +11,7 @@ import Link from "next/link";
 
 export default function StudentDashboardPage() {
   const currentProgram = {
+    id: "prog-1",
     title: "Upper Body Hypertrophy",
     trainer: "John Doe",
     progress: 65,
@@ -54,8 +56,10 @@ export default function StudentDashboardPage() {
                   <Calendar className="h-4 w-4" />
                   <span className="text-sm font-medium">Next: {currentProgram.nextSession}</span>
                 </div>
-                <Button variant="secondary" className="gap-2">
-                  <Play className="h-4 w-4" /> Start Workout
+                <Button variant="secondary" className="gap-2" asChild>
+                  <Link href={`/student/workouts/${currentProgram.id}/session`}>
+                    <Play className="h-4 w-4" /> Start Workout
+                  </Link>
                 </Button>
               </div>
             </CardContent>

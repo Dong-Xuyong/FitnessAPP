@@ -1,3 +1,4 @@
+
 "use client";
 
 import { StudentNavigation } from "@/components/StudentNavigation";
@@ -67,8 +68,10 @@ export default function StudentWorkoutsPage() {
                   
                   <div className="flex items-center gap-3">
                     <Button variant="outline" className="hidden sm:flex">View Details</Button>
-                    <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2 flex-1 sm:flex-none">
-                      <Play className="h-4 w-4" /> Start Session
+                    <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2 flex-1 sm:flex-none" asChild>
+                      <Link href={`/student/workouts/${program.id}/session`}>
+                        <Play className="h-4 w-4" /> Start Session
+                      </Link>
                     </Button>
                     <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
                   </div>
