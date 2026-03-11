@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser, useFirestore, updateDocumentNonBlocking } from "@/firebase";
-import { collection, query, where, getDocs, limit, doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, UserCircle, Camera } from "lucide-react";
 
@@ -21,11 +21,10 @@ export default function StudentProfilePage() {
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [studentDocInfo, setStudentDocInfo] = useState<{ id: string; trainerId?: string } | null>(null);
+  const [trainerId, setTrainerId] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
+    name: "",
     photoUrl: "",
     age: "",
     sex: "male",
@@ -41,17 +40,15 @@ export default function StudentProfilePage() {
     async function fetchProfile() {
       setIsLoadingProfile(true);
       try {
-        // First try the global collection
         const globalDocRef = doc(db, "students", user.uid);
         const globalDocSnap = await getDoc(globalDocRef);
         
         if (globalDocSnap.exists()) {
           const data = globalDocSnap.data();
-          setStudentDocInfo({ id: user.uid, trainerId: data.personalTrainerId });
+          setTrainerId(data.trainerId || null);
           setFormData({
-            firstName: data.firstName || "",
-            lastName: data.lastName || "",
-            photoUrl: data.photoUrl || "",
+            name: data.name || user.displayName || "",
+            photoUrl: data.photoUrl || user.photoURL || "",
             age: data.age?.toString() || "",
             sex: data.sex || "male",
             weightKg: data.weightKg?.toString() || "",
@@ -68,7 +65,7 @@ export default function StudentProfilePage() {
     }
 
     fetchProfile();
-  }, [db, user?.uid]);
+  }, [db, user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,8 +74,8 @@ export default function StudentProfilePage() {
     setIsSaving(true);
 
     const updateData = {
-      firstName: formData.firstName,
-      lastName: formData.lastName,
+      userId: user.uid,
+      name: formData.name,
       photoUrl: formData.photoUrl,
       age: Number(formData.age) || 0,
       sex: formData.sex,
@@ -86,16 +83,15 @@ export default function StudentProfilePage() {
       heightCm: Number(formData.heightCm) || 0,
       goalType: formData.goalType,
       goalWeightKg: Number(formData.goalWeightKg) || 0,
+      email: user.email,
     };
 
     try {
-      // Update global profile
       const globalRef = doc(db, "students", user.uid);
       updateDocumentNonBlocking(globalRef, updateData);
 
-      // Update subcollection profile if it exists
-      if (studentDocInfo?.trainerId) {
-        const subRef = doc(db, "personalTrainers", studentDocInfo.trainerId, "students", user.uid);
+      if (trainerId) {
+        const subRef = doc(db, "personalTrainers", trainerId, "students", user.uid);
         updateDocumentNonBlocking(subRef, updateData);
       }
 
@@ -129,7 +125,7 @@ export default function StudentProfilePage() {
       <div className="max-w-2xl mx-auto space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">My Profile</h1>
-          <p className="text-muted-foreground">Keep your physical stats and goals up to date for your coach.</p>
+          <p className="text-muted-foreground">Keep your physical stats and goals up to date.</p>
         </header>
 
         <form onSubmit={handleSave}>
@@ -141,7 +137,7 @@ export default function StudentProfilePage() {
                 </div>
                 <div>
                   <CardTitle>Personal Information</CardTitle>
-                  <CardDescription>Updates are visible to your personal trainer and reachable via search.</CardDescription>
+                  <CardDescription>Managed via your global student account.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -150,7 +146,7 @@ export default function StudentProfilePage() {
                 <div className="relative group">
                   <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg">
                     <AvatarImage src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`} />
-                    <AvatarFallback className="text-xl font-bold">{formData.firstName[0]}{formData.lastName[0]}</AvatarFallback>
+                    <AvatarFallback className="text-xl font-bold">{formData.name[0]}</AvatarFallback>
                   </Avatar>
                   <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <Camera className="h-6 w-6 text-white" />
@@ -167,25 +163,14 @@ export default function StudentProfilePage() {
                 </div>
               </div>
 
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="firstName">First Name</Label>
-                  <Input 
-                    id="firstName" 
-                    value={formData.firstName} 
-                    onChange={(e) => setFormData({...formData, firstName: e.target.value})} 
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lastName">Last Name</Label>
-                  <Input 
-                    id="lastName" 
-                    value={formData.lastName} 
-                    onChange={(e) => setFormData({...formData, lastName: e.target.value})} 
-                    required
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
+                <Input 
+                  id="name" 
+                  value={formData.name} 
+                  onChange={(e) => setFormData({...formData, name: e.target.value})} 
+                  required
+                />
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -263,7 +248,7 @@ export default function StudentProfilePage() {
             <CardFooter className="bg-muted/10 border-t py-4">
               <Button type="submit" className="w-full gap-2" disabled={isSaving}>
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save Profile Changes
+                Save Changes
               </Button>
             </CardFooter>
           </Card>

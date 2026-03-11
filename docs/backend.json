@@ -5,131 +5,46 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "PersonalTrainer",
       "type": "object",
-      "description": "Represents a personal trainer who uses the ElevateFit platform to manage students and workouts.",
+      "description": "Represents a personal trainer.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the PersonalTrainer entity."
-        },
-        "firstName": {
-          "type": "string",
-          "description": "The first name of the personal trainer."
-        },
-        "lastName": {
-          "type": "string",
-          "description": "The last name of the personal trainer."
-        },
-        "email": {
-          "type": "string",
-          "description": "The email address of the personal trainer, used for communication.",
-          "format": "email"
-        },
-        "photoUrl": {
-          "type": "string",
-          "description": "URL to the trainer's profile photo."
-        },
-        "dateJoined": {
-          "type": "string",
-          "description": "The date and time when the trainer account was created.",
-          "format": "date-time"
-        }
+        "id": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoUrl": { "type": "string" },
+        "dateJoined": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "firstName",
-        "lastName",
-        "email",
-        "dateJoined"
-      ]
+      "required": ["id", "firstName", "lastName", "email", "dateJoined"]
     },
     "Student": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Student",
       "type": "object",
-      "description": "Represents a student client managed by a personal trainer on the ElevateFit platform.",
+      "description": "Represents a student client with detailed fitness metrics.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Student entity."
-        },
-        "personalTrainerId": {
-          "type": "string",
-          "description": "Reference to the PersonalTrainer managing this student."
-        },
-        "userId": {
-          "type": "string",
-          "description": "The Auth UID of the student."
-        },
-        "firstName": {
-          "type": "string",
-          "description": "The first name of the student."
-        },
-        "lastName": {
-          "type": "string",
-          "description": "The last name of the student."
-        },
-        "email": {
-          "type": "string",
-          "description": "The email address of the student.",
-          "format": "email"
-        },
-        "photoUrl": {
-          "type": "string",
-          "description": "URL to the student's profile photo."
-        },
-        "age": {
-          "type": "number",
-          "description": "The age of the student."
-        },
-        "sex": {
-          "type": "string",
-          "enum": ["male", "female", "other"]
-        },
-        "weightKg": {
-          "type": "number",
-          "description": "Current weight in kilograms."
-        },
-        "heightCm": {
-          "type": "number",
-          "description": "Height in centimeters."
-        },
-        "goalType": {
-          "type": "string",
-          "description": "Primary goal (e.g., muscle_gain, weight_loss)."
-        },
-        "goalWeightKg": {
-          "type": "number",
-          "description": "Target weight in kilograms."
-        },
-        "activityStatus": {
-          "type": "string",
-          "enum": ["active", "inactive"]
-        },
-        "joinedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "subscriptionStatus": {
-          "type": "string",
-          "enum": ["active", "expired", "pending"]
-        },
-        "currentStreakDays": {
-          "type": "number"
-        }
+        "userId": { "type": "string", "description": "Auth UID" },
+        "trainerId": { "type": "string", "description": "ID of the assigned trainer" },
+        "name": { "type": "string", "description": "Full name of the student" },
+        "email": { "type": "string", "format": "email" },
+        "photoUrl": { "type": "string" },
+        "age": { "type": "number" },
+        "sex": { "type": "string", "enum": ["male", "female", "other"] },
+        "weightKg": { "type": "number" },
+        "heightCm": { "type": "number" },
+        "goalType": { "type": "string" },
+        "goalWeightKg": { "type": "number" },
+        "activityStatus": { "type": "string", "enum": ["active", "inactive"] },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "currentProgramId": { "type": "string" },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "expired", "pending"] },
+        "currentStreakDays": { "type": "number" },
+        "lastWorkoutAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "firstName",
-        "lastName",
-        "email"
-      ]
+      "required": ["userId", "name", "email"]
     }
   },
   "auth": {
-    "providers": [
-      "password",
-      "google.com",
-      "anonymous"
-    ]
+    "providers": ["password", "google.com", "anonymous"]
   },
   "firestore": {
     "structure": [
@@ -137,9 +52,7 @@
         "path": "/personalTrainers/{personalTrainerId}",
         "definition": {
           "entityName": "PersonalTrainer",
-          "schema": {
-            "$ref": "#/backend/entities/PersonalTrainer"
-          },
+          "schema": { "$ref": "#/backend/entities/PersonalTrainer" },
           "description": "Trainer profiles."
         }
       },
@@ -147,19 +60,15 @@
         "path": "/personalTrainers/{personalTrainerId}/students/{studentId}",
         "definition": {
           "entityName": "Student",
-          "schema": {
-            "$ref": "#/backend/entities/Student"
-          },
-          "description": "Students managed by trainers."
+          "schema": { "$ref": "#/backend/entities/Student" },
+          "description": "Students managed by specific trainers."
         }
       },
       {
         "path": "/students/{studentId}",
         "definition": {
           "entityName": "Student",
-          "schema": {
-            "$ref": "#/backend/entities/Student"
-          },
+          "schema": { "$ref": "#/backend/entities/Student" },
           "description": "Global directory of student profiles."
         }
       }

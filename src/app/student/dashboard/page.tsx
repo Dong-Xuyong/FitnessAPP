@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Dumbbell, Calendar, Play, TrendingUp, History, Loader2, ArrowRight, UserCheck, Search } from "lucide-react";
+import { Dumbbell, Calendar, Play, TrendingUp, History, Loader2, ArrowRight, UserCheck, Search, Flame, Target } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, setDocumentNonBlocking } from "@/firebase";
-import { collection, query, where, limit, getDocs, doc } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,6 @@ export default function StudentDashboardPage() {
   const [isJoining, setIsJoining] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Gated by user existence to avoid permission errors
   const coachesQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collection(db, "personalTrainers");
@@ -34,24 +33,16 @@ export default function StudentDashboardPage() {
   const { data: coaches, isLoading: isLoadingCoaches } = useCollection(coachesQuery);
 
   useEffect(() => {
-    if (!db || !user?.email) return;
+    if (!db || !user?.uid) return;
 
     async function findStudentProfile() {
       setIsLoadingProfile(true);
       try {
-        const trainersCol = collection(db, "personalTrainers");
-        const trainersSnapshot = await getDocs(trainersCol);
+        const globalRef = doc(db, "students", user.uid);
+        const globalSnap = await getDoc(globalRef);
         
-        let found = false;
-        for (const trainerDoc of trainersSnapshot.docs) {
-          const studentsCol = collection(db, "personalTrainers", trainerDoc.id, "students");
-          const q = query(studentsCol, where("email", "==", user?.email), limit(1));
-          const studentSnapshot = await getDocs(q);
-          if (!studentSnapshot.empty) {
-            setStudentData({ ...studentSnapshot.docs[0].data(), id: studentSnapshot.docs[0].id, trainerId: trainerDoc.id });
-            found = true;
-            break;
-          }
+        if (globalSnap.exists()) {
+          setStudentData(globalSnap.data());
         }
       } catch (e) {
         console.error("Error finding student profile", e);
@@ -61,7 +52,7 @@ export default function StudentDashboardPage() {
     }
 
     findStudentProfile();
-  }, [db, user?.email]);
+  }, [db, user?.uid]);
 
   const handleJoinCoach = async (trainerId: string, trainerName: string) => {
     if (!db || !user) return;
@@ -69,51 +60,47 @@ export default function StudentDashboardPage() {
 
     try {
       const studentId = user.uid;
-      const studentRef = doc(db, "personalTrainers", trainerId, "students", studentId);
+      const studentRef = doc(db, "students", studentId);
+      const coachStudentRef = doc(db, "personalTrainers", trainerId, "students", studentId);
 
       const newStudentData = {
-        personalTrainerId: trainerId,
         userId: user.uid,
-        firstName: user.displayName?.split(' ')[0] || "New",
-        lastName: user.displayName?.split(' ')[1] || "Student",
+        trainerId: trainerId,
+        name: user.displayName || "New Student",
         email: user.email,
-        age: 0,
-        sex: "male",
-        weightKg: 0,
-        heightCm: 0,
-        goalType: "general",
-        goalWeightKg: 0,
+        age: studentData?.age || 0,
+        sex: studentData?.sex || "other",
+        weightKg: studentData?.weightKg || 0,
+        heightCm: studentData?.heightCm || 0,
+        goalType: studentData?.goalType || "general",
+        goalWeightKg: studentData?.goalWeightKg || 0,
         activityStatus: "active",
-        joinedAt: new Date().toISOString(),
+        joinedAt: studentData?.joinedAt || new Date().toISOString(),
         subscriptionStatus: "active",
-        currentStreakDays: 0,
+        currentStreakDays: studentData?.currentStreakDays || 0,
+        lastWorkoutAt: studentData?.lastWorkoutAt || null,
+        currentProgramId: studentData?.currentProgramId || null
       };
 
       await setDocumentNonBlocking(studentRef, newStudentData, { merge: true });
+      await setDocumentNonBlocking(coachStudentRef, newStudentData, { merge: true });
       
       toast({
         title: "Successfully Joined!",
         description: `You are now linked with Coach ${trainerName}.`,
       });
       
-      setStudentData({ ...newStudentData, id: studentId, trainerId });
+      setStudentData(newStudentData);
     } catch (e) {
       toast({
         variant: "destructive",
         title: "Error Joining",
-        description: "Failed to link with coach. Please try again.",
+        description: "Failed to link with coach.",
       });
     } finally {
       setIsJoining(null);
     }
   };
-
-  const workoutPlansQuery = useMemoFirebase(() => {
-    if (!db || !studentData) return null;
-    return collection(db, "personalTrainers", studentData.trainerId, "students", studentData.id, "workoutPlans");
-  }, [db, studentData]);
-
-  const { data: plans } = useCollection(workoutPlansQuery);
 
   if (isUserLoading || isLoadingProfile) {
     return (
@@ -125,7 +112,7 @@ export default function StudentDashboardPage() {
     );
   }
 
-  if (!studentData) {
+  if (!studentData?.trainerId) {
     const filteredCoaches = coaches?.filter(coach => 
       `${coach.firstName} ${coach.lastName}`.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
@@ -134,13 +121,9 @@ export default function StudentDashboardPage() {
       <StudentNavigation>
         <div className="max-w-4xl mx-auto py-10 space-y-8">
           <div className="text-center space-y-2">
-            <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <UserCheck className="h-8 w-8 text-accent" />
-            </div>
             <h2 className="text-3xl font-bold font-headline">Choose your Coach</h2>
-            <p className="text-muted-foreground">Select a personal trainer from our roster to get started with your custom plans.</p>
+            <p className="text-muted-foreground">Select a personal trainer from our roster.</p>
           </div>
-
           <div className="relative max-w-md mx-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
@@ -150,26 +133,22 @@ export default function StudentDashboardPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-
           {isLoadingCoaches ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground/30" />
-            </div>
+            <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredCoaches.map((coach) => (
-                <Card key={coach.id} className="hover:border-accent transition-all group overflow-hidden">
-                  <CardHeader className="text-center pb-2">
-                    <Avatar className="h-20 w-20 mx-auto mb-2 border-2 border-accent/20 group-hover:scale-105 transition-transform">
+                <Card key={coach.id}>
+                  <CardHeader className="text-center">
+                    <Avatar className="h-20 w-20 mx-auto mb-2">
                       <AvatarImage src={`https://picsum.photos/seed/${coach.id}/200/200`} />
                       <AvatarFallback>{coach.firstName[0]}</AvatarFallback>
                     </Avatar>
-                    <CardTitle className="text-lg">{coach.firstName} {coach.lastName}</CardTitle>
-                    <CardDescription>{coach.email}</CardDescription>
+                    <CardTitle>{coach.firstName} {coach.lastName}</CardTitle>
                   </CardHeader>
-                  <CardContent className="pt-2">
+                  <CardContent>
                     <Button 
-                      className="w-full bg-accent text-accent-foreground hover:bg-accent/90" 
+                      className="w-full" 
                       onClick={() => handleJoinCoach(coach.id, coach.lastName)}
                       disabled={!!isJoining}
                     >
@@ -179,11 +158,6 @@ export default function StudentDashboardPage() {
                   </CardContent>
                 </Card>
               ))}
-              {filteredCoaches.length === 0 && (
-                <div className="col-span-full py-20 text-center border-2 border-dashed rounded-xl bg-muted/5">
-                  <p className="text-muted-foreground">No coaches found matching your search.</p>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -191,81 +165,73 @@ export default function StudentDashboardPage() {
     );
   }
 
-  const activePlan = plans?.[0];
-
   return (
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">Welcome back, {studentData.firstName}!</h1>
-          <p className="text-muted-foreground">Goal: <span className="text-primary font-semibold capitalize">{studentData.goalType?.replace('_', ' ')}</span></p>
+          <h1 className="text-3xl font-bold font-headline">Welcome back, {studentData.name.split(' ')[0]}!</h1>
+          <p className="text-muted-foreground capitalize">Goal: {studentData.goalType?.replace('_', ' ')}</p>
         </header>
 
         <div className="grid md:grid-cols-3 gap-6">
           <Card className="md:col-span-2 bg-primary text-primary-foreground">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-xl">Active Program</CardTitle>
+                <CardTitle>Training Status</CardTitle>
                 <CardDescription className="text-primary-foreground/80">
-                  {activePlan ? activePlan.title : "No program assigned yet"}
+                  {studentData.currentProgramId ? "Active Program in Progress" : "Waiting for Coach to assign program"}
                 </CardDescription>
               </div>
               <Dumbbell className="h-8 w-8 opacity-20" />
             </CardHeader>
             <CardContent className="space-y-6">
-              {activePlan ? (
-                <>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Recent Progress</span>
-                      <span>{studentData.currentStreakDays || 0} Day Streak 🔥</span>
-                    </div>
-                    <Progress value={Math.min((studentData.currentStreakDays || 0) * 10, 100)} className="h-2 bg-primary-foreground/20" />
-                  </div>
-                  <div className="flex items-center justify-between pt-4">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" />
-                      <span className="text-sm font-medium">
-                        Last workout: {studentData.lastWorkoutAt ? new Date(studentData.lastWorkoutAt).toLocaleDateString() : "Never"}
-                      </span>
-                    </div>
-                    <Button variant="secondary" className="gap-2" asChild>
-                      <Link href={`/student/workouts/${activePlan.id}/session`}>
-                        <Play className="h-4 w-4" /> Start Workout
-                      </Link>
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-4 opacity-70 italic text-sm">
-                  Your coach will assign your first routine soon.
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Current Streak</span>
+                  <span>{studentData.currentStreakDays || 0} Days <Flame className="inline h-4 w-4" /></span>
                 </div>
-              )}
+                <Progress value={Math.min((studentData.currentStreakDays || 0) * 10, 100)} className="h-2 bg-primary-foreground/20" />
+              </div>
+              <div className="flex items-center justify-between pt-4">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  <span className="text-sm">
+                    Last session: {studentData.lastWorkoutAt ? new Date(studentData.lastWorkoutAt).toLocaleDateString() : "No history"}
+                  </span>
+                </div>
+                {studentData.currentProgramId && (
+                  <Button variant="secondary" asChild>
+                    <Link href={`/student/workouts/${studentData.currentProgramId}/session`}>
+                      <Play className="h-4 w-4 mr-2" /> Resume
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Physical Metrics</CardTitle>
+              <CardTitle>Physical Stats</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center gap-3 p-3 border rounded-lg bg-accent/5">
-                <TrendingUp className="h-5 w-5 text-accent" />
+              <div className="flex items-center gap-3 p-3 border rounded-lg">
+                <TrendingUp className="h-5 w-5 text-primary" />
                 <div>
-                  <p className="text-sm font-bold">Current Weight</p>
-                  <p className="text-xs text-muted-foreground">{studentData.weightKg} kg (Goal: {studentData.goalWeightKg} kg)</p>
+                  <p className="text-sm font-bold">{studentData.weightKg} kg</p>
+                  <p className="text-xs text-muted-foreground">Weight (Goal: {studentData.goalWeightKg} kg)</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 border rounded-lg bg-accent/5">
-                <History className="h-5 w-5 text-accent" />
+              <div className="flex items-center gap-3 p-3 border rounded-lg">
+                <Target className="h-5 w-5 text-accent" />
                 <div>
-                  <p className="text-sm font-bold">Height</p>
-                  <p className="text-xs text-muted-foreground">{studentData.heightCm} cm</p>
+                  <p className="text-sm font-bold">{studentData.heightCm} cm</p>
+                  <p className="text-xs text-muted-foreground">Height</p>
                 </div>
               </div>
-              <Button variant="ghost" className="w-full text-xs" asChild>
-                <Link href="/student/progress">Detailed History</Link>
-              </Button>
+              <div className="text-xs text-center py-2 bg-muted rounded">
+                Status: <span className="font-bold capitalize">{studentData.subscriptionStatus}</span>
+              </div>
             </CardContent>
           </Card>
         </div>
