@@ -1,4 +1,3 @@
-
 "use client";
 
 import { use } from "react";
@@ -71,7 +70,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         <header className="flex flex-col md:flex-row gap-6 items-start justify-between bg-card p-6 rounded-xl border shadow-sm">
           <div className="flex gap-6 items-center">
             <Avatar className="h-24 w-24 ring-4 ring-primary/10">
-              <AvatarImage src={`https://picsum.photos/seed/${student.id}/200/200`} />
+              <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/200/200`} data-ai-hint="student portrait" />
               <AvatarFallback className="text-2xl">{student.firstName[0]}{student.lastName[0]}</AvatarFallback>
             </Avatar>
             <div className="space-y-1">

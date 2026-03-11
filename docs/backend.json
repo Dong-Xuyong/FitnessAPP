@@ -68,6 +68,10 @@
           "description": "The email address of the student.",
           "format": "email"
         },
+        "photoUrl": {
+          "type": "string",
+          "description": "URL to the student's profile photo."
+        },
         "password": {
           "type": "string",
           "description": "Initial password assigned by the trainer."

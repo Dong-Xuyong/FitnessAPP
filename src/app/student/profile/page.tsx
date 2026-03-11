@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -8,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser, useFirestore, updateDocumentNonBlocking } from "@/firebase";
 import { collection, query, where, getDocs, limit, doc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, UserCircle } from "lucide-react";
+import { Loader2, Save, UserCircle, Camera } from "lucide-react";
 
 export default function StudentProfilePage() {
   const { user, isUserLoading } = useUser();
@@ -25,6 +25,7 @@ export default function StudentProfilePage() {
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
+    photoUrl: "",
     age: "",
     sex: "male",
     weightKg: "",
@@ -53,6 +54,7 @@ export default function StudentProfilePage() {
             setFormData({
               firstName: data.firstName || "",
               lastName: data.lastName || "",
+              photoUrl: data.photoUrl || "",
               age: data.age?.toString() || "",
               sex: data.sex || "male",
               weightKg: data.weightKg?.toString() || "",
@@ -83,6 +85,7 @@ export default function StudentProfilePage() {
     const updateData = {
       firstName: formData.firstName,
       lastName: formData.lastName,
+      photoUrl: formData.photoUrl,
       age: Number(formData.age) || 0,
       sex: formData.sex,
       weightKg: Number(formData.weightKg) || 0,
@@ -138,8 +141,8 @@ export default function StudentProfilePage() {
         </header>
 
         <form onSubmit={handleSave}>
-          <Card className="border-2">
-            <CardHeader className="bg-muted/30">
+          <Card className="border-2 overflow-hidden">
+            <CardHeader className="bg-muted/30 pb-12">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-primary/10 rounded-full">
                   <UserCircle className="h-8 w-8 text-primary" />
@@ -150,7 +153,29 @@ export default function StudentProfilePage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-6 pt-6">
+            <CardContent className="space-y-6 -mt-8 relative z-10">
+              <div className="flex flex-col items-center gap-4 mb-6">
+                <div className="relative group">
+                  <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg">
+                    <AvatarImage src={formData.photoUrl || `https://picsum.photos/seed/${studentDocInfo.id}/200/200`} data-ai-hint="student portrait" />
+                    <AvatarFallback className="text-xl font-bold">{formData.firstName[0]}{formData.lastName[0]}</AvatarFallback>
+                  </Avatar>
+                  <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Camera className="h-6 w-6 text-white" />
+                  </div>
+                </div>
+                <div className="w-full max-w-sm space-y-2">
+                  <Label htmlFor="photoUrl">Profile Photo URL</Label>
+                  <Input 
+                    id="photoUrl" 
+                    placeholder="https://example.com/photo.jpg" 
+                    value={formData.photoUrl} 
+                    onChange={(e) => setFormData({...formData, photoUrl: e.target.value})} 
+                  />
+                  <p className="text-[10px] text-muted-foreground text-center italic">Provide a link to your profile image</p>
+                </div>
+              </div>
+
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="firstName">First Name</Label>
