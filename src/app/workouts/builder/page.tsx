@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -11,23 +12,37 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sparkles, Plus, Trash2, Save, Send, Loader2 } from "lucide-react";
 import { aiWorkoutPlanSuggestion } from "@/ai/flows/ai-workout-plan-suggestion";
 import { useToast } from "@/hooks/use-toast";
+import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBlocking } from "@/firebase";
+import { collection } from "firebase/firestore";
 
 export default function WorkoutBuilderPage() {
+  const { user } = useUser();
+  const db = useFirestore();
   const { toast } = useToast();
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   
+  const [programTitle, setProgramTitle] = useState("New Workout Plan");
+  const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [exercises, setExercises] = useState([
     { name: "", sets: 3, reps: "10-12", rest: 60, notes: "" }
   ]);
 
-  const [studentInfo, setStudentInfo] = useState({
+  const [aiContext, setAiContext] = useState({
     goals: "Build muscle",
     age: 25,
     weight: 75,
     level: "intermediate"
   });
+
+  const studentsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "personalTrainers", user.uid, "students");
+  }, [db, user]);
+
+  const { data: students } = useCollection(studentsQuery);
 
   const handleAddExercise = () => {
     setExercises([...exercises, { name: "", sets: 3, reps: "10-12", rest: 60, notes: "" }]);
@@ -43,56 +58,66 @@ export default function WorkoutBuilderPage() {
     setExercises(newExercises);
   };
 
-  const handleSaveTemplate = () => {
-    if (exercises.length === 0) {
+  const handleAssignToStudent = async () => {
+    if (!db || !user || !selectedStudentId) {
       toast({
         variant: "destructive",
-        title: "Empty Program",
-        description: "Please add at least one exercise to save a template.",
+        title: "Selection Required",
+        description: "Please select a student to assign this program to.",
       });
       return;
     }
-    
-    setIsSaving(true);
-    // Simulate save
-    setTimeout(() => {
-      setIsSaving(false);
-      toast({
-        title: "Template Saved",
-        description: "Workout program template has been saved to your library.",
-      });
-    }, 800);
-  };
 
-  const handleAssignToStudent = () => {
-    if (exercises.length === 0) {
+    if (exercises.some(ex => !ex.name)) {
       toast({
         variant: "destructive",
-        title: "Empty Program",
-        description: "Please add at least one exercise before assigning.",
+        title: "Incomplete Program",
+        description: "Please ensure all exercises have a name.",
       });
       return;
     }
 
     setIsAssigning(true);
-    // Simulate assignment
-    setTimeout(() => {
-      setIsAssigning(false);
-      toast({
-        title: "Program Assigned",
-        description: "The workout plan has been successfully assigned to the student.",
+    const workoutRef = collection(db, "personalTrainers", user.uid, "students", selectedStudentId, "workoutPlans");
+    
+    try {
+      await addDocumentNonBlocking(workoutRef, {
+        title: programTitle,
+        studentId: selectedStudentId,
+        personalTrainerId: user.uid,
+        createdAt: new Date().toISOString(),
+        exercises: exercises.map(ex => ({
+          exerciseName: ex.name,
+          sets: Number(ex.sets),
+          reps: ex.reps,
+          restTimeSeconds: Number(ex.rest),
+          notes: ex.notes
+        }))
       });
-    }, 1000);
+
+      toast({
+        title: "Program Assigned!",
+        description: `Successfully assigned "${programTitle}" to the selected student.`,
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Assignment Failed",
+        description: "Could not save the program. Please check your permissions.",
+      });
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   const handleAiSuggestion = async () => {
     setIsGenerating(true);
     try {
       const result = await aiWorkoutPlanSuggestion({
-        studentGoals: studentInfo.goals,
-        studentAge: studentInfo.age,
-        studentWeightKg: studentInfo.weight,
-        studentFitnessLevel: studentInfo.level,
+        studentGoals: aiContext.goals,
+        studentAge: aiContext.age,
+        studentWeightKg: aiContext.weight,
+        studentFitnessLevel: aiContext.level,
       });
 
       const newExercises = result.workoutPlan.map(ex => ({
@@ -105,14 +130,14 @@ export default function WorkoutBuilderPage() {
 
       setExercises(newExercises);
       toast({
-        title: "AI Suggestion Generated!",
-        description: "A tailored workout plan has been added based on student goals.",
+        title: "AI Suggestion Ready!",
+        description: "The plan has been populated with AI recommendations.",
       });
     } catch (error) {
       toast({
         variant: "destructive",
-        title: "AI Suggestion Failed",
-        description: "Could not generate a plan at this time. Please try again.",
+        title: "AI Failed",
+        description: "Could not generate suggestions. Check your API configuration.",
       });
     } finally {
       setIsGenerating(false);
@@ -123,27 +148,22 @@ export default function WorkoutBuilderPage() {
     <Navigation>
       <div className="max-w-4xl mx-auto space-y-8">
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-3xl font-bold font-headline">Program Builder</h1>
-            <p className="text-muted-foreground">Create a custom routine for your student.</p>
+          <div className="space-y-1 flex-1">
+            <Input 
+              value={programTitle} 
+              onChange={(e) => setProgramTitle(e.target.value)} 
+              className="text-3xl font-bold font-headline border-none p-0 h-auto focus-visible:ring-0 bg-transparent"
+            />
+            <p className="text-muted-foreground">Drafting program for student assignment.</p>
           </div>
           <div className="flex gap-2">
             <Button 
-              variant="outline" 
-              className="gap-2" 
-              onClick={handleSaveTemplate}
-              disabled={isSaving || isAssigning}
-            >
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Template
-            </Button>
-            <Button 
               className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
               onClick={handleAssignToStudent}
-              disabled={isSaving || isAssigning}
+              disabled={isAssigning || !selectedStudentId}
             >
               {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Assign to Student
+              Assign Program
             </Button>
           </div>
         </header>
@@ -151,42 +171,47 @@ export default function WorkoutBuilderPage() {
         <div className="grid md:grid-cols-3 gap-6">
           <Card className="md:col-span-1">
             <CardHeader>
-              <CardTitle>Student Context</CardTitle>
-              <CardDescription>Target audience for this plan</CardDescription>
+              <CardTitle>Assignment</CardTitle>
+              <CardDescription>Who is this for?</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Fitness Level</Label>
-                <Select 
-                  value={studentInfo.level} 
-                  onValueChange={(v) => setStudentInfo({...studentInfo, level: v})}
-                >
+                <Label>Select Student</Label>
+                <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select level" />
+                    <SelectValue placeholder="Select from roster" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="beginner">Beginner</SelectItem>
-                    <SelectItem value="intermediate">Intermediate</SelectItem>
-                    <SelectItem value="advanced">Advanced</SelectItem>
+                    {students?.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{s.firstName} {s.lastName}</SelectItem>
+                    ))}
+                    {(!students || students.length === 0) && (
+                      <SelectItem value="none" disabled>No students found</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>Goals</Label>
-                <Input 
-                  value={studentInfo.goals} 
-                  onChange={(e) => setStudentInfo({...studentInfo, goals: e.target.value})}
-                />
+
+              <div className="pt-4 border-t space-y-4">
+                <Label className="text-xs uppercase text-muted-foreground font-bold">AI Assistant</Label>
+                <div className="space-y-2">
+                  <Label>Goals</Label>
+                  <Input 
+                    placeholder="e.g. Lose fat" 
+                    value={aiContext.goals} 
+                    onChange={(e) => setAiContext({...aiContext, goals: e.target.value})}
+                  />
+                </div>
+                <Button 
+                  variant="secondary" 
+                  className="w-full gap-2" 
+                  onClick={handleAiSuggestion}
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-primary" />}
+                  Generate Suggestion
+                </Button>
               </div>
-              <Button 
-                variant="secondary" 
-                className="w-full gap-2 mt-4" 
-                onClick={handleAiSuggestion}
-                disabled={isGenerating}
-              >
-                {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-primary" />}
-                {isGenerating ? "Generating..." : "Get AI Suggestion"}
-              </Button>
             </CardContent>
           </Card>
 
@@ -194,12 +219,12 @@ export default function WorkoutBuilderPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle>Exercises</CardTitle>
-                  <CardDescription>Add and configure movements</CardDescription>
+                  <CardTitle>Routine Steps</CardTitle>
+                  <CardDescription>{exercises.length} exercises total</CardDescription>
                 </div>
                 <Button variant="outline" size="sm" onClick={handleAddExercise} className="gap-2">
                   <Plus className="h-4 w-4" />
-                  Add Exercise
+                  Add Row
                 </Button>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -219,7 +244,7 @@ export default function WorkoutBuilderPage() {
                           <Label>Exercise Name</Label>
                           <Input 
                             value={ex.name} 
-                            placeholder="e.g. Bench Press" 
+                            placeholder="e.g. Barbell Squat" 
                             onChange={(e) => handleUpdateExercise(i, "name", e.target.value)}
                           />
                         </div>
@@ -229,7 +254,7 @@ export default function WorkoutBuilderPage() {
                             <Input 
                               type="number" 
                               value={ex.sets} 
-                              onChange={(e) => handleUpdateExercise(i, "sets", parseInt(e.target.value) || 0)}
+                              onChange={(e) => handleUpdateExercise(i, "sets", e.target.value)}
                             />
                           </div>
                           <div className="space-y-2">
@@ -244,29 +269,23 @@ export default function WorkoutBuilderPage() {
                             <Input 
                               type="number" 
                               value={ex.rest} 
-                              onChange={(e) => handleUpdateExercise(i, "rest", parseInt(e.target.value) || 0)}
+                              onChange={(e) => handleUpdateExercise(i, "rest", e.target.value)}
                             />
                           </div>
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <Label>Instructions / Notes</Label>
+                        <Label>Coach's Notes</Label>
                         <Textarea 
                           value={ex.notes} 
-                          placeholder="Specific tips for execution..." 
-                          className="h-20"
+                          placeholder="Cue: Keep core tight..." 
+                          className="h-16"
                           onChange={(e) => handleUpdateExercise(i, "notes", e.target.value)}
                         />
                       </div>
                     </div>
                   </div>
                 ))}
-
-                {exercises.length === 0 && (
-                  <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
-                    No exercises added yet. Use AI or add manually.
-                  </div>
-                )}
               </CardContent>
             </Card>
           </div>

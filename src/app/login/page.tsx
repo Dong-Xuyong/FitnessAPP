@@ -10,31 +10,49 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
-import { useAuth, useUser } from "@/firebase";
+import { useAuth, useUser, useFirestore, setDocumentNonBlocking } from "@/firebase";
 import { initiateEmailSignIn, initiateEmailSignUp, initiateGoogleSignIn } from "@/firebase/non-blocking-login";
+import { doc, getDoc } from "firebase/firestore";
 
 export default function LoginPage() {
   const router = useRouter();
   const auth = useAuth();
+  const db = useFirestore();
   const { user, isUserLoading } = useUser();
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Redirect if already logged in
+  // Redirect and Initialize Profile
   useEffect(() => {
-    if (user && !isUserLoading) {
-      router.push("/dashboard");
+    async function checkProfile() {
+      if (user && !isUserLoading && db) {
+        const trainerRef = doc(db, "personalTrainers", user.uid);
+        const trainerSnap = await getDoc(trainerRef);
+        
+        if (!trainerSnap.exists()) {
+          // Initialize Trainer Profile if it doesn't exist
+          const names = user.displayName?.split(" ") || ["Trainer", ""];
+          setDocumentNonBlocking(trainerRef, {
+            id: user.uid,
+            firstName: names[0],
+            lastName: names[1] || "",
+            email: user.email,
+            dateJoined: new Date().toISOString()
+          }, { merge: true });
+        }
+        router.push("/dashboard");
+      }
     }
-  }, [user, isUserLoading, router]);
+    checkProfile();
+  }, [user, isUserLoading, router, db]);
 
   const handleEmailSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth) return;
     setIsSubmitting(true);
     initiateEmailSignIn(auth, email, password);
-    // Note: We don't await here. The useUser hook will update the state automatically.
   };
 
   const handleEmailSignUp = (e: React.FormEvent) => {
@@ -193,7 +211,7 @@ export default function LoginPage() {
                 fill="#FBBC05"
               />
               <path
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                 fill="#EA4335"
               />
               <path d="M0 0h24v24H0z" fill="none" />
@@ -201,19 +219,6 @@ export default function LoginPage() {
             Google
           </Button>
         </CardContent>
-        <CardFooter className="flex flex-col space-y-4">
-          <p className="text-center text-xs text-muted-foreground">
-            By clicking continue, you agree to our{" "}
-            <Link href="#" className="underline underline-offset-4 hover:text-primary">
-              Terms of Service
-            </Link>{" "}
-            and{" "}
-            <Link href="#" className="underline underline-offset-4 hover:text-primary">
-              Privacy Policy
-            </Link>
-            .
-          </p>
-        </CardFooter>
       </Card>
     </div>
   );
