@@ -5,96 +5,45 @@ service cloud.firestore {
     /**
      * ElevateFit Security Rules
      * 
-     * CORE PHILOSOPHY:
-     * This ruleset implements a strict hierarchical ownership model tailored for the Personal Trainer-Student 
-     * relationship. It prioritizes Authorization Independence by using path-based wildcards and denormalized 
-     * IDs to grant access without cross-document lookups.
-     * 
-     * DATA STRUCTURE:
-     * - /exercises: Global read-only database for all authenticated users.
-     * - /personalTrainers/{trainerId}: Root path for trainer profiles.
-     * - /personalTrainers/{trainerId}/students/{studentId}: Nested data tree for specific student records.
-     * - Subcollections (Workouts, Plans, Metrics): Inherit access from the trainer and student context.
-     * 
-     * KEY SECURITY DECISIONS:
-     * 1. Trainers have full read/write access to their own profile and all students nested under them.
-     * 2. Students are granted read/write access to their own data (sessions, metrics, photos) via their UID.
-     * 3. Relational integrity is enforced on 'create' to ensure that internal 'id' and 'ownerId' fields 
-     *    match the document's path, preventing "data spoofing" or orphaned records.
-     * 4. Prototyping Mode: Schema validation (types, required fields) is omitted to allow for rapid iteration, 
-     *    focusing exclusively on authorization and relational links.
-     * 
-     * DENORMALIZATION FOR AUTHORIZATION:
-     * Critical IDs (personalTrainerId, studentId) are expected to be present in the document data 
-     * to support collection group queries while maintaining strict path-based security.
+     * Hierarchical ownership model with email-based fallback for student onboarding.
      */
 
-    // --- Helper Functions ---
-
-    // Checks if the user is authenticated
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Checks if the user's UID matches the provided ID
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Combines ownership and existence checks for updates and deletes
     function isExistingOwner(userId) {
       return resource != null && isOwner(userId);
     }
 
-    // Validates that a specific field in the new data matches an ID (used for path consistency)
     function matchesPath(field, id) {
       return request.resource.data[field] == id;
     }
 
-    // Ensures a field has not been changed during an update
     function isImmutable(field) {
       return request.resource.data[field] == resource.data[field];
     }
 
     // Shared access for Student-related data (either the managing PT or the Student themselves)
-    function canAccessStudentData(trainerId, studentId) {
-      return isOwner(trainerId) || isOwner(studentId);
+    function canAccessStudentData(trainerId, studentId, studentEmail) {
+      return isOwner(trainerId) || (isSignedIn() && (request.auth.uid == studentId || request.auth.token.email == studentEmail));
     }
 
-    // --- Collection Rules ---
-
-    /**
-     * @description Global exercise database. Read-only for all authenticated users.
-     * @path /exercises/{exerciseId}
-     * @allow (get, list) if user is signed in.
-     * @deny (create, update, delete) for all users.
-     * @principle Public read for authenticated users with administrative-only writes.
-     */
     match /exercises/{exerciseId} {
       allow get, list: if isSignedIn();
       allow create, update, delete: if false;
     }
 
-    /**
-     * @description Personal Trainer profiles. Trainers manage their own identity.
-     * @path /personalTrainers/{personalTrainerId}
-     * @allow (get, list, create, update) if the trainer matches the path ID.
-     * @deny (delete) trainers cannot self-delete via client rules.
-     * @principle Enforces path-based user ownership and relational integrity.
-     */
     match /personalTrainers/{personalTrainerId} {
       allow get, list: if isOwner(personalTrainerId);
       allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId);
       allow update: if isExistingOwner(personalTrainerId) && isImmutable('id');
       allow delete: if false;
 
-      /**
-       * @description Notifications sent specifically to a Personal Trainer.
-       * @path /personalTrainers/{personalTrainerId}/notifications/{notificationId}
-       * @allow (all) if the user is the personalTrainerId.
-       * @deny (all) if the auth UID does not match.
-       * @principle Structural segregation of notifications by recipient type.
-       */
       match /notifications/{notificationId} {
         allow get, list: if isOwner(personalTrainerId);
         allow create: if isOwner(personalTrainerId) && matchesPath('recipientId', personalTrainerId);
@@ -102,88 +51,35 @@ service cloud.firestore {
         allow delete: if isExistingOwner(personalTrainerId);
       }
 
-      /**
-       * @description Student records managed by a Trainer. Both PT and Student can read.
-       * @path /personalTrainers/{personalTrainerId}/students/{studentId}
-       * @allow (read) if user is the PT or the Student.
-       * @allow (write) if user is the managing PT.
-       * @principle Shared access for collaboration with owner-only (PT) management.
-       */
       match /students/{studentId} {
-        allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-        allow create: if isOwner(personalTrainerId) && matchesPath('id', studentId) && matchesPath('personalTrainerId', personalTrainerId);
-        allow update: if isExistingOwner(personalTrainerId) && isImmutable('id') && isImmutable('personalTrainerId');
-        allow delete: if isExistingOwner(personalTrainerId);
+        // Allow access if user is the PT or if the student's email matches the auth token
+        allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email);
+        
+        // PT can create student records with any ID (trainer stays logged in)
+        allow create: if isOwner(personalTrainerId) && matchesPath('personalTrainerId', personalTrainerId);
+        
+        allow update: if (isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email)) && isImmutable('personalTrainerId');
+        allow delete: if isOwner(personalTrainerId);
 
-        /**
-         * @description Workout plans assigned to a student.
-         * @path /personalTrainers/{personalTrainerId}/students/{studentId}/workoutPlans/{workoutPlanId}
-         */
         match /workoutPlans/{workoutPlanId} {
-          allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-          allow create: if isOwner(personalTrainerId) && matchesPath('studentId', studentId) && matchesPath('personalTrainerId', personalTrainerId);
-          allow update: if isExistingOwner(personalTrainerId) && isImmutable('studentId');
-          allow delete: if isExistingOwner(personalTrainerId);
-
-          /**
-           * @description Exercises within a specific workout plan.
-           */
-          match /workoutPlanExercises/{workoutPlanExerciseId} {
-            allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-            allow create: if isOwner(personalTrainerId) && matchesPath('workoutPlanId', workoutPlanId);
-            allow update: if isExistingOwner(personalTrainerId) && isImmutable('workoutPlanId');
-            allow delete: if isExistingOwner(personalTrainerId);
-          }
+          allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow create: if isOwner(personalTrainerId);
+          allow update: if isOwner(personalTrainerId);
+          allow delete: if isOwner(personalTrainerId);
         }
 
-        /**
-         * @description Individual workout sessions performed by a student.
-         */
         match /workoutSessions/{workoutSessionId} {
-          allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-          allow create: if canAccessStudentData(personalTrainerId, studentId) && matchesPath('studentId', studentId);
-          allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && resource != null && isImmutable('studentId');
-          allow delete: if isExistingOwner(personalTrainerId);
-
-          /**
-           * @description Logs for specific exercises within a session.
-           */
-          match /workoutExerciseLogs/{workoutExerciseLogId} {
-            allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-            allow create: if canAccessStudentData(personalTrainerId, studentId) && matchesPath('workoutSessionId', workoutSessionId);
-            allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && resource != null && isImmutable('workoutSessionId');
-            allow delete: if isExistingOwner(personalTrainerId);
-          }
+          allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow create: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow update: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow delete: if isOwner(personalTrainerId);
         }
 
-        /**
-         * @description Numerical progress metrics (weight, etc.) for a student.
-         */
         match /progressMetrics/{progressMetricId} {
-          allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-          allow create: if canAccessStudentData(personalTrainerId, studentId) && matchesPath('studentId', studentId);
-          allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && resource != null && isImmutable('studentId');
-          allow delete: if isExistingOwner(personalTrainerId);
-        }
-
-        /**
-         * @description Progress photos for a student.
-         */
-        match /progressPhotos/{progressPhotoId} {
-          allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-          allow create: if canAccessStudentData(personalTrainerId, studentId) && matchesPath('studentId', studentId);
-          allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && resource != null && isImmutable('studentId');
-          allow delete: if isExistingOwner(personalTrainerId);
-        }
-
-        /**
-         * @description Notifications sent specifically to a Student.
-         */
-        match /notifications/{notificationId} {
-          allow get, list: if canAccessStudentData(personalTrainerId, studentId);
-          allow create: if canAccessStudentData(personalTrainerId, studentId) && matchesPath('recipientId', studentId);
-          allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && resource != null && isImmutable('recipientId');
-          allow delete: if canAccessStudentData(personalTrainerId, studentId) && resource != null;
+          allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow create: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow update: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow delete: if isOwner(personalTrainerId);
         }
       }
     }

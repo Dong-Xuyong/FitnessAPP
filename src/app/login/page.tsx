@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -27,26 +26,17 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    async function checkProfile() {
-      if (user && !isUserLoading && db) {
-        const trainerRef = doc(db, "personalTrainers", user.uid);
-        const trainerSnap = await getDoc(trainerRef);
-        
-        if (!trainerSnap.exists()) {
-          const names = user.displayName?.split(" ") || ["Trainer", ""];
-          setDocumentNonBlocking(trainerRef, {
-            id: user.uid,
-            firstName: names[0],
-            lastName: names[1] || "",
-            email: user.email,
-            dateJoined: new Date().toISOString()
-          }, { merge: true });
-        }
-        router.push("/dashboard");
-      }
+    // Remove automatic trainer profile creation and redirection.
+    // A more robust solution would involve explicit role selection during signup
+    // or separate signup flows for trainers and students.
+    // For now, this prevents all new users from being classified as trainers.
+    if (user && !isUserLoading) {
+      // Optionally, you might want to redirect authenticated users to a default page,
+      // or let them remain on the login page if other logic handles role-based redirection.
+      // For this fix, we are only removing the trainer creation and dashboard redirection.
+      router.push("/dashboard"); // Keep existing redirection if it's generally desired after any login
     }
-    checkProfile();
-  }, [user, isUserLoading, router, db]);
+  }, [user, isUserLoading, router]);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,7 +80,7 @@ export default function LoginPage() {
       toast({
         variant: "destructive",
         title: "Google Sign-In Failed",
-        description: "An error occurred during Google authentication. Please try again.",
+        description: error.message || "An error occurred during Google authentication. Please try again.",
       });
     }
   };

@@ -6,7 +6,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { 
   Dialog, 
   DialogContent, 
@@ -21,13 +20,15 @@ import { Search, Filter, UserPlus, ChevronRight, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBlocking } from "@/firebase";
 import { collection } from "firebase/firestore";
-import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 export default function StudentsPage() {
   const { user } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAdding, setIsAdding] = useState(false);
+  const [open, setOpen] = useState(false);
   const [newStudent, setNewStudent] = useState({
     firstName: "",
     lastName: "",
@@ -52,12 +53,21 @@ export default function StudentsPage() {
   const handleAddStudent = () => {
     if (!db || !user) return;
     
+    if (!newStudent.firstName || !newStudent.lastName || !newStudent.email) {
+      toast({
+        variant: "destructive",
+        title: "Missing Information",
+        description: "Please fill in the student's name and email.",
+      });
+      return;
+    }
+
     setIsAdding(true);
     const studentData = {
       ...newStudent,
       personalTrainerId: user.uid,
-      age: Number(newStudent.age),
-      currentWeightKg: Number(newStudent.currentWeightKg),
+      age: Number(newStudent.age) || 0,
+      currentWeightKg: Number(newStudent.currentWeightKg) || 0,
       dateJoined: new Date().toISOString()
     };
 
@@ -65,6 +75,7 @@ export default function StudentsPage() {
     addDocumentNonBlocking(studentsCol, studentData)
       .then(() => {
         setIsAdding(false);
+        setOpen(false);
         setNewStudent({
           firstName: "",
           lastName: "",
@@ -73,8 +84,19 @@ export default function StudentsPage() {
           currentWeightKg: "",
           goals: ""
         });
+        toast({
+          title: "Student Added",
+          description: `${newStudent.firstName} has been added to your roster.`,
+        });
       })
-      .catch(() => setIsAdding(false));
+      .catch((error) => {
+        setIsAdding(false);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to add student. Please try again.",
+        });
+      });
   };
 
   return (
@@ -96,7 +118,7 @@ export default function StudentsPage() {
               Filter
             </Button>
             
-            <Dialog>
+            <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2 flex-1 sm:flex-none">
                   <UserPlus className="h-4 w-4" />
@@ -107,7 +129,7 @@ export default function StudentsPage() {
                 <DialogHeader>
                   <DialogTitle>Add New Student</DialogTitle>
                   <DialogDescription>
-                    Create a new student profile. They'll appear in your roster immediately.
+                    Register a student in your database. They can claim their account later using this email.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -130,10 +152,11 @@ export default function StudentsPage() {
                     </div>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email">Email (Used for login)</Label>
                     <Input 
                       id="email" 
                       type="email" 
+                      placeholder="student@example.com"
                       value={newStudent.email} 
                       onChange={(e) => setNewStudent({...newStudent, email: e.target.value})} 
                     />
@@ -162,15 +185,16 @@ export default function StudentsPage() {
                     <Label htmlFor="goals">Fitness Goals</Label>
                     <Input 
                       id="goals" 
+                      placeholder="e.g., Build muscle, lose weight"
                       value={newStudent.goals} 
                       onChange={(e) => setNewStudent({...newStudent, goals: e.target.value})} 
                     />
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button onClick={handleAddStudent} disabled={isAdding}>
+                  <Button onClick={handleAddStudent} disabled={isAdding} className="w-full sm:w-auto">
                     {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Add Student
+                    Confirm Registration
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -197,20 +221,20 @@ export default function StudentsPage() {
                         <h3 className="font-semibold group-hover:text-primary transition-colors">
                           {student.firstName} {student.lastName}
                         </h3>
-                        <p className="text-xs text-muted-foreground">{student.goals}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[150px]">{student.email}</p>
                       </div>
-                      <div className="hidden md:block">
+                      <div className="hidden md:block text-center">
                         <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Age</p>
-                        <p className="text-sm font-medium">{student.age} years</p>
+                        <p className="text-sm font-medium">{student.age} yrs</p>
                       </div>
-                      <div className="hidden md:block">
+                      <div className="hidden md:block text-center">
                         <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Weight</p>
                         <p className="text-sm font-medium">{student.currentWeightKg} kg</p>
                       </div>
-                      <div className="text-right md:text-left flex items-center justify-end md:justify-between">
-                        <div className="hidden md:block">
+                      <div className="text-right flex items-center justify-end gap-4">
+                        <div className="hidden md:block text-right">
                           <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Status</p>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 justify-end">
                             <div className="w-2 h-2 rounded-full bg-accent" />
                             <span className="text-sm">Active</span>
                           </div>
@@ -223,8 +247,10 @@ export default function StudentsPage() {
               </Card>
             ))}
             {!isLoading && filteredStudents.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
-                No students found. Add your first student to get started.
+              <div className="text-center py-20 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
+                <UserPlus className="h-10 w-10 mx-auto mb-4 opacity-20" />
+                <p className="text-lg font-medium">No students found</p>
+                <p className="text-sm">Add your first student to start managing their programs.</p>
               </div>
             )}
           </div>
