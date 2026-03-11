@@ -1,6 +1,6 @@
 
 import Link from "next/link";
-import { Dumbbell, ArrowRight, ShieldCheck, Zap, Users, GraduationCap } from "lucide-react";
+import { Dumbbell, ArrowRight, ShieldCheck, Zap, Users, GraduationCap, UserCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Home() {
@@ -28,16 +28,16 @@ export default function Home() {
               Elevate Your <span className="text-primary">Coaching</span> Business
             </h1>
             <p className="text-xl text-muted-foreground">
-              A professional platform for personal trainers to manage students, build programs, and track results without the chaos of spreadsheets.
+              A professional platform for personal trainers to manage students, build programs, and track results.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Button size="lg" className="h-12 px-8 text-lg gap-2" asChild>
-                <Link href="/login">
-                  Trainer Dashboard <ArrowRight className="h-5 w-5" />
+                <Link href="/login?role=trainer">
+                  <UserCircle className="h-5 w-5" /> Trainer Portal
                 </Link>
               </Button>
               <Button size="lg" variant="outline" className="h-12 px-8 text-lg gap-2" asChild>
-                <Link href="/login">
+                <Link href="/login?role=student">
                   <GraduationCap className="h-5 w-5" /> Student Portal
                 </Link>
               </Button>

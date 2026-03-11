@@ -1,21 +1,24 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Dumbbell, Mail, Lock, Loader2 } from "lucide-react";
+import { Dumbbell, Mail, Lock, Loader2, UserCircle, GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth, useUser, useFirestore, setDocumentNonBlocking } from "@/firebase";
 import { initiateEmailSignIn, initiateEmailSignUp, initiateGoogleSignIn } from "@/firebase/non-blocking-login";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const auth = useAuth();
   const db = useFirestore();
   const { user, isUserLoading } = useUser();
@@ -23,20 +26,32 @@ export default function LoginPage() {
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isTrainer, setIsTrainer] = useState(searchParams.get("role") !== "student");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingRole, setIsCheckingRole] = useState(false);
 
   useEffect(() => {
-    // Remove automatic trainer profile creation and redirection.
-    // A more robust solution would involve explicit role selection during signup
-    // or separate signup flows for trainers and students.
-    // For now, this prevents all new users from being classified as trainers.
-    if (user && !isUserLoading) {
-      // Optionally, you might want to redirect authenticated users to a default page,
-      // or let them remain on the login page if other logic handles role-based redirection.
-      // For this fix, we are only removing the trainer creation and dashboard redirection.
-      router.push("/dashboard"); // Keep existing redirection if it's generally desired after any login
+    async function handleRedirect() {
+      if (user && !isUserLoading && db) {
+        setIsCheckingRole(true);
+        try {
+          const ptDoc = await getDoc(doc(db, "personalTrainers", user.uid));
+          if (ptDoc.exists()) {
+            router.push("/dashboard");
+          } else {
+            // If they signed up as a trainer but doc doesn't exist yet, we handle it in handleEmailSignUp
+            // Otherwise, default to student portal
+            router.push("/student/dashboard");
+          }
+        } catch (error) {
+          router.push("/student/dashboard");
+        } finally {
+          setIsCheckingRole(false);
+        }
+      }
     }
-  }, [user, isUserLoading, router]);
+    handleRedirect();
+  }, [user, isUserLoading, router, db]);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,23 +64,38 @@ export default function LoginPage() {
       toast({
         variant: "destructive",
         title: "Login Failed",
-        description: "Invalid email or password. Please try again or sign up if you don't have an account.",
+        description: "Invalid email or password.",
       });
     }
   };
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth) return;
+    if (!auth || !db) return;
     setIsSubmitting(true);
     try {
-      await initiateEmailSignUp(auth, email, password);
+      const userCredential = await initiateEmailSignUp(auth, email, password);
+      
+      if (isTrainer) {
+        // Initialize Trainer Profile
+        const trainerData = {
+          id: userCredential.user.uid,
+          firstName: email.split('@')[0], // Default placeholder
+          lastName: "Trainer",
+          email: email,
+          dateJoined: new Date().toISOString(),
+        };
+        await setDoc(doc(db, "personalTrainers", userCredential.user.uid), trainerData);
+        router.push("/dashboard");
+      } else {
+        router.push("/student/dashboard");
+      }
     } catch (error: any) {
       setIsSubmitting(false);
       toast({
         variant: "destructive",
         title: "Registration Failed",
-        description: error.message || "Could not create account. Please try a different email.",
+        description: error.message || "Could not create account.",
       });
     }
   };
@@ -80,15 +110,18 @@ export default function LoginPage() {
       toast({
         variant: "destructive",
         title: "Google Sign-In Failed",
-        description: error.message || "An error occurred during Google authentication. Please try again.",
+        description: error.message,
       });
     }
   };
 
-  if (isUserLoading) {
+  if (isUserLoading || isCheckingRole) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-secondary/30">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Authenticating...</p>
+        </div>
       </div>
     );
   }
@@ -102,9 +135,13 @@ export default function LoginPage() {
 
       <Card className="w-full max-w-md shadow-xl border-t-4 border-t-primary">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold font-headline">Welcome Back</CardTitle>
+          <CardTitle className="text-2xl font-bold font-headline">
+            {isTrainer ? "Coach Login" : "Student Login"}
+          </CardTitle>
           <CardDescription>
-            Enter your credentials or use social login to continue.
+            {isTrainer 
+              ? "Manage your roster and workout plans." 
+              : "Access your training and track progress."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -132,12 +169,7 @@ export default function LoginPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="password">Password</Label>
-                    <Button variant="link" className="px-0 font-normal text-xs" type="button">
-                      Forgot password?
-                    </Button>
-                  </div>
+                  <Label htmlFor="password">Password</Label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input 
@@ -188,6 +220,18 @@ export default function LoginPage() {
                     />
                   </div>
                 </div>
+                
+                <div className="flex items-center space-x-2 pt-2">
+                  <Checkbox 
+                    id="trainer-toggle" 
+                    checked={isTrainer} 
+                    onCheckedChange={(checked) => setIsTrainer(checked as boolean)} 
+                  />
+                  <Label htmlFor="trainer-toggle" className="text-sm font-normal cursor-pointer">
+                    I am registering as a <span className="font-bold text-primary">Personal Trainer</span>
+                  </Label>
+                </div>
+
                 <Button className="w-full" type="submit" disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Create Account
@@ -215,27 +259,24 @@ export default function LoginPage() {
             disabled={isSubmitting}
           >
             <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-              <path
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                fill="#4285F4"
-              />
-              <path
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                fill="#34A853"
-              />
-              <path
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
-                fill="#FBBC05"
-              />
-              <path
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                fill="#EA4335"
-              />
-              <path d="M0 0h24v24H0z" fill="none" />
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
             Google
           </Button>
         </CardContent>
+        <CardFooter className="justify-center border-t py-4 bg-muted/20">
+          <Button 
+            variant="link" 
+            size="sm" 
+            className="text-xs"
+            onClick={() => setIsTrainer(!isTrainer)}
+          >
+            Switch to {isTrainer ? "Student" : "Coach"} Login
+          </Button>
+        </CardFooter>
       </Card>
     </div>
   );
