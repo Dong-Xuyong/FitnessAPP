@@ -15,6 +15,9 @@ import { useToast } from "@/hooks/use-toast";
 export default function WorkoutBuilderPage() {
   const { toast } = useToast();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
+  
   const [exercises, setExercises] = useState([
     { name: "", sets: 3, reps: "10-12", rest: 60, notes: "" }
   ]);
@@ -38,6 +41,48 @@ export default function WorkoutBuilderPage() {
     const newExercises = [...exercises];
     newExercises[index] = { ...newExercises[index], [field]: value };
     setExercises(newExercises);
+  };
+
+  const handleSaveTemplate = () => {
+    if (exercises.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Empty Program",
+        description: "Please add at least one exercise to save a template.",
+      });
+      return;
+    }
+    
+    setIsSaving(true);
+    // Simulate save
+    setTimeout(() => {
+      setIsSaving(false);
+      toast({
+        title: "Template Saved",
+        description: "Workout program template has been saved to your library.",
+      });
+    }, 800);
+  };
+
+  const handleAssignToStudent = () => {
+    if (exercises.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Empty Program",
+        description: "Please add at least one exercise before assigning.",
+      });
+      return;
+    }
+
+    setIsAssigning(true);
+    // Simulate assignment
+    setTimeout(() => {
+      setIsAssigning(false);
+      toast({
+        title: "Program Assigned",
+        description: "The workout plan has been successfully assigned to the student.",
+      });
+    }, 1000);
   };
 
   const handleAiSuggestion = async () => {
@@ -83,12 +128,21 @@ export default function WorkoutBuilderPage() {
             <p className="text-muted-foreground">Create a custom routine for your student.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="gap-2">
-              <Save className="h-4 w-4" />
+            <Button 
+              variant="outline" 
+              className="gap-2" 
+              onClick={handleSaveTemplate}
+              disabled={isSaving || isAssigning}
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save Template
             </Button>
-            <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90">
-              <Send className="h-4 w-4" />
+            <Button 
+              className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
+              onClick={handleAssignToStudent}
+              disabled={isSaving || isAssigning}
+            >
+              {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Assign to Student
             </Button>
           </div>
@@ -175,7 +229,7 @@ export default function WorkoutBuilderPage() {
                             <Input 
                               type="number" 
                               value={ex.sets} 
-                              onChange={(e) => handleUpdateExercise(i, "sets", parseInt(e.target.value))}
+                              onChange={(e) => handleUpdateExercise(i, "sets", parseInt(e.target.value) || 0)}
                             />
                           </div>
                           <div className="space-y-2">
@@ -190,7 +244,7 @@ export default function WorkoutBuilderPage() {
                             <Input 
                               type="number" 
                               value={ex.rest} 
-                              onChange={(e) => handleUpdateExercise(i, "rest", parseInt(e.target.value))}
+                              onChange={(e) => handleUpdateExercise(i, "rest", parseInt(e.target.value) || 0)}
                             />
                           </div>
                         </div>
