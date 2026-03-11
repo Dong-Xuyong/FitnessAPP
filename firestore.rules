@@ -24,7 +24,7 @@ service cloud.firestore {
     }
 
     function isImmutable(field) {
-      return request.resource.data[field] == resource.data[field];
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([field]);
     }
 
     // Global Students Directory
@@ -42,20 +42,24 @@ service cloud.firestore {
       allow delete: if false;
 
       match /students/{studentId} {
-        allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email);
-        allow create: if (isOwner(personalTrainerId) && matchesPath('personalTrainerId', personalTrainerId)) || 
-                      (isSignedIn() && request.auth.uid == studentId);
-        allow update: if (isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email)) && isImmutable('personalTrainerId');
+        // Allow trainers to manage their students, and students to read/manage their own records
+        allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
+        
+        allow create: if (isOwner(personalTrainerId) && matchesPath('trainerId', personalTrainerId)) || 
+                      isOwner(studentId);
+                      
+        allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && isImmutable('trainerId');
+        
         allow delete: if isOwner(personalTrainerId);
 
         match /workoutPlans/{workoutPlanId} {
-          allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
           allow create, update, delete: if isOwner(personalTrainerId);
         }
 
         match /workoutSessions/{workoutSessionId} {
-          allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
-          allow create, update: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)).data.email);
+          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
+          allow create, update: if isOwner(personalTrainerId) || isOwner(studentId);
           allow delete: if isOwner(personalTrainerId);
         }
       }

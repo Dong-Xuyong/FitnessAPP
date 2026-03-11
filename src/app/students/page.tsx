@@ -69,12 +69,12 @@ export default function StudentsPage() {
   const { data: allStudents, isLoading: isLoadingGlobal } = useCollection(globalStudentsQuery);
 
   const filteredRoster = myStudents?.filter((s) => {
-    const fullName = `${s.firstName} ${s.lastName}`.toLowerCase();
+    const fullName = `${s.firstName || s.name} ${s.lastName || ""}`.toLowerCase();
     return fullName.includes(searchQuery.toLowerCase());
   }) || [];
 
   const filteredGlobal = allStudents?.filter((s) => {
-    const fullName = `${s.firstName} ${s.lastName}`.toLowerCase();
+    const fullName = `${s.firstName || s.name} ${s.lastName || ""}`.toLowerCase();
     const isAlreadyInRoster = myStudents?.some(ms => ms.id === s.id || ms.email === s.email);
     return fullName.includes(globalSearch.toLowerCase()) && !isAlreadyInRoster && s.id !== user?.uid;
   }) || [];
@@ -89,8 +89,8 @@ export default function StudentsPage() {
       
       const studentData = {
         ...student,
-        id: studentId,
-        personalTrainerId: user.uid,
+        userId: studentId,
+        trainerId: user.uid,
         joinedAt: new Date().toISOString(),
         activityStatus: student.activityStatus || "active",
       };
@@ -99,7 +99,7 @@ export default function StudentsPage() {
       
       toast({
         title: "Student Added",
-        description: `${student.firstName} is now part of your roster.`,
+        description: `${student.firstName || student.name} is now part of your roster.`,
       });
       setIsManualAdding(false);
     } catch (e) {
@@ -116,7 +116,11 @@ export default function StudentsPage() {
   const handleManualAdd = (e: React.FormEvent) => {
     e.preventDefault();
     handleAddStudent({
-      ...manualStudent,
+      firstName: manualStudent.firstName,
+      lastName: manualStudent.lastName,
+      name: `${manualStudent.firstName} ${manualStudent.lastName}`,
+      email: manualStudent.email,
+      goalType: manualStudent.goalType,
       weightKg: 0,
       heightCm: 0,
       goalWeightKg: 0,
@@ -218,12 +222,12 @@ export default function StudentsPage() {
                         <Link href={`/students/${student.id}`} className="flex items-center gap-4 p-4">
                           <Avatar className="h-12 w-12 border-2 border-primary/10">
                             <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/100/100`} />
-                            <AvatarFallback>{student.firstName?.[0]}</AvatarFallback>
+                            <AvatarFallback>{(student.firstName || student.name)?.[0]}</AvatarFallback>
                           </Avatar>
                           <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4 items-center">
                             <div>
                               <h3 className="font-semibold group-hover:text-primary transition-colors">
-                                {student.firstName} {student.lastName}
+                                {student.name || `${student.firstName} ${student.lastName}`}
                               </h3>
                               <p className="text-xs text-muted-foreground truncate max-w-[150px]">{student.email}</p>
                             </div>
@@ -287,9 +291,9 @@ export default function StudentsPage() {
                       <CardHeader className="text-center pb-2">
                         <Avatar className="h-20 w-20 mx-auto mb-2 border-2 border-primary/10 group-hover:scale-105 transition-transform">
                           <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/200/200`} />
-                          <AvatarFallback>{student.firstName[0]}</AvatarFallback>
+                          <AvatarFallback>{(student.firstName || student.name)?.[0]}</AvatarFallback>
                         </Avatar>
-                        <CardTitle className="text-lg">{student.firstName} {student.lastName}</CardTitle>
+                        <CardTitle className="text-lg">{student.name || `${student.firstName} ${student.lastName}`}</CardTitle>
                         <CardDescription className="flex items-center justify-center gap-1">
                           <Target className="h-3 w-3" /> {student.goalType?.replace('_', ' ') || 'General Fitness'}
                         </CardDescription>
