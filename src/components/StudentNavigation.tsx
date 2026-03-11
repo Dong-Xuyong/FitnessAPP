@@ -7,11 +7,11 @@ import {
   LayoutDashboard, 
   Dumbbell, 
   LineChart, 
-  User, 
   LogOut,
   Bell,
   MessageSquare,
-  Play
+  Play,
+  CreditCard
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -20,6 +20,7 @@ const navItems = [
   { name: "My Dashboard", href: "/student/dashboard", icon: LayoutDashboard },
   { name: "Workouts", href: "/student/workouts", icon: Dumbbell },
   { name: "Progress", href: "/student/progress", icon: LineChart },
+  { name: "Billing", href: "/student/billing", icon: CreditCard },
 ];
 
 export function StudentNavigation({ children }: { children: React.ReactNode }) {
