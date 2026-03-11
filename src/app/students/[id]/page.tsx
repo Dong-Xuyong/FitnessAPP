@@ -1,5 +1,6 @@
 "use client";
 
+import { use } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -25,14 +26,16 @@ const strengthData = [
   { date: 'Mar', bench: 72.5, squat: 105 },
 ];
 
-export default function StudentDetailPage({ params }: { params: { id: string } }) {
+export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+
   return (
     <Navigation>
       <div className="space-y-8">
         <header className="flex flex-col md:flex-row gap-6 items-start justify-between bg-card p-6 rounded-xl border">
           <div className="flex gap-6 items-center">
             <Avatar className="h-24 w-24 ring-4 ring-secondary">
-              <AvatarImage src={`https://picsum.photos/seed/s${params.id}/200/200`} />
+              <AvatarImage src={`https://picsum.photos/seed/s${id}/200/200`} />
               <AvatarFallback>S</AvatarFallback>
             </Avatar>
             <div className="space-y-1">
