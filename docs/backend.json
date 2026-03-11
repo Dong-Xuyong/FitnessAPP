@@ -28,6 +28,10 @@
           "type": "string",
           "description": "The date and time when the trainer account was created.",
           "format": "date-time"
+        },
+        "joinCode": {
+          "type": "string",
+          "description": "A unique code students can use to join this trainer's roster."
         }
       },
       "required": [
@@ -118,6 +122,10 @@
         "lastWorkoutAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "joinCode": {
+          "type": "string",
+          "description": "The code used to link to the trainer (transient)."
         }
       },
       "required": [

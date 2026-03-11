@@ -1,19 +1,29 @@
 
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Users, Dumbbell, Activity, Calendar, ArrowUpRight, TrendingUp, Loader2, Weight, Target } from "lucide-react";
+import { Users, Dumbbell, Activity, Calendar, ArrowUpRight, TrendingUp, Loader2, Weight, Target, Hash, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, query, orderBy } from "firebase/firestore";
+import { useUser, useFirestore, useCollection, useMemoFirebase, updateDocumentNonBlocking, useDoc } from "@/firebase";
+import { collection, query, orderBy, doc } from "firebase/firestore";
+import { useToast } from "@/hooks/use-toast";
 
 function DashboardContent() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
+
+  const trainerRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return doc(db, "personalTrainers", user.uid);
+  }, [db, user]);
+
+  const { data: trainer } = useDoc(trainerRef);
 
   const studentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -31,6 +41,16 @@ function DashboardContent() {
     { label: "Completion Rate", value: "84%", icon: Activity, change: "+12% vs last month" },
     { label: "Scheduled Today", value: "4", icon: Calendar, change: "Next: Sarah (2 PM)" },
   ];
+
+  const handleGenerateJoinCode = () => {
+    if (!trainerRef) return;
+    const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    updateDocumentNonBlocking(trainerRef, { joinCode: newCode });
+    toast({
+      title: "Join Code Updated",
+      description: `Your new join code is: ${newCode}`,
+    });
+  };
 
   if (isUserLoading) {
     return (
@@ -58,8 +78,8 @@ function DashboardContent() {
           ))}
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-6">
-          <Card className="col-span-1">
+        <div className="grid lg:grid-cols-3 gap-6">
+          <Card className="lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Recent Students</CardTitle>
@@ -118,34 +138,42 @@ function DashboardContent() {
             </CardContent>
           </Card>
 
-          <Card className="col-span-1">
-            <CardHeader>
-              <CardTitle>Physical Insights</CardTitle>
-              <CardDescription>Roster performance summary</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[350px] flex items-center justify-center border-2 border-dashed rounded-lg bg-accent/5">
-              <div className="text-center space-y-4 max-w-[300px]">
-                <div className="flex justify-center">
-                  <div className="relative">
-                    <TrendingUp className="h-16 w-16 text-muted-foreground/20" />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Activity className="h-6 w-6 text-primary" />
-                    </div>
-                  </div>
+          <div className="space-y-6">
+            <Card className="bg-primary/5 border-primary/20">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Hash className="h-4 w-4 text-primary" />
+                  <CardTitle className="text-lg">Student Join Code</CardTitle>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Tracking physical progression</p>
-                  <p className="text-xs text-muted-foreground">Visual trends for weight, body fat, and strength will appear here as your students log their sessions.</p>
+                <CardDescription>Share this code with your students to link accounts.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-4 bg-background border-2 border-dashed rounded-lg">
+                  <span className="text-3xl font-mono font-bold tracking-widest text-primary">
+                    {trainer?.joinCode || "------"}
+                  </span>
+                  <Button variant="ghost" size="icon" onClick={handleGenerateJoinCode}>
+                    <RefreshCcw className="h-4 w-4" />
+                  </Button>
                 </div>
-                <Button variant="outline" size="sm" className="gap-2" asChild>
-                  <Link href="/progress">
-                    <ArrowUpRight className="h-4 w-4" />
-                    View Detailed Analytics
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                <p className="text-[10px] text-muted-foreground">
+                  Students can enter this code in their dashboard to automatically join your roster.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Physical Insights</CardTitle>
+              </CardHeader>
+              <CardContent className="h-[200px] flex items-center justify-center border-2 border-dashed rounded-lg bg-accent/5">
+                <div className="text-center space-y-2">
+                  <TrendingUp className="h-8 w-8 text-muted-foreground/20 mx-auto" />
+                  <p className="text-xs text-muted-foreground">Visual trends appear as students log sessions.</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </Navigation>
