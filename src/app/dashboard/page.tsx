@@ -1,4 +1,3 @@
-
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
@@ -41,16 +40,6 @@ function DashboardContent() {
     { label: "Completion Rate", value: "84%", icon: Activity, change: "+12% vs last month" },
     { label: "Scheduled Today", value: "4", icon: Calendar, change: "Next: Sarah (2 PM)" },
   ];
-
-  const handleGenerateJoinCode = () => {
-    if (!trainerRef) return;
-    const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    updateDocumentNonBlocking(trainerRef, { joinCode: newCode });
-    toast({
-      title: "Join Code Updated",
-      description: `Your new join code is: ${newCode}`,
-    });
-  };
 
   if (isUserLoading) {
     return (
@@ -139,29 +128,6 @@ function DashboardContent() {
           </Card>
 
           <div className="space-y-6">
-            <Card className="bg-primary/5 border-primary/20">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Hash className="h-4 w-4 text-primary" />
-                  <CardTitle className="text-lg">Student Join Code</CardTitle>
-                </div>
-                <CardDescription>Share this code with your students to link accounts.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-background border-2 border-dashed rounded-lg">
-                  <span className="text-3xl font-mono font-bold tracking-widest text-primary">
-                    {trainer?.joinCode || "------"}
-                  </span>
-                  <Button variant="ghost" size="icon" onClick={handleGenerateJoinCode}>
-                    <RefreshCcw className="h-4 w-4" />
-                  </Button>
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Students can enter this code in their dashboard to automatically join your roster.
-                </p>
-              </CardContent>
-            </Card>
-
             <Card>
               <CardHeader>
                 <CardTitle>Physical Insights</CardTitle>

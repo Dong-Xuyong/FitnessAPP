@@ -1,4 +1,3 @@
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -28,8 +27,7 @@ service cloud.firestore {
     }
 
     match /personalTrainers/{personalTrainerId} {
-      allow get: if isSignedIn(); // Allow students to get trainer info for joining
-      allow list: if isOwner(personalTrainerId);
+      allow get, list: if isSignedIn(); // Allow students to browse coaches
       allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId);
       allow update: if isExistingOwner(personalTrainerId) && isImmutable('id');
       allow delete: if false;
@@ -38,10 +36,9 @@ service cloud.firestore {
         // Allow access if user is the PT or if the student's email matches the auth token
         allow get, list: if isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email);
         
-        // PT can create student records OR students can join using a valid join code
+        // PT can create student records OR students can join a coach themselves
         allow create: if (isOwner(personalTrainerId) && matchesPath('personalTrainerId', personalTrainerId)) || 
-                      (isSignedIn() && request.auth.uid == studentId && 
-                       request.resource.data.joinCode == get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)).data.joinCode);
+                      (isSignedIn() && request.auth.uid == studentId);
         
         allow update: if (isOwner(personalTrainerId) || (isSignedIn() && request.auth.token.email == resource.data.email)) && isImmutable('personalTrainerId');
         allow delete: if isOwner(personalTrainerId);

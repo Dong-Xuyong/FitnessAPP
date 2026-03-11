@@ -1,4 +1,3 @@
-
 "use client";
 
 import { StudentNavigation } from "@/components/StudentNavigation";
@@ -6,14 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dumbbell, Calendar, Play, CheckCircle2, TrendingUp, History, Loader2, Search, ArrowRight, UserPlus } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Dumbbell, Calendar, Play, TrendingUp, History, Loader2, ArrowRight, UserCheck, Search } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, setDocumentNonBlocking } from "@/firebase";
 import { collection, query, where, limit, getDocs, doc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
 
 export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
@@ -22,8 +21,15 @@ export default function StudentDashboardPage() {
   
   const [studentData, setStudentData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-  const [joinCode, setJoinCode] = useState("");
-  const [isJoining, setIsJoining] = useState(false);
+  const [isJoining, setIsJoining] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const coachesQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, "personalTrainers");
+  }, [db]);
+
+  const { data: coaches, isLoading: isLoadingCoaches } = useCollection(coachesQuery);
 
   useEffect(() => {
     if (!db || !user?.email) return;
@@ -55,31 +61,16 @@ export default function StudentDashboardPage() {
     findStudentProfile();
   }, [db, user?.email]);
 
-  const handleJoinCoach = async () => {
-    if (!db || !user || !joinCode) return;
-    setIsJoining(true);
+  const handleJoinCoach = async (trainerId: string, trainerName: string) => {
+    if (!db || !user) return;
+    setIsJoining(trainerId);
 
     try {
-      const trainersCol = collection(db, "personalTrainers");
-      const q = query(trainersCol, where("joinCode", "==", joinCode.toUpperCase()), limit(1));
-      const trainerSnapshot = await getDocs(q);
-
-      if (trainerSnapshot.empty) {
-        toast({
-          variant: "destructive",
-          title: "Invalid Code",
-          description: "No coach found with this join code.",
-        });
-        setIsJoining(false);
-        return;
-      }
-
-      const trainerDoc = trainerSnapshot.docs[0];
       const studentId = user.uid;
-      const studentRef = doc(db, "personalTrainers", trainerDoc.id, "students", studentId);
+      const studentRef = doc(db, "personalTrainers", trainerId, "students", studentId);
 
       const newStudentData = {
-        personalTrainerId: trainerDoc.id,
+        personalTrainerId: trainerId,
         userId: user.uid,
         firstName: user.displayName?.split(' ')[0] || "New",
         lastName: user.displayName?.split(' ')[1] || "Student",
@@ -94,17 +85,16 @@ export default function StudentDashboardPage() {
         joinedAt: new Date().toISOString(),
         subscriptionStatus: "active",
         currentStreakDays: 0,
-        joinCode: joinCode.toUpperCase()
       };
 
       await setDocumentNonBlocking(studentRef, newStudentData, { merge: true });
       
       toast({
         title: "Successfully Joined!",
-        description: `You are now linked with Coach ${trainerDoc.data().lastName}.`,
+        description: `You are now linked with Coach ${trainerName}.`,
       });
       
-      setStudentData({ ...newStudentData, id: studentId, trainerId: trainerDoc.id });
+      setStudentData({ ...newStudentData, id: studentId, trainerId });
     } catch (e) {
       toast({
         variant: "destructive",
@@ -112,7 +102,7 @@ export default function StudentDashboardPage() {
         description: "Failed to link with coach. Please try again.",
       });
     } finally {
-      setIsJoining(false);
+      setIsJoining(null);
     }
   };
 
@@ -134,43 +124,66 @@ export default function StudentDashboardPage() {
   }
 
   if (!studentData) {
+    const filteredCoaches = coaches?.filter(c => 
+      `${c.firstName} ${c.lastName}`.toLowerCase().includes(searchQuery.toLowerCase())
+    ) || [];
+
     return (
       <StudentNavigation>
-        <div className="max-w-md mx-auto py-20 space-y-8">
+        <div className="max-w-4xl mx-auto py-10 space-y-8">
           <div className="text-center space-y-2">
             <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <UserPlus className="h-8 w-8 text-accent" />
+              <UserCheck className="h-8 w-8 text-accent" />
             </div>
-            <h2 className="text-3xl font-bold font-headline">Join your Coach</h2>
-            <p className="text-muted-foreground">Enter the 6-digit join code provided by your personal trainer to access your programs.</p>
+            <h2 className="text-3xl font-bold font-headline">Choose your Coach</h2>
+            <p className="text-muted-foreground">Select a personal trainer from our roster to get started with your custom plans.</p>
           </div>
 
-          <Card className="border-2 border-accent/20 shadow-xl">
-            <CardContent className="pt-6 space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="joinCode">Coach Join Code</Label>
-                <Input 
-                  id="joinCode" 
-                  placeholder="e.g. AB1234" 
-                  className="text-center text-2xl font-mono tracking-widest h-14 uppercase"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                />
-              </div>
-              <Button 
-                className="w-full h-12 text-lg bg-accent text-accent-foreground hover:bg-accent/90" 
-                onClick={handleJoinCoach}
-                disabled={isJoining || joinCode.length < 3}
-              >
-                {isJoining && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Link Account <ArrowRight className="ml-2 h-5 w-5" />
-              </Button>
-            </CardContent>
-          </Card>
-
-          <div className="text-center text-sm text-muted-foreground">
-            <p>Don't have a coach yet? Check out our <Link href="/coaches" className="text-primary hover:underline">directory</Link>.</p>
+          <div className="relative max-w-md mx-auto">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input 
+              placeholder="Search by coach name..." 
+              className="pl-10 h-12"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
+
+          {isLoadingCoaches ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground/30" />
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredCoaches.map((coach) => (
+                <Card key={coach.id} className="hover:border-accent transition-all group overflow-hidden">
+                  <CardHeader className="text-center pb-2">
+                    <Avatar className="h-20 w-20 mx-auto mb-2 border-2 border-accent/20 group-hover:scale-105 transition-transform">
+                      <AvatarImage src={`https://picsum.photos/seed/${coach.id}/200/200`} />
+                      <AvatarFallback>{coach.firstName[0]}</AvatarFallback>
+                    </Avatar>
+                    <CardTitle className="text-lg">{coach.firstName} {coach.lastName}</CardTitle>
+                    <CardDescription>{coach.email}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <Button 
+                      className="w-full bg-accent text-accent-foreground hover:bg-accent/90" 
+                      onClick={() => handleJoinCoach(coach.id, coach.lastName)}
+                      disabled={!!isJoining}
+                    >
+                      {isJoining === coach.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+                      Join Team
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+              {filteredCoaches.length === 0 && (
+                <div className="col-span-full py-20 text-center border-2 border-dashed rounded-xl bg-muted/5">
+                  <p className="text-muted-foreground">No coaches found matching your search.</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </StudentNavigation>
     );
