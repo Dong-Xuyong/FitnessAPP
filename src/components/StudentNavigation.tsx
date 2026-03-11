@@ -13,7 +13,8 @@ import {
   MessageSquare,
   Play,
   CreditCard,
-  Calendar
+  Calendar,
+  User
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -27,6 +28,7 @@ const navItems = [
   { name: "Workouts", href: "/student/workouts", icon: Dumbbell },
   { name: "Progress", href: "/student/progress", icon: LineChart },
   { name: "Billing", href: "/student/billing", icon: CreditCard },
+  { name: "Profile", href: "/student/profile", icon: User },
 ];
 
 const mockStudentNotifications = [
