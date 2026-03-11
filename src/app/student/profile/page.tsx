@@ -269,6 +269,6 @@ export default function StudentProfilePage() {
           </Card>
         </form>
       </div>
-    </Navigation>
+    </StudentNavigation>
   );
 }
