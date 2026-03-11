@@ -1,0 +1,717 @@
+{
+  "entities": {
+    "PersonalTrainer": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "PersonalTrainer",
+      "type": "object",
+      "description": "Represents a personal trainer who uses the ElevateFit platform to manage students and workouts.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the PersonalTrainer entity."
+        },
+        "firstName": {
+          "type": "string",
+          "description": "The first name of the personal trainer."
+        },
+        "lastName": {
+          "type": "string",
+          "description": "The last name of the personal trainer."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email address of the personal trainer, used for communication.",
+          "format": "email"
+        },
+        "dateJoined": {
+          "type": "string",
+          "description": "The date and time when the trainer account was created.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "email",
+        "dateJoined"
+      ]
+    },
+    "Student": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Student",
+      "type": "object",
+      "description": "Represents a student client managed by a personal trainer on the ElevateFit platform.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Student entity."
+        },
+        "personalTrainerId": {
+          "type": "string",
+          "description": "Reference to the PersonalTrainer managing this student. (Relationship: PersonalTrainer 1:N Student)"
+        },
+        "firstName": {
+          "type": "string",
+          "description": "The first name of the student."
+        },
+        "lastName": {
+          "type": "string",
+          "description": "The last name of the student."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email address of the student, used for communication.",
+          "format": "email"
+        },
+        "age": {
+          "type": "number",
+          "description": "The age of the student."
+        },
+        "currentWeightKg": {
+          "type": "number",
+          "description": "The current weight of the student in kilograms."
+        },
+        "goals": {
+          "type": "string",
+          "description": "A description of the student's fitness goals."
+        },
+        "dateJoined": {
+          "type": "string",
+          "description": "The date and time when the student profile was created.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "personalTrainerId",
+        "firstName",
+        "lastName",
+        "email",
+        "age",
+        "currentWeightKg",
+        "goals",
+        "dateJoined"
+      ]
+    },
+    "Exercise": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Exercise",
+      "type": "object",
+      "description": "Represents a single exercise available in the ElevateFit exercise database.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Exercise entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the exercise (e.g., 'Bench Press')."
+        },
+        "description": {
+          "type": "string",
+          "description": "A detailed description of how to perform the exercise."
+        },
+        "category": {
+          "type": "string",
+          "description": "The category of the exercise (e.g., 'chest', 'back', 'legs')."
+        },
+        "videoUrl": {
+          "type": "string",
+          "description": "Optional URL to an instructional video for the exercise.",
+          "format": "uri"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Optional URL to an image demonstrating the exercise.",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "category"
+      ]
+    },
+    "WorkoutPlan": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkoutPlan",
+      "type": "object",
+      "description": "Represents a custom training program designed by a trainer for a specific student.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the WorkoutPlan entity."
+        },
+        "personalTrainerId": {
+          "type": "string",
+          "description": "Reference to the PersonalTrainer who created this plan. (Relationship: PersonalTrainer 1:N WorkoutPlan)"
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Reference to the Student to whom this plan is assigned. (Relationship: Student 1:N WorkoutPlan)"
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the workout plan (e.g., 'Strength Cycle - Week 1')."
+        },
+        "description": {
+          "type": "string",
+          "description": "An optional description or objective for the workout plan."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "The date when the workout plan is scheduled to start.",
+          "format": "date"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "The date when the workout plan is scheduled to end.",
+          "format": "date"
+        },
+        "assignedDate": {
+          "type": "string",
+          "description": "The date and time when the workout plan was assigned to the student.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "personalTrainerId",
+        "studentId",
+        "name",
+        "startDate",
+        "endDate",
+        "assignedDate"
+      ]
+    },
+    "WorkoutPlanExercise": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkoutPlanExercise",
+      "type": "object",
+      "description": "Details a specific exercise included in a workout plan, including sets, reps, and rest time.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the WorkoutPlanExercise entity."
+        },
+        "workoutPlanId": {
+          "type": "string",
+          "description": "Reference to the WorkoutPlan this exercise belongs to. (Relationship: WorkoutPlan 1:N WorkoutPlanExercise)"
+        },
+        "exerciseId": {
+          "type": "string",
+          "description": "Reference to the Exercise being performed. (Relationship: Exercise 1:N WorkoutPlanExercise)"
+        },
+        "sets": {
+          "type": "number",
+          "description": "The number of sets prescribed for this exercise."
+        },
+        "reps": {
+          "type": "number",
+          "description": "The number of repetitions prescribed per set for this exercise."
+        },
+        "restTimeSeconds": {
+          "type": "number",
+          "description": "The prescribed rest time in seconds between sets for this exercise."
+        },
+        "orderIndex": {
+          "type": "number",
+          "description": "The sequential order of this exercise within the workout plan."
+        }
+      },
+      "required": [
+        "id",
+        "workoutPlanId",
+        "exerciseId",
+        "sets",
+        "reps",
+        "restTimeSeconds",
+        "orderIndex"
+      ]
+    },
+    "WorkoutSession": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkoutSession",
+      "type": "object",
+      "description": "Represents a specific instance of a student performing a workout, potentially from an assigned plan, on a given date.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the WorkoutSession entity."
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Reference to the Student who performed this workout session. (Relationship: Student 1:N WorkoutSession)"
+        },
+        "workoutPlanId": {
+          "type": "string",
+          "description": "Reference to the WorkoutPlan this session is part of. Can be null if it's an ad-hoc session. (Relationship: WorkoutPlan 1:N WorkoutSession)"
+        },
+        "sessionDate": {
+          "type": "string",
+          "description": "The date and time when the workout session was performed or scheduled.",
+          "format": "date-time"
+        },
+        "notes": {
+          "type": "string",
+          "description": "General notes about the workout session provided by the student or trainer."
+        },
+        "status": {
+          "type": "string",
+          "description": "The status of the workout session (e.g., 'completed', 'skipped', 'in_progress', 'scheduled')."
+        }
+      },
+      "required": [
+        "id",
+        "studentId",
+        "sessionDate",
+        "status"
+      ]
+    },
+    "WorkoutExerciseLog": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkoutExerciseLog",
+      "type": "object",
+      "description": "Records the performance details for a single set of an exercise within a student's workout session.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the WorkoutExerciseLog entity."
+        },
+        "workoutSessionId": {
+          "type": "string",
+          "description": "Reference to the WorkoutSession this exercise log belongs to. (Relationship: WorkoutSession 1:N WorkoutExerciseLog)"
+        },
+        "exerciseId": {
+          "type": "string",
+          "description": "Reference to the Exercise that was performed. (Relationship: Exercise 1:N WorkoutExerciseLog)"
+        },
+        "setNumber": {
+          "type": "number",
+          "description": "The sequential number of the set performed (e.g., 1, 2, 3)."
+        },
+        "repsCompleted": {
+          "type": "number",
+          "description": "The number of repetitions completed for this set."
+        },
+        "weightLiftedKg": {
+          "type": "number",
+          "description": "The weight lifted in kilograms for this set."
+        },
+        "restTimeTakenSeconds": {
+          "type": "number",
+          "description": "The rest time taken in seconds before starting this set (optional, might be per set or per exercise)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes specific to this exercise performance (e.g., 'struggled on last rep')."
+        }
+      },
+      "required": [
+        "id",
+        "workoutSessionId",
+        "exerciseId",
+        "setNumber",
+        "repsCompleted",
+        "weightLiftedKg"
+      ]
+    },
+    "ProgressMetric": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ProgressMetric",
+      "type": "object",
+      "description": "Records various numerical progress metrics for a student over time, such as weight.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the ProgressMetric entity."
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Reference to the Student for whom this metric is recorded. (Relationship: Student 1:N ProgressMetric)"
+        },
+        "dateRecorded": {
+          "type": "string",
+          "description": "The date and time when the metric was recorded.",
+          "format": "date-time"
+        },
+        "metricType": {
+          "type": "string",
+          "description": "The type of metric recorded (e.g., 'weight', 'body_fat_percentage', 'bicep_circumference')."
+        },
+        "value": {
+          "type": "number",
+          "description": "The numerical value of the recorded metric."
+        },
+        "unit": {
+          "type": "string",
+          "description": "The unit of measurement for the metric (e.g., 'kg', '%', 'cm')."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes related to this metric recording."
+        }
+      },
+      "required": [
+        "id",
+        "studentId",
+        "dateRecorded",
+        "metricType",
+        "value",
+        "unit"
+      ]
+    },
+    "ProgressPhoto": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ProgressPhoto",
+      "type": "object",
+      "description": "Records progress photos for a student over time.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the ProgressPhoto entity."
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Reference to the Student for whom this photo was taken. (Relationship: Student 1:N ProgressPhoto)"
+        },
+        "dateTaken": {
+          "type": "string",
+          "description": "The date and time when the photo was taken.",
+          "format": "date-time"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "The URL to the stored progress photo.",
+          "format": "uri"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes related to this progress photo."
+        }
+      },
+      "required": [
+        "id",
+        "studentId",
+        "dateTaken",
+        "imageUrl"
+      ]
+    },
+    "Notification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Notification",
+      "type": "object",
+      "description": "Stores notifications sent to trainers or students within the app.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Notification entity."
+        },
+        "recipientType": {
+          "type": "string",
+          "description": "The type of recipient (e.g., 'PersonalTrainer', 'Student')."
+        },
+        "recipientId": {
+          "type": "string",
+          "description": "Reference to the ID of the recipient (PersonalTrainer or Student). (Relationship: PersonalTrainer/Student 1:N Notification)"
+        },
+        "senderType": {
+          "type": "string",
+          "description": "The type of sender (e.g., 'PersonalTrainer', 'Student', 'System')."
+        },
+        "senderId": {
+          "type": "string",
+          "description": "Reference to the ID of the sender (PersonalTrainer or Student), or null if system-generated. (Relationship: PersonalTrainer/Student 1:N Notification)"
+        },
+        "message": {
+          "type": "string",
+          "description": "The content of the notification message."
+        },
+        "notificationType": {
+          "type": "string",
+          "description": "The category or type of notification (e.g., 'workoutAssigned', 'workoutCompleted', 'generalAlert')."
+        },
+        "isRead": {
+          "type": "boolean",
+          "description": "Indicates whether the recipient has read the notification."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "The date and time when the notification was created.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "recipientType",
+        "recipientId",
+        "senderType",
+        "message",
+        "notificationType",
+        "isRead",
+        "createdAt"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/personalTrainers/{personalTrainerId}",
+        "definition": {
+          "entityName": "PersonalTrainer",
+          "schema": {
+            "$ref": "#/backend/entities/PersonalTrainer"
+          },
+          "description": "Stores profile information for personal trainers. The document ID (`personalTrainerId`) corresponds to the Firebase Authentication UID of the trainer. This collection defines the top-level owner for all nested data.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}",
+        "definition": {
+          "entityName": "Student",
+          "schema": {
+            "$ref": "#/backend/entities/Student"
+          },
+          "description": "Profiles of students managed by a specific personal trainer. Documents include denormalized 'personalTrainerId' for authorization independence and query efficiency.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer who manages this student."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/exercises/{exerciseId}",
+        "definition": {
+          "entityName": "Exercise",
+          "schema": {
+            "$ref": "#/backend/entities/Exercise"
+          },
+          "description": "A global, read-only database of exercises accessible to all authenticated personal trainers.",
+          "params": [
+            {
+              "name": "exerciseId",
+              "description": "The unique ID of the Exercise."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}/workoutPlans/{workoutPlanId}",
+        "definition": {
+          "entityName": "WorkoutPlan",
+          "schema": {
+            "$ref": "#/backend/entities/WorkoutPlan"
+          },
+          "description": "Workout plans created by a specific trainer for a specific student. Documents include denormalized 'personalTrainerId' and 'studentId' for authorization independence and flexible querying.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student to whom this workout plan is assigned."
+            },
+            {
+              "name": "workoutPlanId",
+              "description": "The unique ID of the Workout Plan."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}/workoutPlans/{workoutPlanId}/workoutPlanExercises/{workoutPlanExerciseId}",
+        "definition": {
+          "entityName": "WorkoutPlanExercise",
+          "schema": {
+            "$ref": "#/backend/entities/WorkoutPlanExercise"
+          },
+          "description": "Details for individual exercises within a specific workout plan. Documents include denormalized 'workoutPlanId' and implicitly inherit 'personalTrainerId' and 'studentId' from the path for authorization independence.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student."
+            },
+            {
+              "name": "workoutPlanId",
+              "description": "The unique ID of the parent Workout Plan."
+            },
+            {
+              "name": "workoutPlanExerciseId",
+              "description": "The unique ID of the Workout Plan Exercise entry."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}/workoutSessions/{workoutSessionId}",
+        "definition": {
+          "entityName": "WorkoutSession",
+          "schema": {
+            "$ref": "#/backend/entities/WorkoutSession"
+          },
+          "description": "Records individual workout sessions performed by a student. Documents include denormalized 'studentId' and implicitly inherit 'personalTrainerId' from the path for authorization independence.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student who performed this session."
+            },
+            {
+              "name": "workoutSessionId",
+              "description": "The unique ID of the Workout Session."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}/workoutSessions/{workoutSessionId}/workoutExerciseLogs/{workoutExerciseLogId}",
+        "definition": {
+          "entityName": "WorkoutExerciseLog",
+          "schema": {
+            "$ref": "#/backend/entities/WorkoutExerciseLog"
+          },
+          "description": "Detailed log of exercises performed within a specific workout session. Documents include denormalized 'workoutSessionId' and implicitly inherit 'personalTrainerId' and 'studentId' from the path for authorization independence.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student."
+            },
+            {
+              "name": "workoutSessionId",
+              "description": "The unique ID of the parent Workout Session."
+            },
+            {
+              "name": "workoutExerciseLogId",
+              "description": "The unique ID of the Workout Exercise Log entry."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}/progressMetrics/{progressMetricId}",
+        "definition": {
+          "entityName": "ProgressMetric",
+          "schema": {
+            "$ref": "#/backend/entities/ProgressMetric"
+          },
+          "description": "Records numerical progress metrics for a student over time. Documents include denormalized 'studentId' and implicitly inherit 'personalTrainerId' from the path for authorization independence.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student for whom the metric is recorded."
+            },
+            {
+              "name": "progressMetricId",
+              "description": "The unique ID of the Progress Metric."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}/progressPhotos/{progressPhotoId}",
+        "definition": {
+          "entityName": "ProgressPhoto",
+          "schema": {
+            "$ref": "#/backend/entities/ProgressPhoto"
+          },
+          "description": "Records progress photos for a student over time. Documents include denormalized 'studentId' and implicitly inherit 'personalTrainerId' from the path for authorization independence.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student for whom the photo was taken."
+            },
+            {
+              "name": "progressPhotoId",
+              "description": "The unique ID of the Progress Photo."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/notifications/{notificationId}",
+        "definition": {
+          "entityName": "Notification",
+          "schema": {
+            "$ref": "#/backend/entities/Notification"
+          },
+          "description": "Notifications specifically for a personal trainer. Documents include denormalized 'recipientId' (which is the personalTrainerId) for authorization independence and direct access.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer who is the recipient of this notification."
+            },
+            {
+              "name": "notificationId",
+              "description": "The unique ID of the Notification."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/personalTrainers/{personalTrainerId}/students/{studentId}/notifications/{notificationId}",
+        "definition": {
+          "entityName": "Notification",
+          "schema": {
+            "$ref": "#/backend/entities/Notification"
+          },
+          "description": "Notifications specifically for a student. Documents include denormalized 'recipientId' (which is the studentId) and implicitly inherit 'personalTrainerId' from the path for authorization independence and direct access.",
+          "params": [
+            {
+              "name": "personalTrainerId",
+              "description": "The unique Firebase Authentication UID of the Personal Trainer who manages the student recipient."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique ID of the Student who is the recipient of this notification."
+            },
+            {
+              "name": "notificationId",
+              "description": "The unique ID of the Notification."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The recommended Firestore structure for ElevateFit prioritizes **Authorization Independence** by rigorously applying hierarchical paths and denormalization. All data belonging to a `PersonalTrainer` or one of their `Student`s is nested under the corresponding user's path. This strategy ensures that Firebase Security Rules can authorize requests by simply comparing `request.auth.uid` with the wildcard in the path (`{personalTrainerId}` or `{studentId}`) without resorting to expensive and complex `get()` calls to parent documents. This atomic authorization drastically simplifies rule writing and improves debugging.\n\nFor example, a student's `WorkoutPlan` is located at `/personalTrainers/{personalTrainerId}/students/{studentId}/workoutPlans/{workoutPlanId}`. A security rule can directly check `request.auth.uid == personalTrainerId` or `request.auth.uid == studentId` to grant access. The document itself also includes `personalTrainerId` and `studentId` fields (denormalization) for data integrity and flexible querying (e.g., retrieving all plans for a specific student without knowing the trainer in advance, by using a collection group query on `workoutPlans` and filtering by `studentId`).\n\n**QAPs (Rules are not Filters)** are primarily supported through **Structural Segregation**. Instead of mixing public and private data, or data for different users, all documents within a given collection path share the same security posture. For instance, all documents in `/personalTrainers/{personalTrainerId}/students/{studentId}/workoutPlans` are workout plans for that specific student, managed by that specific trainer. This means that a `list` operation on this path will only return documents that the authenticated user is authorized to see, eliminating the need for client-side filtering and ensuring that all results adhere to security rules. Notifications are also segregated into trainer-specific and student-specific paths to ensure that users only query for and receive notifications relevant to them and authorized by their role and ownership.\n\nThe `exercises` collection is a global, shared resource, accessible by all authenticated trainers, representing a common, homogeneous security posture for that data type.\n\nThis design leverages explicit state modeling (e.g., `status` field for `WorkoutSession`) and radical consistency in naming conventions (e.g., `{personalTrainerId}`, `{studentId}`) to enhance clarity and predictability for both developers and security rule authors."
+  }
+}
