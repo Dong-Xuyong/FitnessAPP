@@ -17,6 +17,7 @@ import {
   DialogTrigger 
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Filter, UserPlus, ChevronRight, Loader2, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBlocking } from "@/firebase";
@@ -38,8 +39,11 @@ export default function StudentsPage() {
     email: "",
     password: "",
     age: "",
-    currentWeightKg: "",
-    goals: ""
+    sex: "male",
+    weightKg: "",
+    heightCm: "",
+    goalType: "muscle_gain",
+    goalWeightKg: ""
   });
 
   const studentsQuery = useMemoFirebase(() => {
@@ -61,7 +65,7 @@ export default function StudentsPage() {
       toast({
         variant: "destructive",
         title: "Missing Information",
-        description: "Please fill in all required fields, including the student's password.",
+        description: "Please fill in all required fields.",
       });
       return;
     }
@@ -71,8 +75,13 @@ export default function StudentsPage() {
       ...newStudent,
       personalTrainerId: user.uid,
       age: Number(newStudent.age) || 0,
-      currentWeightKg: Number(newStudent.currentWeightKg) || 0,
-      dateJoined: new Date().toISOString()
+      weightKg: Number(newStudent.weightKg) || 0,
+      heightCm: Number(newStudent.heightCm) || 0,
+      goalWeightKg: Number(newStudent.goalWeightKg) || 0,
+      joinedAt: new Date().toISOString(),
+      activityStatus: "active",
+      subscriptionStatus: "active",
+      currentStreakDays: 0
     };
 
     const studentsCol = collection(db, "personalTrainers", user.uid, "students");
@@ -86,20 +95,23 @@ export default function StudentsPage() {
           email: "",
           password: "",
           age: "",
-          currentWeightKg: "",
-          goals: ""
+          sex: "male",
+          weightKg: "",
+          heightCm: "",
+          goalType: "muscle_gain",
+          goalWeightKg: ""
         });
         toast({
           title: "Student Added",
           description: `${newStudent.firstName} has been added to your roster.`,
         });
       })
-      .catch((error) => {
+      .catch(() => {
         setIsAdding(false);
         toast({
           variant: "destructive",
           title: "Error",
-          description: "Failed to add student. Please try again.",
+          description: "Failed to add student.",
         });
       });
   };
@@ -130,41 +142,27 @@ export default function StudentsPage() {
                   Add Student
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[425px]">
+              <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
                   <DialogTitle>Add New Student</DialogTitle>
                   <DialogDescription>
-                    Register a student in your database. They can claim their account later using this email and password.
+                    Fill in the student's profile information.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="grid gap-4 py-4">
+                <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto pr-2">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="grid gap-2">
                       <Label htmlFor="firstName">First Name</Label>
-                      <Input 
-                        id="firstName" 
-                        value={newStudent.firstName} 
-                        onChange={(e) => setNewStudent({...newStudent, firstName: e.target.value})} 
-                      />
+                      <Input id="firstName" value={newStudent.firstName} onChange={(e) => setNewStudent({...newStudent, firstName: e.target.value})} />
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="lastName">Last Name</Label>
-                      <Input 
-                        id="lastName" 
-                        value={newStudent.lastName} 
-                        onChange={(e) => setNewStudent({...newStudent, lastName: e.target.value})} 
-                      />
+                      <Input id="lastName" value={newStudent.lastName} onChange={(e) => setNewStudent({...newStudent, lastName: e.target.value})} />
                     </div>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="email">Email (Used for login)</Label>
-                    <Input 
-                      id="email" 
-                      type="email" 
-                      placeholder="student@example.com"
-                      value={newStudent.email} 
-                      onChange={(e) => setNewStudent({...newStudent, email: e.target.value})} 
-                    />
+                    <Label htmlFor="email">Email</Label>
+                    <Input id="email" type="email" value={newStudent.email} onChange={(e) => setNewStudent({...newStudent, email: e.target.value})} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="password">Initial Password</Label>
@@ -174,7 +172,6 @@ export default function StudentsPage() {
                         type={showPassword ? "text" : "password"}
                         value={newStudent.password} 
                         onChange={(e) => setNewStudent({...newStudent, password: e.target.value})} 
-                        className="pr-10"
                       />
                       <Button
                         type="button"
@@ -183,42 +180,56 @@ export default function StudentsPage() {
                         className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                         onClick={() => setShowPassword(!showPassword)}
                       >
-                        {showPassword ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="age">Age</Label>
+                      <Input id="age" type="number" value={newStudent.age} onChange={(e) => setNewStudent({...newStudent, age: e.target.value})} />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Sex</Label>
+                      <Select value={newStudent.sex} onValueChange={(v) => setNewStudent({...newStudent, sex: v})}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="male">Male</SelectItem>
+                          <SelectItem value="female">Female</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="height">Height (cm)</Label>
+                      <Input id="height" type="number" value={newStudent.heightCm} onChange={(e) => setNewStudent({...newStudent, heightCm: e.target.value})} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="age">Age</Label>
-                      <Input 
-                        id="age" 
-                        type="number" 
-                        value={newStudent.age} 
-                        onChange={(e) => setNewStudent({...newStudent, age: e.target.value})} 
-                      />
+                      <Label htmlFor="weight">Current Weight (kg)</Label>
+                      <Input id="weight" type="number" value={newStudent.weightKg} onChange={(e) => setNewStudent({...newStudent, weightKg: e.target.value})} />
                     </div>
                     <div className="grid gap-2">
-                      <Label htmlFor="weight">Weight (kg)</Label>
-                      <Input 
-                        id="weight" 
-                        type="number" 
-                        value={newStudent.currentWeightKg} 
-                        onChange={(e) => setNewStudent({...newStudent, currentWeightKg: e.target.value})} 
-                      />
+                      <Label htmlFor="goalWeight">Goal Weight (kg)</Label>
+                      <Input id="goalWeight" type="number" value={newStudent.goalWeightKg} onChange={(e) => setNewStudent({...newStudent, goalWeightKg: e.target.value})} />
                     </div>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="goals">Fitness Goals</Label>
-                    <Input 
-                      id="goals" 
-                      placeholder="e.g., Build muscle, lose weight"
-                      value={newStudent.goals} 
-                      onChange={(e) => setNewStudent({...newStudent, goals: e.target.value})} 
-                    />
+                    <Label>Goal Type</Label>
+                    <Select value={newStudent.goalType} onValueChange={(v) => setNewStudent({...newStudent, goalType: v})}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="muscle_gain">Muscle Gain</SelectItem>
+                        <SelectItem value="weight_loss">Weight Loss</SelectItem>
+                        <SelectItem value="endurance">Endurance</SelectItem>
+                        <SelectItem value="general">General Fitness</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button onClick={handleAddStudent} disabled={isAdding} className="w-full sm:w-auto">
+                  <Button onClick={handleAddStudent} disabled={isAdding} className="w-full">
                     {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Confirm Registration
                   </Button>
@@ -250,19 +261,19 @@ export default function StudentsPage() {
                         <p className="text-xs text-muted-foreground truncate max-w-[150px]">{student.email}</p>
                       </div>
                       <div className="hidden md:block text-center">
-                        <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Age</p>
-                        <p className="text-sm font-medium">{student.age} yrs</p>
+                        <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Goal</p>
+                        <p className="text-sm font-medium capitalize">{student.goalType?.replace('_', ' ')}</p>
                       </div>
                       <div className="hidden md:block text-center">
                         <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Weight</p>
-                        <p className="text-sm font-medium">{student.currentWeightKg} kg</p>
+                        <p className="text-sm font-medium">{student.weightKg} kg</p>
                       </div>
                       <div className="text-right flex items-center justify-end gap-4">
                         <div className="hidden md:block text-right">
                           <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Status</p>
                           <div className="flex items-center gap-1.5 justify-end">
-                            <div className="w-2 h-2 rounded-full bg-accent" />
-                            <span className="text-sm">Active</span>
+                            <div className={`w-2 h-2 rounded-full ${student.activityStatus === 'active' ? 'bg-accent' : 'bg-muted'}`} />
+                            <span className="text-sm capitalize">{student.activityStatus}</span>
                           </div>
                         </div>
                         <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
@@ -276,7 +287,6 @@ export default function StudentsPage() {
               <div className="text-center py-20 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
                 <UserPlus className="h-10 w-10 mx-auto mb-4 opacity-20" />
                 <p className="text-lg font-medium">No students found</p>
-                <p className="text-sm">Add your first student to start managing their programs.</p>
               </div>
             )}
           </div>

@@ -52,6 +52,10 @@
           "type": "string",
           "description": "Reference to the PersonalTrainer managing this student."
         },
+        "userId": {
+          "type": "string",
+          "description": "The Auth UID of the student if they have registered."
+        },
         "firstName": {
           "type": "string",
           "description": "The first name of the student."
@@ -62,41 +66,67 @@
         },
         "email": {
           "type": "string",
-          "description": "The email address of the student, used for communication.",
+          "description": "The email address of the student.",
           "format": "email"
         },
         "password": {
           "type": "string",
-          "description": "Initial password assigned by the trainer for the student's account."
+          "description": "Initial password assigned by the trainer."
         },
         "age": {
           "type": "number",
           "description": "The age of the student."
         },
-        "currentWeightKg": {
+        "sex": {
+          "type": "string",
+          "enum": ["male", "female", "other"]
+        },
+        "weightKg": {
           "type": "number",
-          "description": "The current weight of the student in kilograms."
+          "description": "Current weight in kilograms."
         },
-        "goals": {
-          "type": "string",
-          "description": "A description of the student's fitness goals."
+        "heightCm": {
+          "type": "number",
+          "description": "Height in centimeters."
         },
-        "dateJoined": {
+        "goalType": {
           "type": "string",
-          "description": "The date and time when the student profile was created.",
+          "description": "Primary goal (e.g., muscle_gain, weight_loss)."
+        },
+        "goalWeightKg": {
+          "type": "number",
+          "description": "Target weight in kilograms."
+        },
+        "activityStatus": {
+          "type": "string",
+          "enum": ["active", "inactive"]
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "currentProgramId": {
+          "type": "string"
+        },
+        "subscriptionStatus": {
+          "type": "string",
+          "enum": ["active", "expired", "pending"]
+        },
+        "currentStreakDays": {
+          "type": "number"
+        },
+        "lastWorkoutAt": {
+          "type": "string",
           "format": "date-time"
         }
       },
       "required": [
-        "id",
         "personalTrainerId",
         "firstName",
         "lastName",
         "email",
         "age",
-        "currentWeightKg",
-        "goals",
-        "dateJoined"
+        "joinedAt"
       ]
     }
   },
