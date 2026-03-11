@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from "next/link";
@@ -14,14 +13,16 @@ import {
   Plus,
   Bell,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  User
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useAuth, useUser } from "@/firebase";
+import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
+import { doc } from "firebase/firestore";
 
 const navItems = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -29,6 +30,7 @@ const navItems = [
   { name: "Programs", href: "/workouts", icon: Dumbbell },
   { name: "Exercises", href: "/exercises", icon: Search },
   { name: "Progress", href: "/progress", icon: LineChart },
+  { name: "My Profile", href: "/profile", icon: User },
 ];
 
 const mockNotifications = [
@@ -41,7 +43,15 @@ export function Navigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const auth = useAuth();
+  const db = useFirestore();
   const { user } = useUser();
+
+  const trainerRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return doc(db, "personalTrainers", user.uid);
+  }, [db, user]);
+
+  const { data: trainer } = useDoc(trainerRef);
 
   const handleSignOut = () => {
     if (!auth) return;
@@ -81,16 +91,18 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="p-4 border-t mt-auto">
-          <div className="flex items-center gap-3 px-4 py-2 mb-4">
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={user?.photoURL || "https://picsum.photos/seed/trainer1/100/100"} />
-              <AvatarFallback>{user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
+          <Link href="/profile" className="flex items-center gap-3 px-4 py-2 mb-4 hover:bg-accent/5 rounded-lg transition-colors group">
+            <Avatar className="h-8 w-8 ring-2 ring-primary/10 group-hover:ring-primary/30 transition-all">
+              <AvatarImage src={trainer?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid}/100/100`} />
+              <AvatarFallback>{trainer?.firstName?.[0] || user?.email?.[0] || "T"}</AvatarFallback>
             </Avatar>
             <div className="overflow-hidden">
-              <p className="text-sm font-medium leading-none truncate">{user?.displayName || "Trainer"}</p>
+              <p className="text-sm font-medium leading-none truncate group-hover:text-primary transition-colors">
+                {trainer ? `${trainer.firstName} ${trainer.lastName}` : "Trainer"}
+              </p>
               <p className="text-xs text-muted-foreground truncate">{user?.email || "Account"}</p>
             </div>
-          </div>
+          </Link>
           <Button 
             variant="ghost" 
             className="w-full justify-start gap-3 text-muted-foreground" 

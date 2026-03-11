@@ -23,6 +23,10 @@
           "description": "The email address of the personal trainer, used for communication.",
           "format": "email"
         },
+        "photoUrl": {
+          "type": "string",
+          "description": "URL to the trainer's profile photo."
+        },
         "dateJoined": {
           "type": "string",
           "description": "The date and time when the trainer account was created.",
