@@ -1,3 +1,28 @@
 {
-  "placeholderImages": []
+  "placeholderImages": [
+    {
+      "id": "hero-gym",
+      "description": "Professional gym background",
+      "imageUrl": "https://picsum.photos/seed/elevatefit1/1200/800",
+      "imageHint": "modern gym"
+    },
+    {
+      "id": "student-1",
+      "description": "Student avatar",
+      "imageUrl": "https://picsum.photos/seed/student1/200/200",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "student-2",
+      "description": "Student avatar",
+      "imageUrl": "https://picsum.photos/seed/student2/200/200",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "trainer-1",
+      "description": "Trainer avatar",
+      "imageUrl": "https://picsum.photos/seed/trainer1/200/200",
+      "imageHint": "fitness coach"
+    }
+  ]
 }
