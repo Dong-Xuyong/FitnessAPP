@@ -23,8 +23,9 @@ service cloud.firestore {
       return request.resource.data[field] == id;
     }
 
-    function isImmutable(field) {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([field]);
+    // Helper to check if a field is being modified in an update
+    function isFieldUnchanged(field) {
+      return !(field in request.resource.data) || request.resource.data[field] == resource.data[field];
     }
 
     // Global Students Directory
@@ -38,7 +39,7 @@ service cloud.firestore {
     match /personalTrainers/{personalTrainerId} {
       allow get, list: if isSignedIn();
       allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId);
-      allow update: if isExistingOwner(personalTrainerId) && isImmutable('id');
+      allow update: if isExistingOwner(personalTrainerId) && isFieldUnchanged('id');
       allow delete: if false;
 
       match /students/{studentId} {
@@ -48,7 +49,8 @@ service cloud.firestore {
         allow create: if (isOwner(personalTrainerId) && matchesPath('trainerId', personalTrainerId)) || 
                       isOwner(studentId);
                       
-        allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && isImmutable('trainerId');
+        // Ensure trainerId cannot be changed once established
+        allow update: if (isOwner(personalTrainerId) || isOwner(studentId)) && isFieldUnchanged('trainerId');
         
         allow delete: if isOwner(personalTrainerId);
 

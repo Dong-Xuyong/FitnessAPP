@@ -84,6 +84,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     if (!studentRef || !user) return;
     setIsSaving(true);
     try {
+      // Ensure trainerId is preserved to satisfy security rules
       updateDocumentNonBlocking(studentRef, {
         trainerId: user.uid,
         coachingNotes,
