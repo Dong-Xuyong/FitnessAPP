@@ -33,12 +33,15 @@ export default function StudentDashboardPage() {
   const { data: coaches, isLoading: isLoadingCoaches } = useCollection(coachesQuery);
 
   useEffect(() => {
-    if (!db || !user?.uid) return;
+    if (!db || !user?.uid) {
+      setIsLoadingProfile(false);
+      return;
+    }
 
     async function findStudentProfile() {
       setIsLoadingProfile(true);
       try {
-        const globalRef = doc(db, "students", user.uid);
+        const globalRef = doc(db, "students", user!.uid);
         const globalSnap = await getDoc(globalRef);
         
         if (globalSnap.exists()) {

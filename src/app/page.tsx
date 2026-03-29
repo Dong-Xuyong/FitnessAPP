@@ -11,14 +11,6 @@ export default function Home() {
           <Dumbbell className="text-primary h-6 w-6" />
           <span className="text-xl font-bold tracking-tight">ElevateFit</span>
         </Link>
-        <nav className="ml-auto flex gap-4">
-          <Button variant="ghost" asChild>
-            <Link href="/login">Login</Link>
-          </Button>
-          <Button asChild>
-            <Link href="/login">Get Started</Link>
-          </Button>
-        </nav>
       </header>
 
       <main className="flex-1">
@@ -32,7 +24,7 @@ export default function Home() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Button size="lg" className="h-12 px-8 text-lg gap-2" asChild>
-                <Link href="/login?role=trainer">
+                <Link href="/dashboard">
                   <UserCircle className="h-5 w-5" /> Trainer Portal
                 </Link>
               </Button>
