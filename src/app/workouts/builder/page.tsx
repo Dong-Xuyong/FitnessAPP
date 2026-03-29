@@ -9,11 +9,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Sparkles, Plus, Trash2, Save, Send, Loader2 } from "lucide-react";
+import { Sparkles, Plus, Trash2, Send, Loader2, Library } from "lucide-react";
 import { aiWorkoutPlanSuggestion } from "@/ai/flows/ai-workout-plan-suggestion";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBlocking } from "@/firebase";
 import { collection } from "firebase/firestore";
+import {
+  buildTrainingProgramSessionsFromBuilder,
+  trainingProgramsRef,
+} from "@/lib/firestore/training-programs";
 
 export default function WorkoutBuilderPage() {
   const { user } = useUser();
@@ -23,6 +27,7 @@ export default function WorkoutBuilderPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isSavingLibrary, setIsSavingLibrary] = useState(false);
   
   const [programTitle, setProgramTitle] = useState("New Workout Plan");
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
@@ -58,6 +63,50 @@ export default function WorkoutBuilderPage() {
     setExercises(newExercises);
   };
 
+  const validateExercisesForSave = (): boolean => {
+    if (exercises.some((ex) => !ex.name)) {
+      toast({
+        variant: "destructive",
+        title: "Incomplete Program",
+        description: "Please ensure all exercises have a name.",
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const handleSaveToLibrary = async () => {
+    if (!db || !user) return;
+    if (!validateExercisesForSave()) return;
+
+    setIsSavingLibrary(true);
+    const now = new Date().toISOString();
+    const programsCol = trainingProgramsRef(db, user.uid);
+
+    try {
+      await addDocumentNonBlocking(programsCol, {
+        trainerId: user.uid,
+        name: programTitle.trim() || "Untitled program",
+        sessions: buildTrainingProgramSessionsFromBuilder(programTitle, exercises),
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      toast({
+        title: "Saved to library",
+        description: `"${programTitle.trim() || "Untitled program"}" is available under Training Programs.`,
+      });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Save failed",
+        description: "Could not save the program. Please check your permissions.",
+      });
+    } finally {
+      setIsSavingLibrary(false);
+    }
+  };
+
   const handleAssignToStudent = async () => {
     if (!db || !user || !selectedStudentId) {
       toast({
@@ -68,14 +117,7 @@ export default function WorkoutBuilderPage() {
       return;
     }
 
-    if (exercises.some(ex => !ex.name)) {
-      toast({
-        variant: "destructive",
-        title: "Incomplete Program",
-        description: "Please ensure all exercises have a name.",
-      });
-      return;
-    }
+    if (!validateExercisesForSave()) return;
 
     setIsAssigning(true);
     const workoutRef = collection(db, "personalTrainers", user.uid, "students", selectedStudentId, "workoutPlans");
@@ -156,7 +198,20 @@ export default function WorkoutBuilderPage() {
             />
             <p className="text-muted-foreground">Drafting program for student assignment.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleSaveToLibrary}
+              disabled={isSavingLibrary || exercises.length === 0}
+            >
+              {isSavingLibrary ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Library className="h-4 w-4" />
+              )}
+              Save to library
+            </Button>
             <Button 
               className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
               onClick={handleAssignToStudent}

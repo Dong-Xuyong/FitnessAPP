@@ -37,6 +37,37 @@ export interface WorkoutProgram {
   createdAt: string;
 }
 
+/** Stored on each exercise row inside a training program session (Firestore). */
+export interface TrainingProgramExercise {
+  exerciseName: string;
+  sets: number;
+  reps: string;
+  restTimeSeconds: number;
+  notes?: string;
+}
+
+/** One schedulable block (e.g. day or session) inside a reusable program template. */
+export interface TrainingProgramSession {
+  order: number;
+  name: string;
+  exercises: TrainingProgramExercise[];
+}
+
+/**
+ * Reusable program template under `personalTrainers/{trainerId}/trainingPrograms/{programId}`.
+ */
+export interface TrainingProgramDocument {
+  trainerId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  level?: FitnessLevel | "all";
+  durationWeeks?: number;
+  sessions: TrainingProgramSession[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProgressLog {
   id: string;
   studentId: string;
