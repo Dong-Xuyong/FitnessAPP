@@ -2,35 +2,39 @@
 "use client";
 
 import { StudentNavigation } from "@/components/StudentNavigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Dumbbell, Calendar, Play, TrendingUp, History, Loader2, ArrowRight, UserCheck, Search, Flame, Target } from "lucide-react";
-import Link from "next/link";
-import { useUser, useFirestore, useCollection, useMemoFirebase, setDocumentNonBlocking } from "@/firebase";
-import { collection, query, where, limit, getDocs, doc, getDoc } from "firebase/firestore";
-import { useEffect, useState } from "react";
-import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target } from "lucide-react";
+import Link from "next/link";
+import { useUser, useFirestore } from "@/firebase";
+import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
+
+function getWeekKey(date: Date): string {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  const day = next.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  next.setDate(next.getDate() + diff);
+  const month = String(next.getMonth() + 1).padStart(2, "0");
+  const dayOfMonth = String(next.getDate()).padStart(2, "0");
+  return `${next.getFullYear()}-${month}-${dayOfMonth}`;
+}
 
 export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
-  const { toast } = useToast();
-  
+
   const [studentData, setStudentData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-  const [isJoining, setIsJoining] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const coachesQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return collection(db, "personalTrainers");
-  }, [db, user]);
-
-  const { data: coaches, isLoading: isLoadingCoaches } = useCollection(coachesQuery);
+  const [weightInput, setWeightInput] = useState("");
+  const [isSavingWeight, setIsSavingWeight] = useState(false);
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [lastSessionDoneAt, setLastSessionDoneAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!db || !user?.uid) {
@@ -43,9 +47,55 @@ export default function StudentDashboardPage() {
       try {
         const globalRef = doc(db, "students", user!.uid);
         const globalSnap = await getDoc(globalRef);
-        
+
         if (globalSnap.exists()) {
-          setStudentData(globalSnap.data());
+          const profileData = globalSnap.data();
+          setStudentData(profileData);
+
+          if (profileData?.trainerId) {
+            const [sessionsSnap, workoutPlansSnap] = await Promise.all([
+              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", user!.uid, "workoutSessions")),
+              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", user!.uid, "workoutPlans")),
+            ]);
+
+            const completedPlanIds = new Set(
+              sessionsSnap.docs
+                .map((sessionDoc) => sessionDoc.data()?.workoutPlanId)
+                .filter((planId): planId is string => typeof planId === "string" && planId.length > 0)
+            );
+
+            const now = Date.now();
+            const plannedWorkouts = workoutPlansSnap.docs
+              .map((planDoc) => ({ id: planDoc.id, data: planDoc.data() as any }))
+              .map((plan) => {
+                const scheduledRaw = plan.data.assignedAt || plan.data.createdAt || "";
+                const timestamp = Date.parse(scheduledRaw);
+                return { id: plan.id, timestamp: Number.isFinite(timestamp) ? timestamp : 0 };
+              })
+              .filter((plan) => plan.timestamp > 0 && plan.timestamp <= now)
+              .sort((a, b) => b.timestamp - a.timestamp);
+
+            let computedStreak = 0;
+            for (const plan of plannedWorkouts) {
+              if (completedPlanIds.has(plan.id)) {
+                computedStreak += 1;
+                continue;
+              }
+              break;
+            }
+            setCurrentStreak(computedStreak);
+
+            const latestSessionTimestamp = sessionsSnap.docs.reduce((latest, sessionDoc) => {
+              const data: any = sessionDoc.data();
+              const timestamp = Date.parse(data?.completedAt || data?.date || data?.createdAt || "");
+              if (!Number.isFinite(timestamp)) return latest;
+              return timestamp > latest ? timestamp : latest;
+            }, 0);
+            setLastSessionDoneAt(latestSessionTimestamp > 0 ? new Date(latestSessionTimestamp).toISOString() : null);
+          } else {
+            setCurrentStreak(0);
+            setLastSessionDoneAt(null);
+          }
         }
       } catch (e) {
         console.error("Error finding student profile", e);
@@ -57,54 +107,6 @@ export default function StudentDashboardPage() {
     findStudentProfile();
   }, [db, user?.uid]);
 
-  const handleJoinCoach = async (trainerId: string, trainerName: string) => {
-    if (!db || !user) return;
-    setIsJoining(trainerId);
-
-    try {
-      const studentId = user.uid;
-      const studentRef = doc(db, "students", studentId);
-      const coachStudentRef = doc(db, "personalTrainers", trainerId, "students", studentId);
-
-      const newStudentData = {
-        userId: user.uid,
-        trainerId: trainerId,
-        name: user.displayName || "New Student",
-        email: user.email,
-        age: studentData?.age || 0,
-        sex: studentData?.sex || "other",
-        weightKg: studentData?.weightKg || 0,
-        heightCm: studentData?.heightCm || 0,
-        goalType: studentData?.goalType || "general",
-        goalWeightKg: studentData?.goalWeightKg || 0,
-        activityStatus: "active",
-        joinedAt: studentData?.joinedAt || new Date().toISOString(),
-        subscriptionStatus: "active",
-        currentStreakDays: studentData?.currentStreakDays || 0,
-        lastWorkoutAt: studentData?.lastWorkoutAt || null,
-        currentProgramId: studentData?.currentProgramId || null
-      };
-
-      await setDocumentNonBlocking(studentRef, newStudentData, { merge: true });
-      await setDocumentNonBlocking(coachStudentRef, newStudentData, { merge: true });
-      
-      toast({
-        title: "Successfully Joined!",
-        description: `You are now linked with Coach ${trainerName}.`,
-      });
-      
-      setStudentData(newStudentData);
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: "Error Joining",
-        description: "Failed to link with coach.",
-      });
-    } finally {
-      setIsJoining(null);
-    }
-  };
-
   if (isUserLoading || isLoadingProfile) {
     return (
       <StudentNavigation>
@@ -115,65 +117,97 @@ export default function StudentDashboardPage() {
     );
   }
 
-  if (!studentData?.trainerId) {
-    const filteredCoaches = coaches?.filter(coach => 
-      `${coach.firstName} ${coach.lastName}`.toLowerCase().includes(searchQuery.toLowerCase())
-    ) || [];
-
+  if (!studentData) {
     return (
       <StudentNavigation>
-        <div className="max-w-4xl mx-auto py-10 space-y-8">
-          <div className="text-center space-y-2">
-            <h2 className="text-3xl font-bold font-headline">Choose your Coach</h2>
-            <p className="text-muted-foreground">Select a personal trainer from our roster.</p>
-          </div>
-          <div className="relative max-w-md mx-auto">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input 
-              placeholder="Search by coach name..." 
-              className="pl-10 h-12"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          {isLoadingCoaches ? (
-            <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
-          ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredCoaches.map((coach) => (
-                <Card key={coach.id}>
-                  <CardHeader className="text-center">
-                    <Avatar className="h-20 w-20 mx-auto mb-2">
-                      <AvatarImage src={`https://picsum.photos/seed/${coach.id}/200/200`} />
-                      <AvatarFallback>{coach.firstName[0]}</AvatarFallback>
-                    </Avatar>
-                    <CardTitle>{coach.firstName} {coach.lastName}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Button 
-                      className="w-full" 
-                      onClick={() => handleJoinCoach(coach.id, coach.lastName)}
-                      disabled={!!isJoining}
-                    >
-                      {isJoining === coach.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
-                      Join Team
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+        <div className="max-w-lg mx-auto py-16 text-center space-y-4">
+          <h2 className="text-2xl font-bold font-headline">Welcome</h2>
+          <p className="text-muted-foreground">
+            We couldn&apos;t find your student profile yet. Complete your profile so your trainer can link your account.
+          </p>
+          <Button asChild>
+            <Link href="/student/profile">Go to profile</Link>
+          </Button>
         </div>
       </StudentNavigation>
     );
   }
 
+  const firstName =
+    studentData.name?.split(" ")[0] || studentData.firstName || "Student";
+
+  const trainingStatusDescription =
+    !studentData.trainerId
+      ? "No trainer linked to your account yet."
+      : studentData.currentProgramId
+        ? "Active Program in Progress"
+        : "Waiting for Coach to assign program";
+
+  const currentWeekKey = getWeekKey(new Date());
+  const lastCheckinWeekKey = studentData?.lastWeeklyWeightCheckInWeekKey || "";
+  const requiresWeeklyWeightCheckIn = lastCheckinWeekKey !== currentWeekKey;
+
+  const handleSubmitWeeklyWeight = async () => {
+    if (!db || !user?.uid || !studentData) return;
+    const parsedWeight = Number(weightInput);
+    if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) return;
+
+    setIsSavingWeight(true);
+    try {
+      const ref = doc(db, "students", user.uid);
+      const trainerStudentRef = studentData?.trainerId
+        ? doc(db, "personalTrainers", studentData.trainerId, "students", user.uid)
+        : null;
+      const now = new Date().toISOString();
+      const existingHistory = Array.isArray(studentData?.weightHistory) ? studentData.weightHistory : [];
+      const nextHistory = [
+        ...existingHistory.filter((entry: any) => entry?.weekKey !== currentWeekKey),
+        {
+          weekKey: currentWeekKey,
+          date: now,
+          weightKg: parsedWeight,
+        },
+      ].sort((a: any, b: any) => Date.parse(a.date || "") - Date.parse(b.date || ""));
+
+      await updateDoc(ref, {
+        weightKg: parsedWeight,
+        lastWeeklyWeightCheckInAt: now,
+        lastWeeklyWeightCheckInWeekKey: currentWeekKey,
+        weightHistory: nextHistory,
+        updatedAt: now,
+      });
+
+      if (trainerStudentRef) {
+        await updateDoc(trainerStudentRef, {
+          weightKg: parsedWeight,
+          updatedAt: now,
+        });
+      }
+
+      setStudentData((prev: any) => ({
+        ...(prev || {}),
+        weightKg: parsedWeight,
+        lastWeeklyWeightCheckInAt: now,
+        lastWeeklyWeightCheckInWeekKey: currentWeekKey,
+        weightHistory: nextHistory,
+        updatedAt: now,
+      }));
+      setWeightInput("");
+    } catch (error) {
+      console.error("Failed to save weekly weight", error);
+    } finally {
+      setIsSavingWeight(false);
+    }
+  };
+
   return (
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">Welcome back, {studentData.name.split(' ')[0]}!</h1>
-          <p className="text-muted-foreground capitalize">Goal: {studentData.goalType?.replace('_', ' ')}</p>
+          <h1 className="text-3xl font-bold font-headline">Welcome back, {firstName}!</h1>
+          <p className="text-muted-foreground capitalize">
+            Goal: {studentData.goalType?.replace("_", " ") || "—"}
+          </p>
         </header>
 
         <div className="grid md:grid-cols-3 gap-6">
@@ -182,7 +216,7 @@ export default function StudentDashboardPage() {
               <div>
                 <CardTitle>Training Status</CardTitle>
                 <CardDescription className="text-primary-foreground/80">
-                  {studentData.currentProgramId ? "Active Program in Progress" : "Waiting for Coach to assign program"}
+                  {trainingStatusDescription}
                 </CardDescription>
               </div>
               <Dumbbell className="h-8 w-8 opacity-20" />
@@ -191,15 +225,24 @@ export default function StudentDashboardPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Current Streak</span>
-                  <span>{studentData.currentStreakDays || 0} Days <Flame className="inline h-4 w-4" /></span>
+                  <span>
+                    {currentStreak} Workouts{" "}
+                    <Flame className="inline h-4 w-4" />
+                  </span>
                 </div>
-                <Progress value={Math.min((studentData.currentStreakDays || 0) * 10, 100)} className="h-2 bg-primary-foreground/20" />
+                <Progress
+                  value={Math.min(currentStreak * 10, 100)}
+                  className="h-2 bg-primary-foreground/20"
+                />
               </div>
               <div className="flex items-center justify-between pt-4">
                 <div className="flex items-center gap-2">
                   <Calendar className="h-4 w-4" />
                   <span className="text-sm">
-                    Last session: {studentData.lastWorkoutAt ? new Date(studentData.lastWorkoutAt).toLocaleDateString() : "No history"}
+                    Last session:{" "}
+                    {lastSessionDoneAt
+                      ? new Date(lastSessionDoneAt).toLocaleDateString()
+                      : "No history"}
                   </span>
                 </div>
                 {studentData.currentProgramId && (
@@ -222,7 +265,9 @@ export default function StudentDashboardPage() {
                 <TrendingUp className="h-5 w-5 text-primary" />
                 <div>
                   <p className="text-sm font-bold">{studentData.weightKg} kg</p>
-                  <p className="text-xs text-muted-foreground">Weight (Goal: {studentData.goalWeightKg} kg)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Weight (Goal: {studentData.goalWeightKg} kg)
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3 p-3 border rounded-lg">
@@ -233,11 +278,45 @@ export default function StudentDashboardPage() {
                 </div>
               </div>
               <div className="text-xs text-center py-2 bg-muted rounded">
-                Status: <span className="font-bold capitalize">{studentData.subscriptionStatus}</span>
+                Status:{" "}
+                <span className="font-bold capitalize">
+                  {studentData.subscriptionStatus || "—"}
+                </span>
               </div>
             </CardContent>
           </Card>
         </div>
+
+        <Dialog open={requiresWeeklyWeightCheckIn} onOpenChange={() => {}}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Weekly Weight Check-in</DialogTitle>
+              <DialogDescription>
+                Start of the week check-in: enter your current weight to continue.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <Label htmlFor="weekly-weight">Current weight (kg)</Label>
+              <Input
+                id="weekly-weight"
+                type="number"
+                step="0.1"
+                min="1"
+                placeholder={studentData?.weightKg ? String(studentData.weightKg) : "e.g. 72.4"}
+                value={weightInput}
+                onChange={(event) => setWeightInput(event.target.value)}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button onClick={handleSubmitWeeklyWeight} disabled={isSavingWeight || !(Number(weightInput) > 0)}>
+                {isSavingWeight ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save Weight
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </StudentNavigation>
   );

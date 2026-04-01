@@ -1,0 +1,1933 @@
+
+"use client";
+
+import { use, useState, useEffect, useMemo } from "react";
+import { Navigation } from "@/components/Navigation";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { 
+  Mail, 
+  Calendar, 
+  Dumbbell, 
+  History, 
+  Award, 
+  Loader2, 
+  User, 
+  Ruler, 
+  Weight, 
+  Target, 
+  Activity, 
+  Zap,
+  Save,
+  TrendingDown,
+  UserPlus,
+  Banknote,
+  Plus,
+  Pencil,
+  Trash2,
+  X,
+  AlertTriangle,
+  Ban,
+  ShieldOff,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  useUser,
+  useFirestore,
+  useDoc,
+  useCollection,
+  useMemoFirebase,
+  updateDocumentNonBlocking,
+  setDocumentNonBlocking,
+} from "@/firebase";
+import { doc, collection, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
+import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { deleteStudent } from "@/lib/firestore/students";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { MilestonesTab } from "@/components/MilestonesTab";
+import type { Milestone } from "@/lib/types";
+
+function getAssignedWorkoutTimestamp(plan: any): number {
+  const rawDate = plan?.assignedAt || plan?.createdAt;
+  if (!rawDate) return 0;
+  const timestamp = Date.parse(rawDate);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function increaseAssignedReps(reps: string, repIncrease: number): string {
+  if (!repIncrease) return reps;
+  const trimmed = reps.trim();
+  const rangeMatch = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
+  if (rangeMatch) {
+    const low = Number(rangeMatch[1]) + repIncrease;
+    const high = Number(rangeMatch[2]) + repIncrease;
+    return `${low}-${high}`;
+  }
+
+  const singleMatch = trimmed.match(/^\d+$/);
+  if (singleMatch) {
+    return String(Number(trimmed) + repIncrease);
+  }
+
+  return reps;
+}
+
+function adjustAssignedExercises(exercises: any[], weightDelta: number, repDelta: number) {
+  return (exercises || []).map((exercise) => ({
+    ...exercise,
+    reps: increaseAssignedReps(exercise.reps || "", repDelta),
+    ...(exercise.targetWeightKg != null
+      ? { targetWeightKg: exercise.targetWeightKg + weightDelta }
+      : {}),
+    ...(Array.isArray(exercise.setDetails)
+      ? {
+          setDetails: exercise.setDetails.map((set: any) => ({
+            ...set,
+            reps: increaseAssignedReps(set.reps || "", repDelta),
+            ...(set.targetWeightKg != null
+              ? { targetWeightKg: set.targetWeightKg + weightDelta }
+              : {}),
+          })),
+        }
+      : {}),
+  }));
+}
+
+// ─── Billing Tab Component ───────────────────────────────────────
+function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studentId: string; toast: any }) {
+  const [monthlyRate, setMonthlyRate] = useState("");
+  const [rate30Min, setRate30Min] = useState("");
+  const [rate60Min, setRate60Min] = useState("");
+  const [sessionDurationMin, setSessionDurationMin] = useState("60");
+  const [sessionsPerWeek, setSessionsPerWeek] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("mbway");
+  const [paymentDetails, setPaymentDetails] = useState("");
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [newPayment, setNewPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid" });
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editingPayment, setEditingPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid" });
+  const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState<string | null>(null);
+
+  const calculatedMonthlyRate = useMemo(() => {
+    const selectedRate =
+      sessionDurationMin === "30" ? Number(rate30Min) || 0 : Number(rate60Min) || 0;
+    const weekly = Number(sessionsPerWeek) || 0;
+    if (selectedRate <= 0 || weekly <= 0) return 0;
+    return Number((selectedRate * weekly * 4).toFixed(2));
+  }, [rate30Min, rate60Min, sessionDurationMin, sessionsPerWeek]);
+
+  // Read billing config from roster doc
+  const billingRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return doc(db, "personalTrainers", user.uid, "students", studentId);
+  }, [db, user, studentId]);
+  const { data: rosterData } = useDoc(billingRef);
+
+  // Read payments
+  const paymentsRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "personalTrainers", user.uid, "students", studentId, "payments");
+  }, [db, user, studentId]);
+  const { data: payments } = useCollection(paymentsRef);
+
+  const sortedPayments = (payments || []).sort(
+    (a: any, b: any) => (b.period || "").localeCompare(a.period || "")
+  );
+
+  // Load existing config
+  useEffect(() => {
+    if (rosterData) {
+      setMonthlyRate(String((rosterData as any).monthlyRate || ""));
+      setRate30Min(String((rosterData as any).rate30Min || ""));
+      setRate60Min(String((rosterData as any).rate60Min || ""));
+      setSessionDurationMin(String((rosterData as any).sessionDurationMin || 60));
+      setSessionsPerWeek(String((rosterData as any).sessionsPerWeek || ""));
+      setPaymentMethod((rosterData as any).paymentMethod || "mbway");
+      setPaymentDetails((rosterData as any).paymentDetails || "");
+    }
+  }, [rosterData]);
+
+  useEffect(() => {
+    if (calculatedMonthlyRate > 0) {
+      setMonthlyRate(String(calculatedMonthlyRate));
+    }
+  }, [calculatedMonthlyRate]);
+
+  const handleSaveBillingConfig = () => {
+    if (!db || !user) return;
+    const safeDuration = sessionDurationMin === "30" ? 30 : 60;
+    const safeSessions = Math.max(0, Number(sessionsPerWeek) || 0);
+    const safeRate30 = Math.max(0, Number(rate30Min) || 0);
+    const safeRate60 = Math.max(0, Number(rate60Min) || 0);
+    updateDocumentNonBlocking(doc(db, "personalTrainers", user.uid, "students", studentId), {
+      billingModel: "session_based",
+      sessionDurationMin: safeDuration,
+      sessionsPerWeek: safeSessions,
+      rate30Min: safeRate30,
+      rate60Min: safeRate60,
+      monthlyRate: calculatedMonthlyRate || Number(monthlyRate) || 0,
+      paymentMethod,
+      paymentDetails,
+      billingStatus: "active",
+    });
+    toast({ title: "Billing settings saved" });
+  };
+
+  const handleAddPayment = async () => {
+    if (!db || !user || !newPayment.period) return;
+    try {
+      await addDoc(collection(db, "personalTrainers", user.uid, "students", studentId, "payments"), {
+        period: newPayment.period,
+        amount: Number(newPayment.amount) || Number(monthlyRate) || 0,
+        method: newPayment.method,
+        status: newPayment.status,
+        paidAt: newPayment.status === "paid" ? new Date().toISOString() : null,
+        createdAt: new Date().toISOString(),
+      });
+      toast({ title: "Payment recorded" });
+      setShowAddPayment(false);
+      setNewPayment({ period: "", amount: "", method: "mbway", status: "paid" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const startEditPayment = (payment: any) => {
+    setEditingPaymentId(payment.id);
+    setEditingPayment({
+      period: String(payment.period || ""),
+      amount: String(payment.amount || ""),
+      method: String(payment.method || "mbway"),
+      status: String(payment.status || "paid"),
+    });
+  };
+
+  const handleUpdatePayment = async (paymentId: string) => {
+    if (!db || !user) return;
+    try {
+      const paymentRef = doc(db, "personalTrainers", user.uid, "students", studentId, "payments", paymentId);
+      await updateDoc(paymentRef, {
+        period: editingPayment.period,
+        amount: Number(editingPayment.amount) || 0,
+        method: editingPayment.method,
+        status: editingPayment.status,
+        paidAt: editingPayment.status === "paid" ? new Date().toISOString() : null,
+      });
+      toast({ title: "Payment updated" });
+      setEditingPaymentId(null);
+      setEditingPayment({ period: "", amount: "", method: "mbway", status: "paid" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message || "Failed to update payment.", variant: "destructive" });
+    }
+  };
+
+  const handleDeletePayment = async (paymentId: string) => {
+    if (!db || !user) return;
+    try {
+      await deleteDoc(doc(db, "personalTrainers", user.uid, "students", studentId, "payments", paymentId));
+      toast({ title: "Payment deleted" });
+      if (editingPaymentId === paymentId) {
+        setEditingPaymentId(null);
+      }
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message || "Failed to delete payment.", variant: "destructive" });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Billing Config */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Banknote className="h-4 w-4 text-primary" /> Billing Settings
+          </CardTitle>
+          <CardDescription>Calculated from 30/60 min session price x times per week</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="space-y-2">
+              <Label>30 min price (€)</Label>
+              <Input
+                type="number"
+                placeholder="e.g. 20"
+                value={rate30Min}
+                onChange={(e) => setRate30Min(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>60 min price (€)</Label>
+              <Input
+                type="number"
+                placeholder="e.g. 35"
+                value={rate60Min}
+                onChange={(e) => setRate60Min(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Session Duration</Label>
+              <Select value={sessionDurationMin} onValueChange={setSessionDurationMin}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">30 min</SelectItem>
+                  <SelectItem value="60">60 min</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Times per week</Label>
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="e.g. 3"
+                value={sessionsPerWeek}
+                onChange={(e) => setSessionsPerWeek(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Monthly Rate (€)</Label>
+              <Input
+                type="number"
+                placeholder="Auto-calculated"
+                value={calculatedMonthlyRate > 0 ? String(calculatedMonthlyRate) : monthlyRate}
+                readOnly
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Payment Method</Label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mbway">MB WAY</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Payment Instructions (visible to student)</Label>
+            <Textarea
+              placeholder="e.g. MB WAY: 912 345 678&#10;IBAN: PT50 0001 2345 6789 0000 0001 2"
+              value={paymentDetails}
+              onChange={(e) => setPaymentDetails(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <Button onClick={handleSaveBillingConfig} className="gap-2">
+            <Save className="h-4 w-4" /> Save Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Payment History */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Payment History</CardTitle>
+              <CardDescription>Record payments from this student</CardDescription>
+            </div>
+            <Button size="sm" className="gap-1" onClick={() => {
+              if (!showAddPayment) {
+                const now = new Date();
+                const currentPeriod = now.toLocaleString("default", { month: "long", year: "numeric" });
+                const billingAmount = monthlyRate || "";
+                setNewPayment({ period: currentPeriod, amount: billingAmount, method: paymentMethod, status: "paid" });
+              }
+              setShowAddPayment(!showAddPayment);
+            }}>
+              <Plus className="h-4 w-4" /> Record Payment
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {showAddPayment && (
+            <div className="p-4 border rounded-lg bg-muted/50 space-y-3">
+              <p className="text-sm font-semibold">New Payment</p>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Period</Label>
+                  <Input
+                    placeholder="e.g. March 2026"
+                    value={newPayment.period}
+                    onChange={(e) => setNewPayment({ ...newPayment, period: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Amount (€)</Label>
+                  <Input
+                    type="number"
+                    placeholder={monthlyRate || "0"}
+                    value={newPayment.amount}
+                    onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Method</Label>
+                  <Select value={newPayment.method} onValueChange={(v) => setNewPayment({ ...newPayment, method: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mbway">MB WAY</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Status</Label>
+                  <Select value={newPayment.status} onValueChange={(v) => setNewPayment({ ...newPayment, status: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="paid">Paid</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleAddPayment}>Save Payment</Button>
+                <Button size="sm" variant="outline" onClick={() => setShowAddPayment(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {sortedPayments.length > 0 ? (
+            <div className="space-y-2">
+              {sortedPayments.map((p: any) => (
+                <div key={p.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  {editingPaymentId === p.id ? (
+                    <div className="w-full space-y-3">
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Period</Label>
+                          <Input
+                            value={editingPayment.period}
+                            onChange={(e) => setEditingPayment({ ...editingPayment, period: e.target.value })}
+                            placeholder="e.g. April 2026"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Amount (€)</Label>
+                          <Input
+                            type="number"
+                            value={editingPayment.amount}
+                            onChange={(e) => setEditingPayment({ ...editingPayment, amount: e.target.value })}
+                            placeholder="0"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Method</Label>
+                          <Select
+                            value={editingPayment.method}
+                            onValueChange={(v) => setEditingPayment({ ...editingPayment, method: v })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="mbway">MB WAY</SelectItem>
+                              <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                              <SelectItem value="cash">Cash</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Status</Label>
+                          <Select
+                            value={editingPayment.status}
+                            onValueChange={(v) => setEditingPayment({ ...editingPayment, status: v })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="paid">Paid</SelectItem>
+                              <SelectItem value="pending">Pending</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <Button size="sm" variant="outline" onClick={() => setEditingPaymentId(null)}>
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={() => handleUpdatePayment(p.id)}>
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <Banknote className="h-4 w-4 text-primary shrink-0" />
+                        <div>
+                          <p className="text-sm font-medium">{p.period}</p>
+                          <p className="text-xs text-muted-foreground capitalize">
+                            {p.method === "mbway" ? "MB WAY" : p.method === "bank_transfer" ? "Bank Transfer" : (p.method || "—")}
+                            {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString()}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold">€{p.amount}</span>
+                        <Badge
+                          variant={p.status === "paid" ? "default" : "outline"}
+                          className={p.status === "paid" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}
+                        >
+                          {p.status}
+                        </Badge>
+                        <Button size="sm" variant="outline" onClick={() => startEditPayment(p)}>
+                          Edit
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => setConfirmDeletePaymentId(p.id)}>
+                          Delete
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-muted-foreground">
+              <Banknote className="h-8 w-8 mx-auto mb-2 opacity-20" />
+              <p className="text-sm">No payments recorded yet.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Payment Delete Confirmation */}
+      <AlertDialog open={!!confirmDeletePaymentId} onOpenChange={(open) => { if (!open) setConfirmDeletePaymentId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" /> Delete Payment
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this payment record? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => { if (confirmDeletePaymentId) { handleDeletePayment(confirmDeletePaymentId); setConfirmDeletePaymentId(null); } }}
+            >
+              <Trash2 className="h-4 w-4 mr-2" /> Delete Payment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function normalizePortalStudent(global: Record<string, unknown>, studentId: string) {
+  const name = String(global.name || "");
+  const parts = name.trim().split(/\s+/);
+  const first = parts[0] || "";
+  const last = parts.slice(1).join(" ") || "";
+  return {
+    ...global,
+    id: studentId,
+    firstName: (global.firstName as string) ?? first,
+    lastName: (global.lastName as string) ?? last,
+    activityStatus: (global.activityStatus as string) || "active",
+    subscriptionStatus: (global.subscriptionStatus as string) || "pending",
+    goalType: (global.goalType as string) || "general",
+  };
+}
+
+function computeEpleyOneRm(weight: number, reps: number): number {
+  if (!Number.isFinite(weight) || !Number.isFinite(reps) || weight <= 0 || reps <= 0) return 0;
+  return weight * (1 + reps / 30);
+}
+
+export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const unwrappedParams = use(params);
+  const { id } = unwrappedParams;
+  const { user } = useUser();
+  const db = useFirestore();
+  const { toast } = useToast();
+  const router = useRouter();
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [isAddingToRoster, setIsAddingToRoster] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showBlockConfirm, setShowBlockConfirm] = useState(false);
+  const [isBlocking, setIsBlocking] = useState(false);
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [confirmDeletePlanId, setConfirmDeletePlanId] = useState<string | null>(null);
+  const [coachingNotes, setCoachingNotes] = useState("");
+  const [editStats, setEditStats] = useState({
+    goalWeightKg: "",
+    goalType: "",
+  });
+  const [editingWorkoutPlan, setEditingWorkoutPlan] = useState<any>(null);
+  const [editingWorkoutPlanValues, setEditingWorkoutPlanValues] = useState({
+    title: "",
+    assignedDate: "",
+    scheduledDayOfWeek: "monday",
+    weightIncreaseKg: "0",
+    repIncrease: "0",
+  });
+  const [isSavingWorkoutPlan, setIsSavingWorkoutPlan] = useState(false);
+  const [deletingWorkoutPlanId, setDeletingWorkoutPlanId] = useState<string | null>(null);
+  const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
+
+  const studentRef = useMemoFirebase(() => {
+    if (!db || !user || !id) return null;
+    return doc(db, "personalTrainers", user.uid, "students", id);
+  }, [db, user, id]);
+
+  const globalStudentRef = useMemoFirebase(() => {
+    if (!db || !id) return null;
+    return doc(db, "students", id);
+  }, [db, id]);
+
+  const { data: rosterStudent, isLoading: rosterLoading } = useDoc(studentRef);
+  const { data: globalStudent, isLoading: globalLoading } = useDoc(globalStudentRef);
+
+  // Query all roster students to find matching doc (may have email-based ID)
+  const allRosterQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "personalTrainers", user.uid, "students");
+  }, [db, user]);
+  const { data: allRoster } = useCollection(allRosterQuery);
+
+  const studentEmail = (globalStudent as any)?.email;
+  const altRosterDoc = allRoster?.find(
+    (s: any) => s.id === id || s.userId === id || (studentEmail && s.email === studentEmail)
+  );
+  const effectiveRoster = rosterStudent || altRosterDoc || null;
+
+  // workoutPlans are always stored under the Auth UID (which is the URL param `id`)
+  const workoutPlansRef = useMemoFirebase(() => {
+    if (!db || !user || !id) return null;
+    return collection(db, "personalTrainers", user.uid, "students", id, "workoutPlans");
+  }, [db, user, id]);
+  const { data: workoutPlans } = useCollection(workoutPlansRef);
+
+  const workoutSessionsRef = useMemoFirebase(() => {
+    if (!db || !user || !id) return null;
+    return collection(db, "personalTrainers", user.uid, "students", id, "workoutSessions");
+  }, [db, user, id]);
+  const { data: workoutSessions } = useCollection(workoutSessionsRef);
+
+  const sortedWorkoutPlans = useMemo(() => {
+    const completedPlanIds = new Set(
+      (workoutSessions || [])
+        .filter((session: any) => session.completedAt && session.workoutPlanId)
+        .map((session: any) => session.workoutPlanId)
+    );
+
+    return [...(workoutPlans || [])]
+      .filter(
+        (plan: any) =>
+          !plan.completedAt &&
+          plan.status !== "completed" &&
+          !completedPlanIds.has(plan.id)
+      )
+      .sort((a: any, b: any) => getAssignedWorkoutTimestamp(a) - getAssignedWorkoutTimestamp(b));
+  }, [workoutPlans, workoutSessions]);
+
+  const currentWorkoutStreak = useMemo(() => {
+    const completedPlanIds = new Set(
+      (workoutSessions || [])
+        .filter((session: any) => session.completedAt && session.workoutPlanId)
+        .map((session: any) => session.workoutPlanId)
+    );
+
+    const now = Date.now();
+    const plannedWorkouts = (workoutPlans || [])
+      .map((plan: any) => {
+        const scheduledRaw = plan.assignedAt || plan.createdAt || "";
+        const timestamp = Date.parse(scheduledRaw);
+        return {
+          id: plan.id,
+          timestamp: Number.isFinite(timestamp) ? timestamp : 0,
+        };
+      })
+      .filter((plan: any) => plan.timestamp > 0 && plan.timestamp <= now)
+      .sort((a: any, b: any) => b.timestamp - a.timestamp);
+
+    let streak = 0;
+    for (const plan of plannedWorkouts) {
+      if (completedPlanIds.has(plan.id)) {
+        streak += 1;
+        continue;
+      }
+      break;
+    }
+
+    return streak;
+  }, [workoutPlans, workoutSessions]);
+
+  const sortedSessions = (workoutSessions || []).sort(
+    (a: any, b: any) => (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
+  );
+
+  const weightChartData = useMemo(() => {
+    const global = (globalStudent || {}) as any;
+    const history = Array.isArray(global.weightHistory) ? global.weightHistory : [];
+
+    const normalized = history
+      .map((entry: any) => {
+        const dateValue = entry?.date || entry?.checkedAt || "";
+        const weightValue = Number(entry?.weightKg ?? entry?.weight);
+        const timestamp = Date.parse(dateValue);
+        return {
+          timestamp,
+          weight: Number.isFinite(weightValue) ? weightValue : NaN,
+        };
+      })
+      .filter((entry: any) => Number.isFinite(entry.timestamp) && Number.isFinite(entry.weight))
+      .sort((a: any, b: any) => a.timestamp - b.timestamp)
+      .map((entry: any) => ({
+        date: new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        weight: Number(entry.weight.toFixed(1)),
+      }));
+
+    if (normalized.length > 0) return normalized;
+
+    const currentWeight = Number(global.weightKg);
+    if (Number.isFinite(currentWeight) && currentWeight > 0) {
+      return [
+        {
+          date: new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+          weight: Number(currentWeight.toFixed(1)),
+        },
+      ];
+    }
+
+    return [];
+  }, [globalStudent]);
+
+  const strengthByExercise = useMemo(() => {
+    const exerciseMap = new Map<string, Map<string, { timestamp: number; date: string; oneRm: number }>>();
+
+    (workoutSessions || []).forEach((session: any) => {
+      const ts = Date.parse(session.completedAt || session.startedAt || session.date || "");
+      if (!Number.isFinite(ts)) return;
+
+      const dayBucketKey = new Date(ts).toISOString().slice(0, 10);
+      const dayLabel = new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+      (session.exercises || []).forEach((exercise: any) => {
+        const exerciseName = String(exercise.exerciseName || exercise.name || "").trim();
+        if (!exerciseName) return;
+        let bestOneRm = 0;
+
+        if (Array.isArray(exercise.sets)) {
+          exercise.sets.forEach((set: any) => {
+            if (set?.completed === false) return;
+            const oneRm = computeEpleyOneRm(Number(set?.weight) || 0, Number(set?.reps) || 0);
+            if (oneRm > bestOneRm) bestOneRm = oneRm;
+          });
+        } else {
+          bestOneRm = computeEpleyOneRm(Number(exercise?.weight) || 0, Number(exercise?.reps) || 0);
+        }
+
+        if (bestOneRm <= 0) return;
+
+        const byDate =
+          exerciseMap.get(exerciseName) ||
+          new Map<string, { timestamp: number; date: string; oneRm: number }>();
+        const existing = byDate.get(dayBucketKey);
+        const roundedOneRm = Number(bestOneRm.toFixed(1));
+
+        if (!existing || roundedOneRm > existing.oneRm) {
+          byDate.set(dayBucketKey, {
+            timestamp: ts,
+            date: dayLabel,
+            oneRm: roundedOneRm,
+          });
+        }
+
+        exerciseMap.set(exerciseName, byDate);
+      });
+    });
+
+    const result: Record<string, Array<{ date: string; oneRm: number }>> = {};
+    for (const [name, byDate] of exerciseMap.entries()) {
+      result[name] = Array.from(byDate.values())
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .map((point) => ({ date: point.date, oneRm: point.oneRm }));
+    }
+
+    return result;
+  }, [workoutSessions]);
+
+  const strengthExerciseOptions = useMemo(
+    () => Object.keys(strengthByExercise).sort((a, b) => a.localeCompare(b)),
+    [strengthByExercise]
+  );
+
+  const selectedStrengthData = useMemo(
+    () => (selectedStrengthExercise ? strengthByExercise[selectedStrengthExercise] || [] : []),
+    [selectedStrengthExercise, strengthByExercise]
+  );
+
+  useEffect(() => {
+    if (strengthExerciseOptions.length === 0) {
+      setSelectedStrengthExercise("");
+      return;
+    }
+
+    if (!strengthExerciseOptions.includes(selectedStrengthExercise)) {
+      setSelectedStrengthExercise(strengthExerciseOptions[0]);
+    }
+  }, [strengthExerciseOptions, selectedStrengthExercise]);
+
+  const lastActiveAt = useMemo(() => {
+    let latest = 0;
+    for (const session of workoutSessions || []) {
+      const raw = session.completedAt || session.startedAt || session.date || "";
+      const ts = Date.parse(raw);
+      if (Number.isFinite(ts) && ts > latest) latest = ts;
+    }
+    return latest > 0 ? latest : null;
+  }, [workoutSessions]);
+
+  const [editSession, setEditSession] = useState<any>(null);
+  const [editExercises, setEditExercises] = useState<any[]>([]);
+
+  const milestonesRef = useMemoFirebase(() => {
+    if (!db || !user || !id) return null;
+    return query(
+      collection(db, "milestones"),
+      where("trainerId", "==", user.uid),
+      where("studentId", "==", id)
+    );
+  }, [db, user, id]);
+  const { data: allMilestones, isLoading: milestonesLoading } = useCollection(milestonesRef);
+
+  const studentMilestones: Milestone[] = (allMilestones || [])
+    .filter((m: any) => m.studentId === id)
+    .sort((a: any, b: any) => {
+      const statusOrder: Record<string, number> = { active: 0, paused: 1, missed: 2, completed: 3 };
+      const aStatus = statusOrder[a.status] ?? 999;
+      const bStatus = statusOrder[b.status] ?? 999;
+      if (aStatus !== bStatus) return aStatus - bStatus;
+      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    });
+
+  const openEditSession = (session: any) => {
+    setEditSession(session);
+    setEditExercises(
+      (session.exercises || []).map((ex: any) => ({
+        name: ex.exerciseName || ex.name || "",
+        sets: Array.isArray(ex.sets)
+          ? ex.sets.map((s: any) => ({ weight: s.weight ?? 0, reps: s.reps ?? 0 }))
+          : Array.from({ length: Number(ex.sets) || 1 }, () => ({ weight: Number(ex.weight) || 0, reps: Number(ex.reps) || 0 })),
+      }))
+    );
+  };
+
+  const handleSaveSession = async () => {
+    if (!editSession || !db || !user) return;
+    const ref = doc(db, "personalTrainers", user.uid, "students", id, "workoutSessions", editSession.id);
+    await updateDoc(ref, {
+      exercises: editExercises.map((ex) => ({
+        exerciseName: ex.name,
+        sets: ex.sets,
+      })),
+    });
+    toast({ title: "Session updated" });
+    setEditSession(null);
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!db || !user) return;
+    await deleteDoc(doc(db, "personalTrainers", user.uid, "students", id, "workoutSessions", sessionId));
+    toast({ title: "Session deleted" });
+    setEditSession(null);
+  };
+
+  const openEditWorkoutPlan = (plan: any) => {
+    setEditingWorkoutPlan(plan);
+    setEditingWorkoutPlanValues({
+      title: plan.title || "",
+      assignedDate: typeof plan.assignedAt === "string" ? plan.assignedAt.split("T")[0] : "",
+      scheduledDayOfWeek: plan.scheduledDayOfWeek || "monday",
+      weightIncreaseKg: String(typeof plan.weightIncreaseKg === "number" ? plan.weightIncreaseKg : 0),
+      repIncrease: String(typeof plan.repIncrease === "number" ? plan.repIncrease : 0),
+    });
+  };
+
+  const handleSaveWorkoutPlan = async () => {
+    if (!db || !user || !editingWorkoutPlan) return;
+
+    const nextWeightIncrease = Number(editingWorkoutPlanValues.weightIncreaseKg) || 0;
+    const nextRepIncrease = Math.max(0, Math.round(Number(editingWorkoutPlanValues.repIncrease) || 0));
+    const currentWeightIncrease = typeof editingWorkoutPlan.weightIncreaseKg === "number" ? editingWorkoutPlan.weightIncreaseKg : 0;
+    const currentRepIncrease = typeof editingWorkoutPlan.repIncrease === "number" ? editingWorkoutPlan.repIncrease : 0;
+    const weightDelta = nextWeightIncrease - currentWeightIncrease;
+    const repDelta = nextRepIncrease - currentRepIncrease;
+
+    setIsSavingWorkoutPlan(true);
+    try {
+      await updateDoc(
+        doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", editingWorkoutPlan.id),
+        {
+          title: editingWorkoutPlanValues.title.trim() || editingWorkoutPlan.title || "Untitled",
+          assignedAt: editingWorkoutPlanValues.assignedDate
+            ? new Date(editingWorkoutPlanValues.assignedDate).toISOString()
+            : editingWorkoutPlan.assignedAt || new Date().toISOString(),
+          scheduledDayOfWeek: editingWorkoutPlanValues.scheduledDayOfWeek,
+          weightIncreaseKg: nextWeightIncrease,
+          repIncrease: nextRepIncrease,
+          exercises: adjustAssignedExercises(editingWorkoutPlan.exercises || [], weightDelta, repDelta),
+        }
+      );
+
+      toast({ title: "Assigned workout updated" });
+      setEditingWorkoutPlan(null);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Update failed",
+        description: error?.message || "Could not update the assigned workout.",
+      });
+    } finally {
+      setIsSavingWorkoutPlan(false);
+    }
+  };
+
+  const handleDeleteWorkoutPlan = async (planId: string) => {
+    if (!db || !user) return;
+
+    setDeletingWorkoutPlanId(planId);
+    try {
+      await deleteDoc(doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", planId));
+      toast({ title: "Assigned workout removed" });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Remove failed",
+        description: error?.message || "Could not remove the assigned workout.",
+      });
+    } finally {
+      setDeletingWorkoutPlanId(null);
+    }
+  };
+
+  const portalOnly = !effectiveRoster && !!globalStudent;
+  const isLoading = rosterLoading || (!rosterStudent && globalLoading);
+  const student = effectiveRoster
+    ? effectiveRoster
+    : globalStudent
+      ? normalizePortalStudent(globalStudent as Record<string, unknown>, id)
+      : null;
+
+  useEffect(() => {
+    if (effectiveRoster) {
+      setCoachingNotes(effectiveRoster.coachingNotes || "");
+      setEditStats({
+        goalWeightKg: effectiveRoster.goalWeightKg?.toString() || "",
+        goalType: effectiveRoster.goalType || "",
+      });
+    } else if (globalStudent) {
+      setCoachingNotes("");
+      setEditStats({
+        goalWeightKg: globalStudent.goalWeightKg?.toString() || "",
+        goalType: (globalStudent.goalType as string) || "",
+      });
+    }
+  }, [effectiveRoster, globalStudent]);
+
+  const handleAddToRoster = () => {
+    if (!db || !user || !globalStudent || !id) return;
+    setIsAddingToRoster(true);
+    const g = globalStudent as Record<string, unknown>;
+    const normalized = normalizePortalStudent(g, id);
+    const subRef = doc(db, "personalTrainers", user.uid, "students", id);
+    const globalRef = doc(db, "students", id);
+    try {
+      setDocumentNonBlocking(
+        subRef,
+        {
+          userId: id,
+          trainerId: user.uid,
+          name:
+            (g.name as string) ||
+            `${String(normalized.firstName)} ${String(normalized.lastName)}`.trim(),
+          firstName: normalized.firstName,
+          lastName: normalized.lastName,
+          email: (g.email as string) || "",
+          age: Number(g.age) || 0,
+          sex: (g.sex as string) || "other",
+          weightKg: Number(g.weightKg) || 0,
+          heightCm: Number(g.heightCm) || 0,
+          goalType: (g.goalType as string) || "general",
+          goalWeightKg: Number(g.goalWeightKg) || 0,
+          activityStatus: (g.activityStatus as string) || "active",
+          joinedAt: (g.joinedAt as string) || new Date().toISOString(),
+          subscriptionStatus: (g.subscriptionStatus as string) || "pending",
+          currentStreakDays: Number(g.currentStreakDays) || 0,
+          lastWorkoutAt: g.lastWorkoutAt ?? null,
+          currentProgramId: g.currentProgramId ?? null,
+          photoUrl: (g.photoUrl as string) || "",
+        },
+        { merge: true }
+      );
+      // Also link the trainerId on the global student doc so the student can find their workouts
+      setDocumentNonBlocking(globalRef, { trainerId: user.uid }, { merge: true });
+      toast({
+        title: "Added to your roster",
+        description: "You can now assign programs and add coaching notes.",
+      });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Could not add student",
+        description: "Check Firestore permissions and try again.",
+      });
+    } finally {
+      setIsAddingToRoster(false);
+    }
+  };
+
+  const handleUpdateStudent = async () => {
+    if (portalOnly || !studentRef || !user) return;
+    setIsSaving(true);
+    try {
+      // Ensure trainerId is preserved to satisfy security rules
+      updateDocumentNonBlocking(studentRef, {
+        trainerId: user.uid,
+        coachingNotes,
+        goalWeightKg: Number(editStats.goalWeightKg) || 0,
+        goalType: editStats.goalType,
+      });
+      toast({
+        title: "Profile Updated",
+        description: "Coaching data and goals have been saved.",
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update coaching info.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteStudent = async () => {
+    if (!db || !user || !student) return;
+    setIsDeleting(true);
+    try {
+      const result = await deleteStudent(db, user.uid, id);
+      if (result.success) {
+        toast({
+          title: "Student Deleted",
+          description: result.message,
+        });
+        router.push("/students");
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: result.message,
+        });
+      }
+    } catch (e: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: e.message || "Failed to delete student.",
+      });
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  const isStudentBlocked = student ? (student as any).blocked === true : false;
+
+  const handleToggleBlock = async () => {
+    if (!db || !user || !student) return;
+    setIsBlocking(true);
+    const newBlocked = !isStudentBlocked;
+    try {
+      updateDocumentNonBlocking(
+        doc(db, "personalTrainers", user.uid, "students", id),
+        { blocked: newBlocked }
+      );
+      // Also update global student doc so the student app can check
+      setDocumentNonBlocking(
+        doc(db, "students", id),
+        { blocked: newBlocked },
+        { merge: true }
+      );
+      toast({
+        title: newBlocked ? "Student Blocked" : "Student Unblocked",
+        description: newBlocked
+          ? "This student can no longer access their program."
+          : "This student can now access their program again.",
+      });
+    } catch (e: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: e.message || "Failed to update block status.",
+      });
+    } finally {
+      setIsBlocking(false);
+      setShowBlockConfirm(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Navigation>
+        <div className="flex items-center justify-center h-[60vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </Navigation>
+    );
+  }
+
+  if (!student) {
+    return (
+      <Navigation>
+        <div className="text-center py-20">
+          <h2 className="text-2xl font-bold">Student not found</h2>
+          <Button className="mt-4" asChild>
+            <Link href="/students">Back to Roster</Link>
+          </Button>
+        </div>
+      </Navigation>
+    );
+  }
+
+  return (
+    <Navigation>
+      <div className="space-y-8">
+        <header className="flex flex-col md:flex-row gap-4 md:gap-6 items-start justify-between bg-card p-4 md:p-6 rounded-xl border shadow-sm">
+          <div className="flex gap-4 md:gap-6 items-center">
+            <Avatar className="h-16 w-16 md:h-24 md:w-24 ring-4 ring-primary/10">
+              <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/200/200`} />
+              <AvatarFallback className="text-2xl">{student.firstName?.[0]}{student.lastName?.[0]}</AvatarFallback>
+            </Avatar>
+            <div className="space-y-1">
+              <div className="flex items-center gap-3">
+                <h1 className="text-xl md:text-3xl font-bold font-headline">
+                  {student.firstName || student.name}{" "}
+                  {student.lastName ? String(student.lastName) : ""}
+                </h1>
+                <Badge className="bg-accent text-accent-foreground capitalize">
+                  {portalOnly ? "Portal" : student.activityStatus}
+                </Badge>
+                {isStudentBlocked && (
+                  <Badge variant="destructive" className="gap-1">
+                    <Ban className="h-3 w-3" /> Blocked
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Mail className="h-4 w-4" /> {student.email}
+              </p>
+              <p className="text-xs text-muted-foreground flex items-center gap-2">
+                <Calendar className="h-3 w-3" /> Member since {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {portalOnly && (
+              <Button
+                className="gap-2"
+                onClick={handleAddToRoster}
+                disabled={isAddingToRoster}
+              >
+                {isAddingToRoster ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <UserPlus className="h-4 w-4" />
+                )}
+                Add to my roster
+              </Button>
+            )}
+            {portalOnly ? (
+              <Button className="gap-2" disabled title="Add this student to your roster first">
+                <Dumbbell className="h-4 w-4" /> Build Program
+              </Button>
+            ) : (
+              <Button className="gap-2" asChild>
+                <Link href="/workouts/builder">
+                  <Dumbbell className="h-4 w-4" /> Build Program
+                </Link>
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              className="gap-2"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Delete Student
+            </Button>
+            {!portalOnly && (
+              <Button
+                variant={isStudentBlocked ? "outline" : "secondary"}
+                className="gap-2"
+                onClick={() => setShowBlockConfirm(true)}
+                disabled={isBlocking}
+              >
+                {isBlocking ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : isStudentBlocked ? (
+                  <ShieldOff className="h-4 w-4" />
+                ) : (
+                  <Ban className="h-4 w-4" />
+                )}
+                {isStudentBlocked ? "Unblock" : "Block Student"}
+              </Button>
+            )}
+          </div>
+        </header>
+
+        <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+                Delete Student
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <p>
+                    Are you sure you want to delete <strong>{student.firstName} {student.lastName}</strong>?
+                  </p>
+                  <p>
+                    This action will permanently remove:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 ml-2">
+                    <li>The student from your roster</li>
+                    <li>All associated workout plans</li>
+                    <li>All workout sessions and history</li>
+                    <li>All payment records</li>
+                  </ul>
+                  <p className="font-semibold text-destructive">
+                    This action cannot be undone.
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteStudent}
+                disabled={isDeleting}
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Student
+                  </>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Block/Unblock Confirmation */}
+        <AlertDialog open={showBlockConfirm} onOpenChange={setShowBlockConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                {isStudentBlocked ? <ShieldOff className="h-5 w-5" /> : <Ban className="h-5 w-5 text-destructive" />}
+                {isStudentBlocked ? "Unblock Student" : "Block Student"}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {isStudentBlocked
+                  ? `Are you sure you want to unblock ${student.firstName} ${student.lastName}? They will regain access to their program.`
+                  : `Are you sure you want to block ${student.firstName} ${student.lastName}? They will lose access to their program until unblocked.`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isBlocking}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleToggleBlock}
+                disabled={isBlocking}
+                className={isStudentBlocked ? "" : "bg-destructive hover:bg-destructive/90"}
+              >
+                {isBlocking ? (
+                  <><Loader2 className="h-4 w-4 animate-spin mr-2" />{isStudentBlocked ? "Unblocking..." : "Blocking..."}</>
+                ) : (
+                  <>{isStudentBlocked ? <><ShieldOff className="h-4 w-4 mr-2" />Unblock</> : <><Ban className="h-4 w-4 mr-2" />Block Student</>}</>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Session Delete Confirmation */}
+        <AlertDialog open={!!confirmDeleteSessionId} onOpenChange={(open) => { if (!open) setConfirmDeleteSessionId(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" /> Delete Session
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete this workout session? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive hover:bg-destructive/90"
+                onClick={() => { if (confirmDeleteSessionId) { handleDeleteSession(confirmDeleteSessionId); setConfirmDeleteSessionId(null); } }}
+              >
+                <Trash2 className="h-4 w-4 mr-2" /> Delete Session
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Workout Plan Delete Confirmation */}
+        <AlertDialog open={!!confirmDeletePlanId} onOpenChange={(open) => { if (!open) setConfirmDeletePlanId(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" /> Remove Assigned Workout
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to remove this assigned workout? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive hover:bg-destructive/90"
+                onClick={() => { if (confirmDeletePlanId) { handleDeleteWorkoutPlan(confirmDeletePlanId); setConfirmDeletePlanId(null); } }}
+              >
+                <Trash2 className="h-4 w-4 mr-2" /> Remove Workout
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {portalOnly && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+            This student is only in the portal directory. Add them to your roster to assign workouts and
+            save private coaching notes.
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
+              <User className="h-4 w-4 text-primary" />
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">Age / Sex</p>
+              <p className="text-base font-bold">{student.age || '--'} yrs / <span className="capitalize">{student.sex || '--'}</span></p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
+              <Ruler className="h-4 w-4 text-primary" />
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">Height</p>
+              <p className="text-base font-bold">{student.heightCm || '--'} cm</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
+              <Weight className="h-4 w-4 text-primary" />
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">Weight</p>
+              <p className="text-base font-bold">{student.weightKg || '--'} kg</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
+              <Target className="h-4 w-4 text-accent" />
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">Goal</p>
+              <p className="text-base font-bold">{student.goalWeightKg || '--'} kg</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Tabs defaultValue="progress" className="space-y-6">
+          <TabsList className="bg-card border h-auto flex-wrap sm:flex-nowrap w-full">
+            <TabsTrigger value="progress" className="px-4 sm:px-8 flex-1">Progress</TabsTrigger>
+            <TabsTrigger value="milestones" className="px-4 sm:px-8 flex-1">Milestones</TabsTrigger>
+            <TabsTrigger value="management" className="px-4 sm:px-8 flex-1 text-xs sm:text-sm">Coaching & Management</TabsTrigger>
+            <TabsTrigger value="billing" className="px-4 sm:px-8 flex-1">Billing</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="progress" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Weight Tracking</CardTitle>
+                  <CardDescription>Path to {student.goalWeightKg}kg (<span className="capitalize">{student.goalType?.replace('_', ' ')}</span>)</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[300px]">
+                  {weightChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={weightChartData}>
+                        <defs>
+                          <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                        <XAxis dataKey="date" />
+                        <YAxis domain={['dataMin - 2', 'dataMax + 2']} />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="weight" stroke="hsl(var(--primary))" fillOpacity={1} fill="url(#colorWeight)" strokeWidth={3} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                      No weekly weight records yet.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Strength Progression</CardTitle>
+                  <CardDescription>Estimated 1RM from logged sessions (kg)</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[300px]">
+                  {strengthExerciseOptions.length > 0 ? (
+                    <div className="h-full flex flex-col gap-3">
+                      <div className="w-full sm:w-[260px]">
+                        <Select value={selectedStrengthExercise} onValueChange={setSelectedStrengthExercise}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select exercise" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {strengthExerciseOptions.map((exerciseName) => (
+                              <SelectItem key={exerciseName} value={exerciseName}>
+                                {exerciseName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="flex-1 min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={selectedStrengthData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                            <XAxis dataKey="date" />
+                            <YAxis />
+                            <Tooltip />
+                            <Line
+                              type="monotone"
+                              dataKey="oneRm"
+                              stroke="hsl(var(--chart-1))"
+                              strokeWidth={3}
+                              name={`${selectedStrengthExercise} 1RM`}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                      No strength session data yet.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,0.9fr)] gap-6 items-start">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Dumbbell className="h-5 w-5 text-primary" />
+                    Workout History
+                  </CardTitle>
+                  <CardDescription>{sortedSessions.length} session{sortedSessions.length !== 1 ? "s" : ""} completed</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {sortedSessions.length > 0 ? (
+                    <div className="space-y-3">
+                      {sortedSessions.map((session: any) => (
+                        <div key={session.id} className="border rounded-lg p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-semibold">{session.workoutTitle || "Untitled Workout"}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {session.completedAt
+                                  ? new Date(session.completedAt).toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric" })
+                                  : session.startedAt
+                                    ? new Date(session.startedAt).toLocaleDateString()
+                                    : "—"}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditSession(session)}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setConfirmDeleteSessionId(session.id)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Badge variant="outline" className="bg-green-100 text-green-800">
+                                {session.status === "completed" ? "Completed" : session.status || "Done"}
+                              </Badge>
+                            </div>
+                          </div>
+                          {session.exercises && session.exercises.length > 0 && (
+                            <div className="space-y-2">
+                              {session.exercises.map((ex: any, idx: number) => (
+                                <div key={idx} className="bg-muted/50 rounded p-2">
+                                  <p className="text-sm font-medium">{ex.exerciseName || ex.name}</p>
+                                  {ex.sets && Array.isArray(ex.sets) ? (
+                                    <div className="flex flex-wrap gap-2 mt-1">
+                                      {ex.sets.map((s: any, si: number) => (
+                                        <span key={si} className="text-xs bg-background border rounded px-2 py-0.5">
+                                          Set {si + 1}: {s.weight ?? "—"}kg × {s.reps ?? "—"}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">
+                                      {ex.sets || "—"} sets · {ex.reps || "—"} reps{ex.weight ? ` · ${ex.weight}kg` : ""}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Dumbbell className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                      <p className="text-sm">No workout sessions recorded yet.</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="bg-primary/5 border-primary/20">
+                <CardHeader>
+                  <CardTitle className="text-sm">Assigned Workouts</CardTitle>
+                  <CardDescription>{sortedWorkoutPlans.length} active assignment{sortedWorkoutPlans.length !== 1 ? "s" : ""}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {sortedWorkoutPlans.length > 0 ? (
+                    sortedWorkoutPlans.map((plan: any) => (
+                      <div key={plan.id} className="p-3 border rounded-lg bg-background flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Dumbbell className="h-4 w-4 text-primary shrink-0" />
+                          <div className="min-w-0">
+                            <span className="text-sm font-medium block truncate">{plan.title || 'Untitled'}</span>
+                            <p className="text-xs text-muted-foreground">
+                              {(plan.assignedAt || plan.createdAt)
+                                ? new Date(plan.assignedAt || plan.createdAt).toLocaleDateString()
+                                : "No date"}
+                            </p>
+                            {(plan.weekNumber || plan.scheduledDayOfWeek || typeof plan.weightIncreaseKg === 'number') && (
+                              <p className="text-xs text-muted-foreground">
+                                {plan.weekNumber ? `Week ${plan.weekNumber}${plan.totalWeeks ? ` of ${plan.totalWeeks}` : ""}` : ""}
+                                {plan.weekNumber && plan.scheduledDayOfWeek ? " • " : ""}
+                                {plan.scheduledDayOfWeek
+                                  ? plan.scheduledDayOfWeek.charAt(0).toUpperCase() + plan.scheduledDayOfWeek.slice(1)
+                                  : ""}
+                                {(plan.weekNumber || plan.scheduledDayOfWeek) && typeof plan.weightIncreaseKg === 'number' ? " • " : ""}
+                                {typeof plan.weightIncreaseKg === 'number' ? `+${plan.weightIncreaseKg} kg` : ""}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge variant="outline">Active</Badge>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEditWorkoutPlan(plan)}
+                            disabled={portalOnly}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setConfirmDeletePlanId(plan.id)}
+                            disabled={portalOnly || deletingWorkoutPlanId === plan.id}
+                          >
+                            {deletingWorkoutPlanId === plan.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No workouts assigned yet.</p>
+                  )}
+                  <Button variant="link" className="w-full mt-2 text-xs" asChild>
+                    <Link href="/workouts/builder">Assign Workout</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Edit Session Dialog */}
+            <Dialog open={!!editSession} onOpenChange={(open) => !open && setEditSession(null)}>
+              <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Edit Session — {editSession?.workoutTitle || "Workout"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  {editExercises.map((ex, ei) => (
+                    <div key={ei} className="border rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Input
+                          className="font-medium text-sm h-8"
+                          value={ex.name}
+                          onChange={(e) => {
+                            const copy = [...editExercises];
+                            copy[ei] = { ...copy[ei], name: e.target.value };
+                            setEditExercises(copy);
+                          }}
+                        />
+                        <Button size="icon" variant="ghost" className="h-7 w-7 ml-2 text-destructive shrink-0" onClick={() => setEditExercises(editExercises.filter((_, i) => i !== ei))}>
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <div className="space-y-1">
+                        {ex.sets.map((s: any, si: number) => (
+                          <div key={si} className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-12 shrink-0">Set {si + 1}</span>
+                            <Input
+                              type="number"
+                              className="h-7 text-xs"
+                              placeholder="kg"
+                              value={s.weight}
+                              onChange={(e) => {
+                                const copy = [...editExercises];
+                                const sets = [...copy[ei].sets];
+                                sets[si] = { ...sets[si], weight: Number(e.target.value) || 0 };
+                                copy[ei] = { ...copy[ei], sets };
+                                setEditExercises(copy);
+                              }}
+                            />
+                            <span className="text-xs">kg ×</span>
+                            <Input
+                              type="number"
+                              className="h-7 text-xs"
+                              placeholder="reps"
+                              value={s.reps}
+                              onChange={(e) => {
+                                const copy = [...editExercises];
+                                const sets = [...copy[ei].sets];
+                                sets[si] = { ...sets[si], reps: Number(e.target.value) || 0 };
+                                copy[ei] = { ...copy[ei], sets };
+                                setEditExercises(copy);
+                              }}
+                            />
+                            <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => {
+                              const copy = [...editExercises];
+                              copy[ei] = { ...copy[ei], sets: copy[ei].sets.filter((_: any, i: number) => i !== si) };
+                              setEditExercises(copy);
+                            }}>
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button size="sm" variant="outline" className="h-6 text-xs mt-1" onClick={() => {
+                          const copy = [...editExercises];
+                          copy[ei] = { ...copy[ei], sets: [...copy[ei].sets, { weight: 0, reps: 0 }] };
+                          setEditExercises(copy);
+                        }}>
+                          + Add Set
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex gap-2 pt-2">
+                    <Button className="flex-1" onClick={handleSaveSession}>Save Changes</Button>
+                    <Button variant="destructive" onClick={() => editSession && setConfirmDeleteSessionId(editSession.id)}>Delete Session</Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <div className="grid sm:grid-cols-3 gap-6">
+              <Card className="bg-accent/5">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-accent" />
+                    Current Streak
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{currentWorkoutStreak} Workouts</p>
+                  <p className="text-xs text-muted-foreground">Keep the momentum going!</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-primary/5">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-primary" />
+                    Subscription
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Badge variant={student.subscriptionStatus === 'active' ? 'default' : 'destructive'} className="capitalize">
+                    {student.subscriptionStatus || 'Inactive'}
+                  </Badge>
+                  <p className="text-xs text-muted-foreground mt-2">Status: {student.subscriptionStatus || 'Unknown'}</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-secondary/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <History className="h-4 w-4 text-primary" />
+                    Last Active
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm font-medium">
+                    {lastActiveAt ? new Date(lastActiveAt).toLocaleDateString() : "No recent activity"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">Logged session</p>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="milestones" className="space-y-6">
+            <MilestonesTab
+              db={db}
+              user={user}
+              studentId={id}
+              milestones={studentMilestones}
+              isLoading={milestonesLoading}
+              onMilestonesChange={() => {
+                // Trigger a refetch by updating state or calling the query again
+                // This will be handled by Firestore listener in the useCollection hook
+              }}
+            />
+          </TabsContent>
+
+          <TabsContent value="management">
+            <div className="grid lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingDown className="h-5 w-5 text-primary" />
+                      Trainer Observations & Notes
+                    </CardTitle>
+                    <CardDescription>Private notes only visible to you.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Textarea 
+                      placeholder="Enter coaching cues, technical faults, or recovery notes..."
+                      className="min-h-[250px] text-base leading-relaxed"
+                      value={coachingNotes}
+                      onChange={(e) => setCoachingNotes(e.target.value)}
+                      disabled={portalOnly}
+                    />
+                  </CardContent>
+                  <CardFooter className="bg-muted/5 border-t">
+                    <Button 
+                      className="gap-2 ml-auto" 
+                      onClick={handleUpdateStudent}
+                      disabled={isSaving || portalOnly}
+                    >
+                      {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Save Coaching Notes
+                    </Button>
+                  </CardFooter>
+                </Card>
+              </div>
+
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Adjust Goals</CardTitle>
+                    <CardDescription>Update target metrics for this student.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Goal Weight (kg)</Label>
+                      <Input 
+                        type="number" 
+                        value={editStats.goalWeightKg}
+                        onChange={(e) => setEditStats({...editStats, goalWeightKg: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Goal Type</Label>
+                      <Input 
+                        placeholder="e.g. Muscle Gain"
+                        value={editStats.goalType}
+                        onChange={(e) => setEditStats({...editStats, goalType: e.target.value})}
+                      />
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      className="w-full"
+                      onClick={handleUpdateStudent}
+                      disabled={isSaving || portalOnly}
+                    >
+                      Update Targets
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="billing" className="space-y-6">
+            <BillingTab db={db} user={user} studentId={id} toast={toast} />
+          </TabsContent>
+        </Tabs>
+
+        <Dialog open={Boolean(editingWorkoutPlan)} onOpenChange={(open) => !open && setEditingWorkoutPlan(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Assigned Workout</DialogTitle>
+              <DialogDescription>
+                Update the assigned workout details for this student.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Workout title</Label>
+                <Input
+                  value={editingWorkoutPlanValues.title}
+                  onChange={(event) =>
+                    setEditingWorkoutPlanValues((current) => ({ ...current, title: event.target.value }))
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Assigned date</Label>
+                  <Input
+                    type="date"
+                    value={editingWorkoutPlanValues.assignedDate}
+                    onChange={(event) =>
+                      setEditingWorkoutPlanValues((current) => ({ ...current, assignedDate: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Workout day</Label>
+                  <Select
+                    value={editingWorkoutPlanValues.scheduledDayOfWeek}
+                    onValueChange={(value) =>
+                      setEditingWorkoutPlanValues((current) => ({ ...current, scheduledDayOfWeek: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monday">Monday</SelectItem>
+                      <SelectItem value="tuesday">Tuesday</SelectItem>
+                      <SelectItem value="wednesday">Wednesday</SelectItem>
+                      <SelectItem value="thursday">Thursday</SelectItem>
+                      <SelectItem value="friday">Friday</SelectItem>
+                      <SelectItem value="saturday">Saturday</SelectItem>
+                      <SelectItem value="sunday">Sunday</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>kg increase</Label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    value={editingWorkoutPlanValues.weightIncreaseKg}
+                    onChange={(event) =>
+                      setEditingWorkoutPlanValues((current) => ({ ...current, weightIncreaseKg: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>rep increase</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={editingWorkoutPlanValues.repIncrease}
+                    onChange={(event) =>
+                      setEditingWorkoutPlanValues((current) => ({ ...current, repIncrease: event.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingWorkoutPlan(null)} disabled={isSavingWorkoutPlan}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveWorkoutPlan} disabled={isSavingWorkoutPlan}>
+                {isSavingWorkoutPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </Navigation>
+  );
+}

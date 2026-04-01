@@ -3,17 +3,16 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import { 
   LayoutDashboard, 
   Users, 
   Dumbbell, 
   LineChart, 
+  CalendarDays,
   LogOut, 
   Search,
   Plus,
-  Bell,
-  CheckCircle2,
-  AlertCircle,
   User,
   ChevronLeft,
   ChevronRight,
@@ -21,48 +20,42 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Sheet,
-  SheetContent,
-  SheetTrigger,
-  SheetClose,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc } from "firebase/firestore";
 import { useState } from "react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Globe } from "lucide-react";
 
-const navItems = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Students", href: "/students", icon: Users },
-  { name: "Programs", href: "/workouts", icon: Dumbbell },
-  { name: "Exercises", href: "/exercises", icon: Search },
-  { name: "Progress", href: "/progress", icon: LineChart },
-  { name: "My Profile", href: "/profile", icon: User },
-];
-
-const mockNotifications = [
-  { id: 1, title: "Workout Logged", description: "Alex Johnson completed 'Upper Body Push A'", time: "10m ago", icon: CheckCircle2, type: "success" },
-  { id: 2, title: "New PR Alert", description: "Sarah Williams hit a new Squat PR: 65kg!", time: "45m ago", icon: Bell, type: "info" },
-  { id: 3, title: "Pending Program", description: "Mike Tyson is waiting for his new routine", time: "2h ago", icon: AlertCircle, type: "warning" },
+const navItemKeys = [
+  { key: "dashboard" as const, href: "/dashboard", icon: LayoutDashboard },
+  { key: "students" as const, href: "/students", icon: Users },
+  { key: "programs" as const, href: "/workouts", icon: Dumbbell },
+  { key: "exercises" as const, href: "/exercises", icon: Search },
+  { key: "assignmentCalendar" as const, href: "/assignment-calendar", icon: CalendarDays },
+  { key: "progress" as const, href: "/progress", icon: LineChart },
+  { key: "myProfile" as const, href: "/profile", icon: User },
 ];
 
 /* ─── Shared sidebar nav content ─── */
+type SidebarTranslate = (key: "dashboard" | "students" | "programs" | "exercises" | "assignmentCalendar" | "progress" | "myProfile" | "logout") => string;
+
 function SidebarContent({
   pathname,
   trainer,
   user,
   onSignOut,
   onNavClick,
+  t,
 }: {
   pathname: string;
   trainer: Record<string, string> | null;
   user: { uid?: string; photoURL?: string | null; email?: string | null } | null;
   onSignOut: () => void;
   onNavClick?: () => void;
+  t: SidebarTranslate;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -76,9 +69,9 @@ function SidebarContent({
 
       {/* Nav Items */}
       <nav className="flex-1 px-2 space-y-1 mt-2">
-        {navItems.map((item) => (
+        {navItemKeys.map((item) => (
           <Link
-            key={item.name}
+            key={item.key}
             href={item.href}
             onClick={onNavClick}
             className={cn(
@@ -89,7 +82,7 @@ function SidebarContent({
             )}
           >
             <item.icon className="h-5 w-5 shrink-0" />
-            <span className="truncate">{item.name}</span>
+            <span className="truncate">{t(item.key)}</span>
           </Link>
         ))}
       </nav>
@@ -128,7 +121,7 @@ function SidebarContent({
           onClick={onSignOut}
         >
           <LogOut className="h-5 w-5" />
-          Logout
+          {t("logout")}
         </Button>
       </div>
     </div>
@@ -142,6 +135,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const db = useFirestore();
   const { user } = useUser();
+  const { t, locale, setLocale } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -160,6 +154,16 @@ export function Navigation({ children }: { children: React.ReactNode }) {
 
   const sidebarWidth = collapsed ? "w-[70px]" : "w-64";
   const mainMargin = collapsed ? "md:ml-[70px]" : "md:ml-64";
+  const pathLabelMap: Record<string, string> = {
+    dashboard: t("dashboard"),
+    students: t("students"),
+    workouts: t("programs"),
+    exercises: t("exercises"),
+    "assignment-calendar": t("assignmentCalendar"),
+    progress: t("progress"),
+    profile: t("myProfile"),
+  };
+  const currentPathKey = pathname.split("/")[1] || "dashboard";
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -194,7 +198,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
 
           {/* Nav Items */}
           <nav className="flex-1 px-2 space-y-1 mt-2">
-            {navItems.map((item) => {
+            {navItemKeys.map((item) => {
               const isActive = pathname === item.href;
               const linkClass = cn(
                 "flex items-center gap-3 px-3 py-3 rounded-md text-sm font-medium transition-colors",
@@ -206,21 +210,21 @@ export function Navigation({ children }: { children: React.ReactNode }) {
 
               if (collapsed) {
                 return (
-                  <Tooltip key={item.name}>
+                  <Tooltip key={item.key}>
                     <TooltipTrigger asChild>
                       <Link href={item.href} className={linkClass}>
                         <item.icon className="h-5 w-5 shrink-0" />
                       </Link>
                     </TooltipTrigger>
-                    <TooltipContent side="right">{item.name}</TooltipContent>
+                    <TooltipContent side="right">{t(item.key)}</TooltipContent>
                   </Tooltip>
                 );
               }
 
               return (
-                <Link key={item.name} href={item.href} className={linkClass}>
+                <Link key={item.key} href={item.href} className={linkClass}>
                   <item.icon className="h-5 w-5 shrink-0" />
-                  <span className="truncate">{item.name}</span>
+                  <span className="truncate">{t(item.key)}</span>
                 </Link>
               );
             })}
@@ -303,7 +307,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
                   onClick={handleSignOut}
                 >
                   <LogOut className="h-5 w-5" />
-                  Logout
+                  {t("logout")}
                 </Button>
               </>
             )}
@@ -326,12 +330,14 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         {/* ── MOBILE Sheet Sidebar ── */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetContent side="left" className="p-0 w-72">
+            <SheetTitle className="sr-only">Main navigation</SheetTitle>
             <SidebarContent
               pathname={pathname}
               trainer={trainer as any}
               user={user}
               onSignOut={handleSignOut}
               onNavClick={() => setMobileOpen(false)}
+              t={t}
             />
           </SheetContent>
         </Sheet>
@@ -352,63 +358,36 @@ export function Navigation({ children }: { children: React.ReactNode }) {
                 <Menu className="h-5 w-5" />
               </Button>
               <h1 className="text-lg font-semibold capitalize">
-                {pathname.split("/")[1] || "Dashboard"}
+                {pathLabelMap[currentPathKey] || t("dashboard")}
               </h1>
             </div>
             <div className="flex items-center gap-3">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="icon" className="relative">
-                    <Bell className="h-5 w-5" />
-                    <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
+              {/* Language Switcher */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon">
+                    <Globe className="h-4 w-4" />
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="end">
-                  <div className="p-4 border-b">
-                    <h3 className="font-bold">Notifications</h3>
-                  </div>
-                  <ScrollArea className="h-[300px]">
-                    <div className="divide-y">
-                      {mockNotifications.map((notif) => (
-                        <div key={notif.id} className="p-4 hover:bg-accent/5 flex gap-3">
-                          <div
-                            className={cn(
-                              "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-                              notif.type === "success"
-                                ? "bg-accent/10 text-accent"
-                                : notif.type === "warning"
-                                ? "bg-destructive/10 text-destructive"
-                                : "bg-primary/10 text-primary"
-                            )}
-                          >
-                            <notif.icon className="w-4 h-4" />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm font-bold leading-none">{notif.title}</p>
-                            <p className="text-xs text-muted-foreground">{notif.description}</p>
-                            <p className="text-[10px] text-muted-foreground">{notif.time}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                  <div className="p-2 border-t text-center">
-                    <Button variant="ghost" size="sm" className="w-full text-xs text-primary">
-                      Mark all as read
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setLocale("en")} className={locale === "en" ? "font-bold" : ""}>
+                    🇬🇧 English
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocale("pt")} className={locale === "pt" ? "font-bold" : ""}>
+                    🇵🇹 Português
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button className="hidden sm:flex gap-2" asChild>
                 <Link href="/workouts/builder">
                   <Plus className="h-4 w-4" />
-                  New Program
+                  {t("newProgram")}
                 </Link>
               </Button>
             </div>
           </header>
 
-          <main className="flex-1 p-4 md:p-6 overflow-auto">
+          <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
             {children}
           </main>
         </div>

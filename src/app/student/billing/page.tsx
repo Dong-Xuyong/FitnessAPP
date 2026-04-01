@@ -1,120 +1,154 @@
 "use client";
 
 import { StudentNavigation } from "@/components/StudentNavigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { CreditCard, Download, ShieldCheck } from "lucide-react";
+import { Banknote, Smartphone, Clock, CheckCircle2, AlertCircle } from "lucide-react";
+import { useUser, useFirestore, useDoc, useCollection, useMemoFirebase } from "@/firebase";
+import { doc, collection } from "firebase/firestore";
 
 export default function StudentBillingPage() {
-  const invoices = [
-    { id: "INV-001", date: "May 1, 2024", amount: "$85.00", status: "Paid" },
-    { id: "INV-002", date: "Apr 1, 2024", amount: "$85.00", status: "Paid" },
-    { id: "INV-003", date: "Mar 1, 2024", amount: "$85.00", status: "Paid" },
-  ];
+  const { user } = useUser();
+  const db = useFirestore();
+
+  // Get student's global doc to find trainerId
+  const studentRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return doc(db, "students", user.uid);
+  }, [db, user]);
+  const { data: studentData } = useDoc(studentRef);
+
+  const trainerId = studentData?.trainerId as string | undefined;
+
+  // Get billing config from trainer's student subdoc
+  const billingConfigRef = useMemoFirebase(() => {
+    if (!db || !trainerId || !user) return null;
+    return doc(db, "personalTrainers", trainerId, "students", user.uid);
+  }, [db, trainerId, user]);
+  const { data: rosterData } = useDoc(billingConfigRef);
+
+  // Get payment records
+  const paymentsRef = useMemoFirebase(() => {
+    if (!db || !trainerId || !user) return null;
+    return collection(db, "personalTrainers", trainerId, "students", user.uid, "payments");
+  }, [db, trainerId, user]);
+  const { data: payments } = useCollection(paymentsRef);
+
+  const sortedPayments = (payments || []).sort(
+    (a: any, b: any) => (b.dueDate || "").localeCompare(a.dueDate || "")
+  );
+
+  const billing = rosterData as any;
+  const monthlyAmount = billing?.monthlyRate || 0;
+  const paymentMethod = billing?.paymentMethod || "bank_transfer";
+  const billingStatus = billing?.billingStatus || "inactive";
+
+  const statusIcon = {
+    active: <CheckCircle2 className="h-4 w-4 text-green-500" />,
+    past_due: <AlertCircle className="h-4 w-4 text-red-500" />,
+    inactive: <Clock className="h-4 w-4 text-muted-foreground" />,
+  }[billingStatus] || <Clock className="h-4 w-4 text-muted-foreground" />;
+
+  const statusColor = {
+    active: "bg-green-100 text-green-800",
+    past_due: "bg-red-100 text-red-800",
+    inactive: "bg-gray-100 text-gray-800",
+  }[billingStatus as string] || "bg-gray-100 text-gray-800";
 
   return (
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">Billing & Subscription</h1>
-          <p className="text-muted-foreground">Manage your plan, payment methods, and billing history.</p>
+          <h1 className="text-3xl font-bold font-headline">Billing</h1>
+          <p className="text-muted-foreground">View your payment status and history.</p>
         </header>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          <Card className="md:col-span-2 border-primary/20">
-            <CardHeader>
-              <div className="flex justify-between items-start">
-                <div>
-                  <CardTitle>Current Plan</CardTitle>
-                  <CardDescription>Premium Coaching Tier</CardDescription>
-                </div>
-                <Badge className="bg-accent text-accent-foreground">Active</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-lg bg-secondary/30 border">
-                <div>
-                  <p className="text-sm font-bold">$85.00 / month</p>
-                  <p className="text-xs text-muted-foreground">Next billing date: June 1, 2024</p>
-                </div>
-                <Button variant="outline" size="sm">Change Plan</Button>
-              </div>
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                <div className="flex items-start gap-3">
-                  <ShieldCheck className="h-5 w-5 text-accent shrink-0" />
-                  <p className="text-sm">Personalized training programs</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <ShieldCheck className="h-5 w-5 text-accent shrink-0" />
-                  <p className="text-sm">Unlimited messaging with coach</p>
-                </div>
-              </div>
-            </CardContent>
-            <CardFooter className="border-t pt-6 bg-muted/5">
-              <p className="text-xs text-muted-foreground">
-                Subscription managed by Stripe. You can cancel your subscription at any time.
-              </p>
-            </CardFooter>
-          </Card>
-
+        <div className="grid md:grid-cols-3 gap-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Payment Method</CardTitle>
-              <CardDescription>Your default card</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4 p-4 border rounded-lg">
-                <div className="w-10 h-10 bg-muted rounded flex items-center justify-center">
-                  <CreditCard className="h-6 w-6" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold">Visa ending in 4242</p>
-                  <p className="text-xs text-muted-foreground">Expires 12/26</p>
-                </div>
-              </div>
-              <Button variant="outline" className="w-full text-xs">Update Method</Button>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
+              <Banknote className="h-6 w-6 text-primary" />
+              <p className="text-xs text-muted-foreground uppercase font-bold">Monthly Rate</p>
+              <p className="text-2xl font-bold">{monthlyAmount > 0 ? `€${monthlyAmount}` : "Not set"}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
+              <Smartphone className="h-6 w-6 text-primary" />
+              <p className="text-xs text-muted-foreground uppercase font-bold">Payment Method</p>
+              <p className="text-lg font-bold capitalize">
+                {paymentMethod === "mbway" ? "MB WAY" : paymentMethod === "bank_transfer" ? "Bank Transfer" : paymentMethod}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
+              {statusIcon}
+              <p className="text-xs text-muted-foreground uppercase font-bold">Status</p>
+              <Badge className={statusColor + " capitalize"}>{billingStatus.replace("_", " ")}</Badge>
             </CardContent>
           </Card>
         </div>
 
+        {billing?.paymentDetails && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Payment Instructions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="p-4 rounded-lg bg-muted/50 border text-sm whitespace-pre-wrap">
+                {billing.paymentDetails}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
-            <CardTitle>Billing History</CardTitle>
-            <CardDescription>Download past invoices for your records.</CardDescription>
+            <CardTitle>Payment History</CardTitle>
+            <CardDescription>Payments recorded by your coach</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Invoice ID</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoices.map((invoice) => (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="font-medium">{invoice.id}</TableCell>
-                    <TableCell>{invoice.date}</TableCell>
-                    <TableCell>{invoice.amount}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="bg-accent/10 text-accent hover:bg-accent/10">
-                        {invoice.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" className="gap-2">
-                        <Download className="h-4 w-4" /> PDF
-                      </Button>
-                    </TableCell>
+            {sortedPayments.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Period</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date Paid</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {sortedPayments.map((p: any) => (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-medium">{p.period || "—"}</TableCell>
+                      <TableCell>€{p.amount || 0}</TableCell>
+                      <TableCell className="capitalize">
+                        {p.method === "mbway" ? "MB WAY" : p.method === "bank_transfer" ? "Bank Transfer" : (p.method || "—")}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={p.status === "paid" ? "default" : "outline"}
+                          className={p.status === "paid" ? "bg-green-100 text-green-800" : p.status === "pending" ? "bg-yellow-100 text-yellow-800" : ""}
+                        >
+                          {p.status || "pending"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Banknote className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                <p className="text-sm">No payment records yet.</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

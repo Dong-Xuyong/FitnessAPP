@@ -2,23 +2,23 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Dumbbell, Mail, Lock, Loader2, User, GraduationCap, UserCircle } from "lucide-react";
+import { Dumbbell, Mail, Lock, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+
 import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateEmailSignIn, initiateEmailSignUp, initiateGoogleSignIn } from "@/firebase/non-blocking-login";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { sendEmailVerification, signOut } from "firebase/auth";
 import { useToast } from "@/hooks/use-toast";
 
 function LoginContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const auth = useAuth();
   const db = useFirestore();
   const { user, isUserLoading } = useUser();
@@ -26,9 +26,11 @@ function LoginContent() {
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isTrainer, setIsTrainer] = useState(searchParams.get("role") !== "student");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCheckingRole, setIsCheckingRole] = useState(false);
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [isResending, setIsResending] = useState(false);
 
   useEffect(() => {
     async function handleRedirect() {
@@ -74,29 +76,20 @@ function LoginContent() {
     try {
       const userCredential = await initiateEmailSignUp(auth, email, password);
       const uid = userCredential.user.uid;
-      
-      if (isTrainer) {
-        const trainerData = {
-          id: uid,
-          firstName: email.split('@')[0],
-          lastName: "Trainer",
-          email: email,
-          dateJoined: new Date().toISOString(),
-        };
-        await setDoc(doc(db, "personalTrainers", uid), trainerData);
-        router.push("/dashboard");
-      } else {
-        const studentData = {
-          userId: uid,
-          firstName: email.split('@')[0],
-          lastName: "Student",
-          email: email,
-          joinedAt: new Date().toISOString(),
-          activityStatus: "active",
-        };
-        await setDoc(doc(db, "students", uid), studentData);
-        router.push("/student/dashboard");
-      }
+      const studentData = {
+        userId: uid,
+        firstName: email.split('@')[0],
+        lastName: "",
+        email: email,
+        joinedAt: new Date().toISOString(),
+        activityStatus: "active",
+      };
+      await setDoc(doc(db, "students", uid), studentData);
+      await sendEmailVerification(userCredential.user);
+      await signOut(auth);
+      setVerificationEmail(email);
+      setVerificationPending(true);
+      setIsSubmitting(false);
     } catch (error: any) {
       setIsSubmitting(false);
       toast({
@@ -133,6 +126,71 @@ function LoginContent() {
     );
   }
 
+  const handleResendVerification = async () => {
+    if (!auth) return;
+    setIsResending(true);
+    try {
+      const cred = await initiateEmailSignIn(auth, verificationEmail, password);
+      await sendEmailVerification(cred.user);
+      await signOut(auth);
+      toast({
+        title: "Verification Email Sent",
+        description: "A new verification link has been sent to your email.",
+      });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Could Not Resend",
+        description: "Please try signing in again to resend the verification email.",
+      });
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  if (verificationPending) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-secondary/50 to-background">
+        <Link href="/" className="flex items-center gap-2 mb-8">
+          <Dumbbell className="text-primary h-8 w-8" />
+          <span className="text-2xl font-bold tracking-tight font-headline">ElevateFit</span>
+        </Link>
+        <Card className="w-full max-w-md shadow-xl border-t-4 border-t-primary">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto rounded-full bg-primary/10 p-4 w-fit">
+              <CheckCircle2 className="h-10 w-10 text-primary" />
+            </div>
+            <CardTitle className="text-2xl font-bold font-headline">Check Your Email</CardTitle>
+            <CardDescription className="text-base">
+              We sent a verification link to <span className="font-medium text-foreground">{verificationEmail}</span>. Click the link to activate your account.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={handleResendVerification}
+              disabled={isResending}
+            >
+              {isResending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Resend Verification Email
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setVerificationPending(false);
+                setPassword("");
+              }}
+            >
+              Back to Sign In
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-secondary/50 to-background">
       <Link href="/" className="flex items-center gap-2 mb-8">
@@ -142,14 +200,8 @@ function LoginContent() {
 
       <Card className="w-full max-w-md shadow-xl border-t-4 border-t-primary">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold font-headline">
-            {isTrainer ? "Coach Access" : "Student Access"}
-          </CardTitle>
-          <CardDescription>
-            {isTrainer 
-              ? "Manage your roster and workout plans." 
-              : "Access your training and track progress."}
-          </CardDescription>
+          <CardTitle className="text-2xl font-bold font-headline">Welcome Back</CardTitle>
+          <CardDescription>Sign in to your account or create a new one.</CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="login" className="w-full">
@@ -227,17 +279,6 @@ function LoginContent() {
                     />
                   </div>
                 </div>
-                
-                <div className="flex items-center space-x-2 pt-2">
-                  <Checkbox 
-                    id="trainer-toggle" 
-                    checked={isTrainer} 
-                    onCheckedChange={(checked) => setIsTrainer(checked as boolean)} 
-                  />
-                  <Label htmlFor="trainer-toggle" className="text-sm font-normal cursor-pointer">
-                    I am registering as a <span className="font-bold text-primary">Personal Trainer</span>
-                  </Label>
-                </div>
 
                 <Button className="w-full" type="submit" disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -274,16 +315,7 @@ function LoginContent() {
             Google
           </Button>
         </CardContent>
-        <CardFooter className="justify-center border-t py-4 bg-muted/20">
-          <Button 
-            variant="link" 
-            size="sm" 
-            className="text-xs"
-            onClick={() => setIsTrainer(!isTrainer)}
-          >
-            Switch to {isTrainer ? "Student" : "Coach"} Login
-          </Button>
-        </CardFooter>
+
       </Card>
     </div>
   );

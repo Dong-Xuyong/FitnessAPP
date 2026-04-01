@@ -43,6 +43,13 @@ export interface TrainingProgramExercise {
   sets: number;
   reps: string;
   restTimeSeconds: number;
+  targetWeightKg?: number;
+  setDetails?: Array<{
+    setNumber: number;
+    reps: string;
+    targetWeightKg?: number;
+    restTimeSeconds: number;
+  }>;
   notes?: string;
 }
 
@@ -53,8 +60,26 @@ export interface TrainingProgramSession {
   exercises: TrainingProgramExercise[];
 }
 
+export type DayOfWeek =
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday'
+  | 'saturday'
+  | 'sunday';
+
+export interface WeeklyProgramItem {
+  week: number;
+  trainingProgramId: string;
+  trainingProgramName: string;
+  dayOfWeek: DayOfWeek;
+  weightIncreaseKg: number;
+  repIncrease: number;
+}
+
 /**
- * Reusable program template under `personalTrainers/{trainerId}/trainingPrograms/{programId}`.
+ * Reusable program template under root `trainerTrainingPrograms/{programId}` (field `trainerId`).
  */
 export interface TrainingProgramDocument {
   trainerId: string;
@@ -64,6 +89,9 @@ export interface TrainingProgramDocument {
   level?: FitnessLevel | "all";
   durationWeeks?: number;
   sessions: TrainingProgramSession[];
+  programType?: 'single' | 'weekly';
+  sourceProgramIds?: string[];
+  weeklyPlan?: WeeklyProgramItem[];
   createdAt: string;
   updatedAt: string;
 }
@@ -84,4 +112,24 @@ export interface StrengthRecord {
   date: string;
   weight: number;
   reps: number;
+}
+
+export type MilestoneStatus = 'active' | 'completed' | 'missed' | 'paused';
+export type MilestoneCategory = 'weight' | 'strength' | 'endurance' | 'flexibility' | 'milestone' | 'other';
+
+export interface Milestone {
+  id: string;
+  studentId: string;
+  trainerId: string;
+  title: string;
+  description?: string;
+  category: MilestoneCategory;
+  targetValue: number;
+  targetUnit: string; // e.g., "kg", "lbs", "reps", "km", "%"
+  currentValue: number;
+  dueDate: string; // ISO date string
+  status: MilestoneStatus;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }

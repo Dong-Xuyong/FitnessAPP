@@ -1,7 +1,9 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,31 +11,127 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Sparkles, Plus, Trash2, Send, Loader2, Library } from "lucide-react";
-import { aiWorkoutPlanSuggestion } from "@/ai/flows/ai-workout-plan-suggestion";
+import { Plus, Trash2, Send, Loader2, Library, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBlocking } from "@/firebase";
-import { collection } from "firebase/firestore";
+import { useUser, useFirestore, useCollection, useDoc, useMemoFirebase, addDocumentNonBlocking, updateDocumentNonBlocking } from "@/firebase";
+import { collection, doc, addDoc } from "firebase/firestore";
 import {
   buildTrainingProgramSessionsFromBuilder,
-  trainingProgramsRef,
+  trainerTrainingProgramsCollection,
 } from "@/lib/firestore/training-programs";
+import type { TrainingProgramDocument } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
-export default function WorkoutBuilderPage() {
+type BuilderSetDetail = {
+  reps: string;
+  weight: string;
+  rest: string;
+};
+
+type BuilderExercise = {
+  name: string;
+  sets: number;
+  reps: string;
+  rest: number;
+  weight: string;
+  notes: string;
+  setDetails: BuilderSetDetail[];
+};
+
+function makeSetDetail(template?: Partial<BuilderSetDetail>): BuilderSetDetail {
+  return {
+    reps: template?.reps ?? "10-12",
+    weight: template?.weight ?? "",
+    rest: template?.rest ?? "60",
+  };
+}
+
+function makeExercise(): BuilderExercise {
+  return {
+    name: "",
+    sets: 3,
+    reps: "10-12",
+    rest: 60,
+    weight: "",
+    notes: "",
+    setDetails: [makeSetDetail(), makeSetDetail(), makeSetDetail()],
+  };
+}
+
+function resizeSetDetails(
+  source: BuilderSetDetail[] | undefined,
+  count: number,
+  fallback: BuilderSetDetail
+): BuilderSetDetail[] {
+  const safeCount = Math.max(1, count);
+  const current = source?.length ? [...source] : [];
+  if (current.length >= safeCount) return current.slice(0, safeCount);
+  const missing = Array.from({ length: safeCount - current.length }, () => makeSetDetail(fallback));
+  return [...current, ...missing];
+}
+
+function WorkoutBuilderContent() {
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { t } = useI18n();
+  const searchParams = useSearchParams();
+  const editProgramId = searchParams.get("edit");
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [isSavingLibrary, setIsSavingLibrary] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   
   const [programTitle, setProgramTitle] = useState("New Workout Plan");
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
-  const [exercises, setExercises] = useState([
-    { name: "", sets: 3, reps: "10-12", rest: 60, notes: "" }
-  ]);
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [scheduledTime, setScheduledTime] = useState("");
+  const [exercises, setExercises] = useState<BuilderExercise[]>([makeExercise()]);
+
+  // Load existing program when editing
+  const editProgramRef = useMemoFirebase(() => {
+    if (!db || !user || !editProgramId) return null;
+    return doc(db, "personalTrainers", user.uid, "personalTrainingPrograms", editProgramId);
+  }, [db, user, editProgramId]);
+
+  const { data: editProgram, isLoading: isLoadingProgram } = useDoc<TrainingProgramDocument>(editProgramRef);
+
+  useEffect(() => {
+    if (editProgram && !loaded) {
+      setProgramTitle(editProgram.name || "Untitled program");
+      const allExercises = (editProgram.sessions || []).flatMap(session =>
+        (session.exercises || []).map(ex => ({
+          name: ex.exerciseName,
+          sets: ex.sets,
+          reps: ex.reps,
+          rest: ex.restTimeSeconds,
+          weight: ex.targetWeightKg != null ? String(ex.targetWeightKg) : "",
+          notes: ex.notes || "",
+          setDetails: ex.setDetails?.length
+            ? ex.setDetails.map((set) => ({
+                reps: String(set.reps || ex.reps || "10-12"),
+                weight: set.targetWeightKg != null ? String(set.targetWeightKg) : "",
+                rest: String(set.restTimeSeconds ?? ex.restTimeSeconds ?? 60),
+              }))
+            : resizeSetDetails(
+                [],
+                Number(ex.sets) || 1,
+                makeSetDetail({
+                  reps: String(ex.reps || "10-12"),
+                  weight: ex.targetWeightKg != null ? String(ex.targetWeightKg) : "",
+                  rest: String(ex.restTimeSeconds ?? 60),
+                })
+              ),
+        }))
+      );
+      if (allExercises.length > 0) {
+        setExercises(allExercises);
+      }
+      setLoaded(true);
+    }
+  }, [editProgram, loaded]);
 
   const [aiContext, setAiContext] = useState({
     goals: "Build muscle",
@@ -49,8 +147,25 @@ export default function WorkoutBuilderPage() {
 
   const { data: students } = useCollection(studentsQuery);
 
+  // Also fetch global students to resolve Auth UIDs
+  const globalStudentsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, "students");
+  }, [db]);
+  const { data: globalStudents } = useCollection(globalStudentsQuery);
+
+  // Fetch exercises from the library
+  const exercisesQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "exercises");
+  }, [db, user]);
+
+  const { data: libraryExercises } = useCollection(exercisesQuery);
+
+  const exerciseNames = (libraryExercises || []).map((ex: any) => ex.name as string).sort();
+
   const handleAddExercise = () => {
-    setExercises([...exercises, { name: "", sets: 3, reps: "10-12", rest: 60, notes: "" }]);
+    setExercises([...exercises, makeExercise()]);
   };
 
   const handleRemoveExercise = (index: number) => {
@@ -58,9 +173,56 @@ export default function WorkoutBuilderPage() {
   };
 
   const handleUpdateExercise = (index: number, field: string, value: any) => {
-    const newExercises = [...exercises];
-    newExercises[index] = { ...newExercises[index], [field]: value };
-    setExercises(newExercises);
+    setExercises((prev) =>
+      prev.map((exercise, i) => {
+        if (i !== index) return exercise;
+
+        if (field === "sets") {
+          const nextSetCount = Math.max(1, Number(value) || 1);
+          const fallback = makeSetDetail({
+            reps: exercise.setDetails[0]?.reps || exercise.reps || "10-12",
+            weight: exercise.setDetails[0]?.weight ?? exercise.weight,
+            rest: exercise.setDetails[0]?.rest || String(exercise.rest || 60),
+          });
+          const nextSetDetails = resizeSetDetails(exercise.setDetails, nextSetCount, fallback);
+          return {
+            ...exercise,
+            sets: nextSetCount,
+            reps: nextSetDetails[0]?.reps || exercise.reps,
+            rest: Number(nextSetDetails[0]?.rest || exercise.rest),
+            weight: nextSetDetails[0]?.weight ?? exercise.weight,
+            setDetails: nextSetDetails,
+          };
+        }
+
+        return { ...exercise, [field]: value };
+      })
+    );
+  };
+
+  const handleUpdateSetDetail = (
+    exerciseIndex: number,
+    setIndex: number,
+    field: keyof BuilderSetDetail,
+    value: string
+  ) => {
+    setExercises((prev) =>
+      prev.map((exercise, i) => {
+        if (i !== exerciseIndex) return exercise;
+        const nextSetDetails = [...exercise.setDetails];
+        const current = nextSetDetails[setIndex] || makeSetDetail();
+        nextSetDetails[setIndex] = { ...current, [field]: value };
+
+        const firstSet = nextSetDetails[0] || makeSetDetail();
+        return {
+          ...exercise,
+          reps: firstSet.reps,
+          rest: Number(firstSet.rest || exercise.rest),
+          weight: firstSet.weight,
+          setDetails: nextSetDetails,
+        };
+      })
+    );
   };
 
   const validateExercisesForSave = (): boolean => {
@@ -81,26 +243,39 @@ export default function WorkoutBuilderPage() {
 
     setIsSavingLibrary(true);
     const now = new Date().toISOString();
-    const programsCol = trainingProgramsRef(db, user.uid);
 
     try {
-      await addDocumentNonBlocking(programsCol, {
-        trainerId: user.uid,
-        name: programTitle.trim() || "Untitled program",
-        sessions: buildTrainingProgramSessionsFromBuilder(programTitle, exercises),
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      toast({
-        title: "Saved to library",
-        description: `"${programTitle.trim() || "Untitled program"}" is available under Training Programs.`,
-      });
-    } catch {
+      if (editProgramId && editProgramRef) {
+        // Update existing program
+        await updateDocumentNonBlocking(editProgramRef, {
+          name: programTitle.trim() || "Untitled program",
+          sessions: buildTrainingProgramSessionsFromBuilder(programTitle, exercises),
+          updatedAt: now,
+        });
+        toast({
+          title: "Program updated",
+          description: `"${programTitle.trim() || "Untitled program"}" has been saved.`,
+        });
+      } else {
+        // Create new program
+        const programsCol = trainerTrainingProgramsCollection(db, user.uid);
+        await addDocumentNonBlocking(programsCol, {
+          trainerId: user.uid,
+          name: programTitle.trim() || "Untitled program",
+          sessions: buildTrainingProgramSessionsFromBuilder(programTitle, exercises),
+          createdAt: now,
+          updatedAt: now,
+        });
+        toast({
+          title: "Saved to library",
+          description: `"${programTitle.trim() || "Untitled program"}" is available under Training Programs.`,
+        });
+      }
+    } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Save failed",
-        description: "Could not save the program. Please check your permissions.",
+        description: error?.message || "Could not save the program.",
       });
     } finally {
       setIsSavingLibrary(false);
@@ -120,69 +295,63 @@ export default function WorkoutBuilderPage() {
     if (!validateExercisesForSave()) return;
 
     setIsAssigning(true);
-    const workoutRef = collection(db, "personalTrainers", user.uid, "students", selectedStudentId, "workoutPlans");
+    // Resolve the student's Auth UID. Try: roster doc's userId field, then match by email in global students, then fall back to roster doc ID
+    const selectedStudent = students?.find(s => s.id === selectedStudentId);
+    let studentAuthUid = selectedStudent?.userId as string || "";
+    if (!studentAuthUid && selectedStudent?.email) {
+      const globalMatch = globalStudents?.find((g: any) => g.email === selectedStudent.email);
+      if (globalMatch) studentAuthUid = globalMatch.id;
+    }
+    if (!studentAuthUid) studentAuthUid = selectedStudentId;
     
-    try {
-      await addDocumentNonBlocking(workoutRef, {
-        title: programTitle,
-        studentId: selectedStudentId,
-        personalTrainerId: user.uid,
-        createdAt: new Date().toISOString(),
-        exercises: exercises.map(ex => ({
-          exerciseName: ex.name,
-          sets: Number(ex.sets),
-          reps: ex.reps,
-          restTimeSeconds: Number(ex.rest),
-          notes: ex.notes
-        }))
-      });
+    const workoutRef = collection(db, "personalTrainers", user.uid, "students", studentAuthUid, "workoutPlans");
+    console.log("Assigning to path:", workoutRef.path, "studentAuthUid:", studentAuthUid, "rosterDocId:", selectedStudentId);
+    
+    const assignedAt = scheduledDate
+      ? new Date(`${scheduledDate}T${scheduledTime || "00:00"}`).toISOString()
+      : new Date().toISOString();
 
+    const payload = {
+      title: programTitle,
+      studentId: studentAuthUid,
+      personalTrainerId: user.uid,
+      createdAt: new Date().toISOString(),
+      assignedAt,
+      scheduledTime: scheduledTime || "",
+      exercises: exercises.map(ex => ({
+        exerciseName: ex.name,
+        sets: ex.setDetails.length,
+        reps: ex.setDetails[0]?.reps || ex.reps,
+        restTimeSeconds: Number(ex.setDetails[0]?.rest || ex.rest),
+        targetWeightKg:
+          ex.setDetails[0]?.weight === "" || ex.setDetails[0]?.weight == null
+            ? undefined
+            : Number(ex.setDetails[0].weight),
+        setDetails: ex.setDetails.map((set, index) => ({
+          setNumber: index + 1,
+          reps: set.reps,
+          targetWeightKg: set.weight === "" ? undefined : Number(set.weight),
+          restTimeSeconds: Number(set.rest),
+        })),
+        notes: ex.notes
+      }))
+    };
+
+    try {
+      const docRef = await addDoc(workoutRef, payload);
       toast({
         title: "Program Assigned!",
         description: `Successfully assigned "${programTitle}" to the selected student.`,
       });
-    } catch (e) {
+    } catch (e: any) {
+      console.error("Assignment error:", e);
       toast({
         variant: "destructive",
         title: "Assignment Failed",
-        description: "Could not save the program. Please check your permissions.",
+        description: e?.message || "Could not save the program. Please check your permissions.",
       });
     } finally {
       setIsAssigning(false);
-    }
-  };
-
-  const handleAiSuggestion = async () => {
-    setIsGenerating(true);
-    try {
-      const result = await aiWorkoutPlanSuggestion({
-        studentGoals: aiContext.goals,
-        studentAge: aiContext.age,
-        studentWeightKg: aiContext.weight,
-        studentFitnessLevel: aiContext.level,
-      });
-
-      const newExercises = result.workoutPlan.map(ex => ({
-        name: ex.exerciseName,
-        sets: ex.sets,
-        reps: ex.reps,
-        rest: ex.restTimeSeconds,
-        notes: ex.notes || ""
-      }));
-
-      setExercises(newExercises);
-      toast({
-        title: "AI Suggestion Ready!",
-        description: "The plan has been populated with AI recommendations.",
-      });
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "AI Failed",
-        description: "Could not generate suggestions. Check your API configuration.",
-      });
-    } finally {
-      setIsGenerating(false);
     }
   };
 
@@ -196,7 +365,9 @@ export default function WorkoutBuilderPage() {
               onChange={(e) => setProgramTitle(e.target.value)} 
               className="text-3xl font-bold font-headline border-none p-0 h-auto focus-visible:ring-0 bg-transparent"
             />
-            <p className="text-muted-foreground">Drafting program for student assignment.</p>
+            <p className="text-muted-foreground">
+              {editProgramId ? "Editing existing program." : "Drafting program for student assignment."}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -210,7 +381,7 @@ export default function WorkoutBuilderPage() {
               ) : (
                 <Library className="h-4 w-4" />
               )}
-              Save to library
+              {editProgramId ? "Save changes" : "Save to library"}
             </Button>
             <Button 
               className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
@@ -218,7 +389,7 @@ export default function WorkoutBuilderPage() {
               disabled={isAssigning || !selectedStudentId}
             >
               {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Assign Program
+              {t("assignProgram")}
             </Button>
           </div>
         </header>
@@ -226,46 +397,41 @@ export default function WorkoutBuilderPage() {
         <div className="grid md:grid-cols-3 gap-6">
           <Card className="md:col-span-1">
             <CardHeader>
-              <CardTitle>Assignment</CardTitle>
-              <CardDescription>Who is this for?</CardDescription>
+              <CardTitle>{t("assignment")}</CardTitle>
+              <CardDescription>{t("whoIsThisFor")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Select Student</Label>
+                <Label>{t("selectStudent")}</Label>
                 <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select from roster" />
+                    <SelectValue placeholder={t("selectFromRoster")} />
                   </SelectTrigger>
                   <SelectContent>
                     {students?.map(s => (
                       <SelectItem key={s.id} value={s.id}>{s.firstName} {s.lastName}</SelectItem>
                     ))}
                     {(!students || students.length === 0) && (
-                      <SelectItem value="none" disabled>No students found</SelectItem>
+                      <SelectItem value="none" disabled>{t("noStudentsFound")}</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
               </div>
-
-              <div className="pt-4 border-t space-y-4">
-                <Label className="text-xs uppercase text-muted-foreground font-bold">AI Assistant</Label>
-                <div className="space-y-2">
-                  <Label>Goals</Label>
-                  <Input 
-                    placeholder="e.g. Lose fat" 
-                    value={aiContext.goals} 
-                    onChange={(e) => setAiContext({...aiContext, goals: e.target.value})}
-                  />
-                </div>
-                <Button 
-                  variant="secondary" 
-                  className="w-full gap-2" 
-                  onClick={handleAiSuggestion}
-                  disabled={isGenerating}
-                >
-                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-primary" />}
-                  Generate Suggestion
-                </Button>
+              <div className="space-y-2">
+                <Label>{t("workoutDate")}</Label>
+                <Input
+                  type="date"
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>{t("workoutTime")}</Label>
+                <Input
+                  type="time"
+                  value={scheduledTime}
+                  onChange={(e) => setScheduledTime(e.target.value)}
+                />
               </div>
             </CardContent>
           </Card>
@@ -274,13 +440,21 @@ export default function WorkoutBuilderPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle>Routine Steps</CardTitle>
+                  <CardTitle>{t("routineSteps")}</CardTitle>
                   <CardDescription>{exercises.length} exercises total</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" onClick={handleAddExercise} className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Add Row
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" asChild className="gap-2">
+                    <Link href="/exercises" target="_blank">
+                      <ExternalLink className="h-4 w-4" />
+                      Browse Library
+                    </Link>
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleAddExercise} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add Row
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-6">
                 {exercises.map((ex, i) => (
@@ -297,36 +471,59 @@ export default function WorkoutBuilderPage() {
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Exercise Name</Label>
-                          <Input 
-                            value={ex.name} 
-                            placeholder="e.g. Barbell Squat" 
-                            onChange={(e) => handleUpdateExercise(i, "name", e.target.value)}
+                          <Select value={ex.name} onValueChange={(val) => handleUpdateExercise(i, "name", val)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select exercise" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {exerciseNames.map((name) => (
+                                <SelectItem key={name} value={name}>{name}</SelectItem>
+                              ))}
+                              {exerciseNames.length === 0 && (
+                                <SelectItem value="none" disabled>No exercises — add some in the Exercise Library</SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Sets</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={ex.sets}
+                            onChange={(e) => handleUpdateExercise(i, "sets", e.target.value)}
                           />
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="space-y-2">
-                            <Label>Sets</Label>
-                            <Input 
-                              type="number" 
-                              value={ex.sets} 
-                              onChange={(e) => handleUpdateExercise(i, "sets", e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Reps</Label>
-                            <Input 
-                              value={ex.reps} 
-                              onChange={(e) => handleUpdateExercise(i, "reps", e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Rest (s)</Label>
-                            <Input 
-                              type="number" 
-                              value={ex.rest} 
-                              onChange={(e) => handleUpdateExercise(i, "rest", e.target.value)}
-                            />
-                          </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-4 gap-2 text-xs font-semibold text-muted-foreground uppercase px-1">
+                          <span>Set</span>
+                          <span>Reps</span>
+                          <span>kg</span>
+                          <span>s</span>
+                        </div>
+                        <div className="space-y-2">
+                          {ex.setDetails.map((set, setIndex) => (
+                            <div key={`${i}-set-${setIndex}`} className="grid grid-cols-4 gap-2 items-center">
+                              <p className="text-sm font-medium px-1">#{setIndex + 1}</p>
+                              <Input
+                                value={set.reps}
+                                onChange={(e) => handleUpdateSetDetail(i, setIndex, "reps", e.target.value)}
+                              />
+                              <Input
+                                type="number"
+                                value={set.weight}
+                                placeholder="Optional"
+                                onChange={(e) => handleUpdateSetDetail(i, setIndex, "weight", e.target.value)}
+                              />
+                              <Input
+                                type="number"
+                                value={set.rest}
+                                onChange={(e) => handleUpdateSetDetail(i, setIndex, "rest", e.target.value)}
+                              />
+                            </div>
+                          ))}
                         </div>
                       </div>
                       <div className="space-y-2">
@@ -347,5 +544,17 @@ export default function WorkoutBuilderPage() {
         </div>
       </div>
     </Navigation>
+  );
+}
+
+export default function WorkoutBuilderPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    }>
+      <WorkoutBuilderContent />
+    </Suspense>
   );
 }

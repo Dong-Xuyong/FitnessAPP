@@ -14,6 +14,10 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isTrainer() {
+      return isSignedIn() && exists(/databases/$(database)/documents/personalTrainers/$(request.auth.uid));
+    }
+
     function isExistingOwner(userId) {
       return resource != null && isOwner(userId);
     }
@@ -27,31 +31,61 @@ service cloud.firestore {
       return !(field in request.resource.data) || request.resource.data[field] == resource.data[field];
     }
 
+    // Global Exercises Library
+    match /exercises/{exerciseId} {
+      allow read: if isSignedIn();
+      allow create: if isTrainer();
+      allow update: if isTrainer() && resource.data.createdBy == request.auth.uid;
+      allow delete: if isTrainer() && resource.data.createdBy == request.auth.uid;
+    }
+
     // Global Students Directory
     match /students/{studentId} {
       allow read: if isSignedIn();
       allow create: if isOwner(studentId);
-      allow update: if isOwner(studentId);
+      allow update: if isOwner(studentId) || isTrainer();
       allow delete: if false;
     }
 
+    // Milestones Collection
+    match /milestones/{milestoneId} {
+      allow get: if isSignedIn() && (
+        // Trainer can read their own milestones
+        resource.data.trainerId == request.auth.uid ||
+        // Student can read milestones assigned to them
+        resource.data.studentId == request.auth.uid
+      );
+
+      // Allow queries only for milestones that belong to the signed-in user.
+      // This supports scoped trainer/student queries without requiring a separate trainer profile doc.
+      allow list: if isSignedIn() && (
+        resource.data.trainerId == request.auth.uid ||
+        resource.data.studentId == request.auth.uid
+      );
+      
+      allow create: if isTrainer() && 
+        request.resource.data.trainerId == request.auth.uid &&
+        request.resource.data.studentId != null;
+      
+      allow update: if isTrainer() && 
+        resource.data.trainerId == request.auth.uid &&
+        request.resource.data.trainerId == request.auth.uid;
+      
+      allow delete: if isTrainer() && 
+        resource.data.trainerId == request.auth.uid;
+    }
+
     match /personalTrainers/{personalTrainerId} {
+    
+      match /personalTrainingPrograms/{programId} {
+        allow get, list: if isOwner(personalTrainerId);
+        allow create, update, delete: if isOwner(personalTrainerId);
+      }	
+    
       allow get, list: if isSignedIn();
       allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId);
       allow update: if isExistingOwner(personalTrainerId) && isFieldUnchanged('id');
       allow delete: if false;
-
-      // Reusable training program templates (trainer library)
-      match /trainingPrograms/{programId} {
-        allow get, list: if isOwner(personalTrainerId);
-        allow create: if isOwner(personalTrainerId)
-          && request.resource.data.trainerId == personalTrainerId;
-        allow update: if isOwner(personalTrainerId)
-          && resource.data.trainerId == personalTrainerId
-          && isFieldUnchanged('trainerId');
-        allow delete: if isOwner(personalTrainerId)
-          && resource.data.trainerId == personalTrainerId;
-      }
 
       match /students/{studentId} {
         // Allow trainers to manage their students, and students to read/manage their own records
@@ -74,6 +108,11 @@ service cloud.firestore {
           allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
           allow create, update: if isOwner(personalTrainerId) || isOwner(studentId);
           allow delete: if isOwner(personalTrainerId);
+        }
+
+        match /payments/{paymentId} {
+          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
+          allow create, update, delete: if isOwner(personalTrainerId);
         }
       }
     }

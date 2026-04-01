@@ -4,41 +4,46 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { 
-  LayoutDashboard, 
-  Dumbbell, 
-  LineChart, 
+import { useI18n } from "@/lib/i18n";
+import {
+  LayoutDashboard,
+  Dumbbell,
+  BookOpen,
+  LineChart,
+  History,
   LogOut,
-  Bell,
-  MessageSquare,
   Play,
   CreditCard,
-  Calendar,
   User,
-  Loader2
+  Menu,
+  Globe,
+  ShieldBan,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
-import { collection, query, where, getDocs, limit } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 
 const navItems = [
-  { name: "My Dashboard", href: "/student/dashboard", icon: LayoutDashboard },
-  { name: "Workouts", href: "/student/workouts", icon: Dumbbell },
-  { name: "Progress", href: "/student/progress", icon: LineChart },
-  { name: "Billing", href: "/student/billing", icon: CreditCard },
-  { name: "Profile", href: "/student/profile", icon: User },
+  { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
+  { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
+  { key: "exercises" as const, href: "/student/exercises", icon: BookOpen },
+  { key: "progress" as const, href: "/student/progress", icon: LineChart },
+  { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
+  { key: "billing" as const, href: "/student/billing", icon: CreditCard },
+  { key: "profile" as const, href: "/student/profile", icon: User },
 ];
 
-const mockStudentNotifications = [
-  { id: 1, title: "New Routine Assigned", description: "Coach John assigned 'Upper Body Hypertrophy'", time: "Just now", icon: Dumbbell, type: "primary" },
-  { id: 2, title: "Coach Feedback", description: "John left a note on your Squat progress", time: "3h ago", icon: MessageSquare, type: "info" },
-  { id: 3, title: "Reminder", description: "Don't forget to log your weight today!", time: "5h ago", icon: Calendar, type: "warning" },
-];
+function splitName(rawName?: string): { firstName?: string; fullName?: string } {
+  const value = (rawName || "").trim().replace(/\s+/g, " ");
+  if (!value) return {};
+  const first = value.split(" ")[0] || undefined;
+  return { firstName: first, fullName: value };
+}
 
 export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -46,33 +51,44 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const db = useFirestore();
   const { user } = useUser();
-  const [profile, setProfile] = useState<{ firstName?: string; photoUrl?: string } | null>(null);
+  const { t, locale, setLocale } = useI18n();
+  const [profile, setProfile] = useState<{ firstName?: string; fullName?: string; photoUrl?: string } | null>(null);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    if (!db || !user?.email) return;
+    if (!db || !user?.uid) return;
+    const uid = user.uid;
 
     async function fetchStudentProfile() {
       try {
-        const trainersCol = collection(db, "personalTrainers");
-        const trainersSnapshot = await getDocs(trainersCol);
-        
-        for (const trainerDoc of trainersSnapshot.docs) {
-          const studentsCol = collection(db, "personalTrainers", trainerDoc.id, "students");
-          const q = query(studentsCol, where("email", "==", user?.email), limit(1));
-          const studentSnapshot = await getDocs(q);
-          
-          if (!studentSnapshot.empty) {
-            setProfile(studentSnapshot.docs[0].data());
-            break;
-          }
+        // Single read of global student doc — rules allow isOwner(studentId).
+        // Do not query trainer subcollections by email; Firestore rules reject those queries.
+        const ref = doc(db, "students", uid);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const d = snap.data();
+          setIsBlocked(d.blocked === true);
+          const fromName = splitName(typeof d.name === "string" ? d.name : undefined);
+          const firstName =
+            fromName.firstName ||
+            (typeof d.firstName === "string" ? d.firstName : undefined);
+          setProfile({
+            fullName: fromName.fullName || (typeof d.name === "string" ? d.name : undefined),
+            firstName,
+            photoUrl: typeof d.photoUrl === "string" ? d.photoUrl : undefined,
+          });
+        } else {
+          setProfile(null);
         }
       } catch (e) {
         console.error("Error fetching profile for navigation", e);
+        setProfile(null);
       }
     }
 
     fetchStudentProfile();
-  }, [db, user?.email, pathname]); // Re-fetch on pathname change to catch updates after saving profile
+  }, [db, user?.uid, pathname]);
 
   const handleSignOut = () => {
     if (!auth) return;
@@ -83,7 +99,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className="w-64 border-r bg-card hidden md:flex flex-col fixed inset-y-0">
+      <aside className="w-64 border-r bg-card hidden md:flex flex-col fixed inset-y-0 overflow-hidden">
         <div className="p-6">
           <Link href="/student/dashboard" className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-accent-foreground">
@@ -93,10 +109,10 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1">
+        <nav className="flex-1 px-4 space-y-1 overflow-y-auto min-h-0">
           {navItems.map((item) => (
             <Link
-              key={item.name}
+              key={item.key}
               href={item.href}
               className={cn(
                 "flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors",
@@ -106,12 +122,12 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
               )}
             >
               <item.icon className="h-5 w-5" />
-              {item.name}
+              {t(item.key)}
             </Link>
           ))}
         </nav>
 
-        <div className="p-4 border-t mt-auto">
+        <div className="p-4 border-t mt-auto shrink-0">
           <div className="flex items-center gap-3 px-4 py-2 mb-4">
             <Avatar className="h-8 w-8 ring-2 ring-accent/10">
               <AvatarImage src={profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || 's1'}/100/100`} />
@@ -119,7 +135,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             </Avatar>
             <div className="overflow-hidden">
               <p className="text-sm font-medium leading-none truncate">
-                {profile?.firstName || user?.displayName || "Student"}
+                {profile?.fullName || profile?.firstName || user?.displayName || "Student"}
               </p>
               <p className="text-xs text-muted-foreground truncate">{user?.email || "Account"}</p>
             </div>
@@ -130,71 +146,121 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             onClick={handleSignOut}
           >
             <LogOut className="h-5 w-5" />
-            Logout
+            {t("logout")}
           </Button>
         </div>
       </aside>
 
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="w-72 p-0 flex flex-col h-full">
+          <SheetTitle className="sr-only">Student navigation</SheetTitle>
+          <div className="p-6 border-b">
+            <Link
+              href="/student/dashboard"
+              className="flex items-center gap-2"
+              onClick={() => setMobileOpen(false)}
+            >
+              <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-accent-foreground">
+                <Dumbbell className="h-5 w-5" />
+              </div>
+              <span className="text-xl font-bold font-headline tracking-tight text-accent">
+                ElevateStudent
+              </span>
+            </Link>
+          </div>
+          <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
+            {navItems.map((item) => (
+              <Link
+                key={item.key}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors",
+                  pathname === item.href
+                    ? "bg-accent/10 text-accent"
+                    : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
+                )}
+              >
+                <item.icon className="h-5 w-5" />
+                {t(item.key)}
+              </Link>
+            ))}
+          </nav>
+          <div className="p-4 pb-8 border-t mt-auto">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-3 text-muted-foreground"
+              onClick={() => {
+                setMobileOpen(false);
+                handleSignOut();
+              }}
+            >
+              <LogOut className="h-5 w-5" />
+              {t("logout")}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <div className="flex-1 md:ml-64 flex flex-col">
-        <header className="h-16 border-b bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-6">
-          <div className="flex items-center gap-4">
+        <header className="h-16 border-b bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden shrink-0"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
             <h1 className="text-lg font-semibold capitalize">
-              Student Portal
+              {t("myDashboard")}
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" className="relative" asChild>
-              <Link href="/student/messages">
-                <MessageSquare className="h-5 w-5" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full" />
-              </Link>
-            </Button>
-            
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="icon" className="relative">
-                  <Bell className="h-5 w-5" />
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <Globe className="h-4 w-4" />
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-0" align="end">
-                <div className="p-4 border-b">
-                  <h3 className="font-bold">Notifications</h3>
-                </div>
-                <ScrollArea className="h-[300px]">
-                  <div className="divide-y">
-                    {mockStudentNotifications.map((notif) => (
-                      <div key={notif.id} className="p-4 hover:bg-accent/5 flex gap-3">
-                        <div className={cn(
-                          "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-                          notif.type === 'primary' ? 'bg-accent/10 text-accent' :
-                          notif.type === 'warning' ? 'bg-destructive/10 text-destructive' : 'bg-blue-500/10 text-blue-500'
-                        )}>
-                          <notif.icon className="w-4 h-4" />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm font-bold leading-none">{notif.title}</p>
-                          <p className="text-xs text-muted-foreground">{notif.description}</p>
-                          <p className="text-[10px] text-muted-foreground">{notif.time}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              </PopoverContent>
-            </Popover>
-
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setLocale("en")} className={locale === "en" ? "font-bold" : ""}>
+                  English
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocale("pt")} className={locale === "pt" ? "font-bold" : ""}>
+                  Português
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button className="hidden sm:flex gap-2 bg-accent text-accent-foreground hover:bg-accent/90" asChild>
               <Link href="/student/workouts">
                 <Play className="h-4 w-4" />
-                Log Workout
+                {t("startWorkout")}
               </Link>
             </Button>
           </div>
         </header>
 
-        <main className="flex-1 p-6 overflow-auto">
-          {children}
+        <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
+          {isBlocked ? (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4">
+              <div className="rounded-full bg-destructive/10 p-6">
+                <ShieldBan className="h-12 w-12 text-destructive" />
+              </div>
+              <h2 className="text-2xl font-bold">Account Suspended</h2>
+              <p className="text-muted-foreground max-w-md">
+                Your account has been suspended by your coach. Please contact your coach for more information.
+              </p>
+              <Button variant="outline" className="mt-4 gap-2" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </Button>
+            </div>
+          ) : (
+            children
+          )}
         </main>
       </div>
     </div>

@@ -13,6 +13,10 @@ import { useUser, useFirestore, updateDocumentNonBlocking } from "@/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, UserCircle, Camera } from "lucide-react";
+import Link from "next/link";
+
+const ALLOWED_GOALS = new Set(["muscle_gain", "weight_loss", "endurance", "general"]);
+const ALLOWED_SEX = new Set(["male", "female", "other"]);
 
 export default function StudentProfilePage() {
   const { user, isUserLoading } = useUser();
@@ -34,38 +38,72 @@ export default function StudentProfilePage() {
     goalWeightKg: ""
   });
 
+  const splitName = (rawName: string): { firstName: string; lastName: string } => {
+    const normalized = rawName.trim().replace(/\s+/g, " ");
+    if (!normalized) return { firstName: "", lastName: "" };
+    const parts = normalized.split(" ");
+    const firstName = parts[0] || "";
+    const lastName = parts.slice(1).join(" ");
+    return { firstName, lastName };
+  };
+
   useEffect(() => {
-    if (!db || !user?.uid) return;
+    if (!db || !user?.uid) {
+      setIsLoadingProfile(false);
+      return;
+    }
+
+    let cancelled = false;
 
     async function fetchProfile() {
       setIsLoadingProfile(true);
       try {
         const globalDocRef = doc(db, "students", user.uid);
         const globalDocSnap = await getDoc(globalDocRef);
-        
+
+        if (cancelled) return;
+
         if (globalDocSnap.exists()) {
           const data = globalDocSnap.data();
+          const sex =
+            typeof data.sex === "string" && ALLOWED_SEX.has(data.sex)
+              ? data.sex
+              : "male";
+          const goalType =
+            typeof data.goalType === "string" && ALLOWED_GOALS.has(data.goalType)
+              ? data.goalType
+              : "muscle_gain";
           setTrainerId(data.trainerId || null);
           setFormData({
             name: data.name || user.displayName || "",
             photoUrl: data.photoUrl || user.photoURL || "",
             age: data.age?.toString() || "",
-            sex: data.sex || "male",
+            sex,
             weightKg: data.weightKg?.toString() || "",
             heightCm: data.heightCm?.toString() || "",
-            goalType: data.goalType || "muscle_gain",
-            goalWeightKg: data.goalWeightKg?.toString() || ""
+            goalType,
+            goalWeightKg: data.goalWeightKg?.toString() || "",
           });
+        } else {
+          setTrainerId(null);
+          setFormData((prev) => ({
+            ...prev,
+            name: user!.displayName || "",
+            photoUrl: user!.photoURL || "",
+          }));
         }
       } catch (e) {
         console.error("Error fetching profile", e);
       } finally {
-        setIsLoadingProfile(false);
+        if (!cancelled) setIsLoadingProfile(false);
       }
     }
 
     fetchProfile();
-  }, [db, user]);
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user?.uid]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,10 +111,14 @@ export default function StudentProfilePage() {
 
     setIsSaving(true);
 
+    const { firstName, lastName } = splitName(formData.name);
+
     const updateData = {
       userId: user.uid,
       trainerId: trainerId,
       name: formData.name,
+      firstName,
+      lastName,
       photoUrl: formData.photoUrl,
       age: Number(formData.age) || 0,
       sex: formData.sex,
@@ -116,6 +158,22 @@ export default function StudentProfilePage() {
       <StudentNavigation>
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </StudentNavigation>
+    );
+  }
+
+  if (!user) {
+    return (
+      <StudentNavigation>
+        <div className="max-w-md mx-auto py-16 text-center space-y-4">
+          <h2 className="text-xl font-bold font-headline">Sign in required</h2>
+          <p className="text-muted-foreground">
+            Sign in as a student to view and edit your profile.
+          </p>
+          <Button asChild>
+            <Link href="/login?role=student">Go to sign in</Link>
+          </Button>
         </div>
       </StudentNavigation>
     );
