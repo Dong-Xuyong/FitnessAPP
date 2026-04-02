@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   Ban,
   ShieldOff,
+  Percent,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -64,6 +65,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MilestonesTab } from "@/components/MilestonesTab";
+import { useI18n } from "@/lib/i18n";
 import type { Milestone } from "@/lib/types";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
@@ -114,6 +116,7 @@ function adjustAssignedExercises(exercises: any[], weightDelta: number, repDelta
 
 // ─── Billing Tab Component ───────────────────────────────────────
 function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studentId: string; toast: any }) {
+  const { t } = useI18n();
   const [monthlyRate, setMonthlyRate] = useState("");
   const [rate30Min, setRate30Min] = useState("");
   const [rate60Min, setRate60Min] = useState("");
@@ -189,7 +192,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       paymentDetails,
       billingStatus: "active",
     });
-    toast({ title: "Billing settings saved" });
+    toast({ title: t("billingSettingsSaved") });
   };
 
   const handleAddPayment = async () => {
@@ -203,7 +206,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
         paidAt: newPayment.status === "paid" ? new Date().toISOString() : null,
         createdAt: new Date().toISOString(),
       });
-      toast({ title: "Payment recorded" });
+      toast({ title: t("paymentRecorded") });
       setShowAddPayment(false);
       setNewPayment({ period: "", amount: "", method: "mbway", status: "paid" });
     } catch (e: any) {
@@ -232,7 +235,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
         status: editingPayment.status,
         paidAt: editingPayment.status === "paid" ? new Date().toISOString() : null,
       });
-      toast({ title: "Payment updated" });
+      toast({ title: t("paymentUpdated") });
       setEditingPaymentId(null);
       setEditingPayment({ period: "", amount: "", method: "mbway", status: "paid" });
     } catch (e: any) {
@@ -244,7 +247,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
     if (!db || !user) return;
     try {
       await deleteDoc(doc(db, "personalTrainers", user.uid, "students", studentId, "payments", paymentId));
-      toast({ title: "Payment deleted" });
+      toast({ title: t("paymentDeleted") });
       if (editingPaymentId === paymentId) {
         setEditingPaymentId(null);
       }
@@ -259,14 +262,14 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Banknote className="h-4 w-4 text-primary" /> Billing Settings
+            <Banknote className="h-4 w-4 text-primary" /> {t("billingSettings")}
           </CardTitle>
-          <CardDescription>Calculated from 30/60 min session price x times per week</CardDescription>
+          <CardDescription>{t("billingCalcDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label>30 min price (€)</Label>
+              <Label>{t("thirtyMinPrice")}</Label>
               <Input
                 type="number"
                 placeholder="e.g. 20"
@@ -275,7 +278,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
               />
             </div>
             <div className="space-y-2">
-              <Label>60 min price (€)</Label>
+              <Label>{t("sixtyMinPrice")}</Label>
               <Input
                 type="number"
                 placeholder="e.g. 35"
@@ -284,19 +287,19 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
               />
             </div>
             <div className="space-y-2">
-              <Label>Session Duration</Label>
+              <Label>{t("sessionDuration")}</Label>
               <Select value={sessionDurationMin} onValueChange={setSessionDurationMin}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="30">30 min</SelectItem>
-                  <SelectItem value="60">60 min</SelectItem>
+                  <SelectItem value="30">{t("thirtyMin")}</SelectItem>
+                  <SelectItem value="60">{t("sixtyMin")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Times per week</Label>
+              <Label>{t("timesPerWeek")}</Label>
               <Input
                 type="number"
                 min="0"
@@ -310,30 +313,30 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
 
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Monthly Rate (€)</Label>
+              <Label>{t("monthlyRate")}</Label>
               <Input
                 type="number"
-                placeholder="Auto-calculated"
+                placeholder={t("autoCalculated")}
                 value={calculatedMonthlyRate > 0 ? String(calculatedMonthlyRate) : monthlyRate}
                 readOnly
               />
             </div>
             <div className="space-y-2">
-              <Label>Payment Method</Label>
+              <Label>{t("paymentMethod")}</Label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="mbway">MB WAY</SelectItem>
-                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="mbway">{t("mbway")}</SelectItem>
+                  <SelectItem value="bank_transfer">{t("bankTransfer")}</SelectItem>
+                  <SelectItem value="cash">{t("cash")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Payment Instructions (visible to student)</Label>
+            <Label>{t("paymentInstructions")}</Label>
             <Textarea
               placeholder="e.g. MB WAY: 912 345 678&#10;IBAN: PT50 0001 2345 6789 0000 0001 2"
               value={paymentDetails}
@@ -342,7 +345,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
             />
           </div>
           <Button onClick={handleSaveBillingConfig} className="gap-2">
-            <Save className="h-4 w-4" /> Save Settings
+            <Save className="h-4 w-4" /> {t("saveSettings")}
           </Button>
         </CardContent>
       </Card>
@@ -352,8 +355,8 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Payment History</CardTitle>
-              <CardDescription>Record payments from this student</CardDescription>
+              <CardTitle>{t("paymentHistory")}</CardTitle>
+              <CardDescription>{t("recordPayments")}</CardDescription>
             </div>
             <Button size="sm" className="gap-1" onClick={() => {
               if (!showAddPayment) {
@@ -364,17 +367,17 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
               }
               setShowAddPayment(!showAddPayment);
             }}>
-              <Plus className="h-4 w-4" /> Record Payment
+              <Plus className="h-4 w-4" /> {t("recordPayment")}
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {showAddPayment && (
             <div className="p-4 border rounded-lg bg-muted/50 space-y-3">
-              <p className="text-sm font-semibold">New Payment</p>
+              <p className="text-sm font-semibold">{t("newPayment")}</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">Period</Label>
+                  <Label className="text-xs">{t("period")}</Label>
                   <Input
                     placeholder="e.g. March 2026"
                     value={newPayment.period}
@@ -382,7 +385,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Amount (€)</Label>
+                  <Label className="text-xs">{t("amount")}</Label>
                   <Input
                     type="number"
                     placeholder={monthlyRate || "0"}
@@ -391,34 +394,34 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Method</Label>
+                  <Label className="text-xs">{t("method")}</Label>
                   <Select value={newPayment.method} onValueChange={(v) => setNewPayment({ ...newPayment, method: v })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="mbway">MB WAY</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="mbway">{t("mbway")}</SelectItem>
+                      <SelectItem value="bank_transfer">{t("bankTransfer")}</SelectItem>
+                      <SelectItem value="cash">{t("cash")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Status</Label>
+                  <Label className="text-xs">{t("status")}</Label>
                   <Select value={newPayment.status} onValueChange={(v) => setNewPayment({ ...newPayment, status: v })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="paid">Paid</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="paid">{t("paid")}</SelectItem>
+                      <SelectItem value="pending">{t("pending")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddPayment}>Save Payment</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowAddPayment(false)}>Cancel</Button>
+                <Button size="sm" onClick={handleAddPayment}>{t("savePayment")}</Button>
+                <Button size="sm" variant="outline" onClick={() => setShowAddPayment(false)}>{t("cancel")}</Button>
               </div>
             </div>
           )}
@@ -431,7 +434,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                     <div className="w-full space-y-3">
                       <div className="grid sm:grid-cols-2 gap-3">
                         <div className="space-y-1">
-                          <Label className="text-xs">Period</Label>
+                          <Label className="text-xs">{t("period")}</Label>
                           <Input
                             value={editingPayment.period}
                             onChange={(e) => setEditingPayment({ ...editingPayment, period: e.target.value })}
@@ -439,7 +442,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">Amount (€)</Label>
+                          <Label className="text-xs">{t("amount")}</Label>
                           <Input
                             type="number"
                             value={editingPayment.amount}
@@ -448,7 +451,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">Method</Label>
+                          <Label className="text-xs">{t("method")}</Label>
                           <Select
                             value={editingPayment.method}
                             onValueChange={(v) => setEditingPayment({ ...editingPayment, method: v })}
@@ -457,14 +460,14 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="mbway">MB WAY</SelectItem>
-                              <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                              <SelectItem value="cash">Cash</SelectItem>
+                              <SelectItem value="mbway">{t("mbway")}</SelectItem>
+                              <SelectItem value="bank_transfer">{t("bankTransfer")}</SelectItem>
+                              <SelectItem value="cash">{t("cash")}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">Status</Label>
+                          <Label className="text-xs">{t("status")}</Label>
                           <Select
                             value={editingPayment.status}
                             onValueChange={(v) => setEditingPayment({ ...editingPayment, status: v })}
@@ -473,18 +476,18 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="paid">Paid</SelectItem>
-                              <SelectItem value="pending">Pending</SelectItem>
+                              <SelectItem value="paid">{t("paid")}</SelectItem>
+                              <SelectItem value="pending">{t("pending")}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
                       <div className="flex gap-2 justify-end">
                         <Button size="sm" variant="outline" onClick={() => setEditingPaymentId(null)}>
-                          Cancel
+                          {t("cancel")}
                         </Button>
                         <Button size="sm" onClick={() => handleUpdatePayment(p.id)}>
-                          Save
+                          {t("save")}
                         </Button>
                       </div>
                     </div>
@@ -495,7 +498,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                         <div>
                           <p className="text-sm font-medium">{p.period}</p>
                           <p className="text-xs text-muted-foreground capitalize">
-                            {p.method === "mbway" ? "MB WAY" : p.method === "bank_transfer" ? "Bank Transfer" : (p.method || "—")}
+                            {p.method === "mbway" ? t("mbway") : p.method === "bank_transfer" ? t("bankTransfer") : (p.method || "—")}
                             {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString()}` : ""}
                           </p>
                         </div>
@@ -509,10 +512,10 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                           {p.status}
                         </Badge>
                         <Button size="sm" variant="outline" onClick={() => startEditPayment(p)}>
-                          Edit
+                          {t("edit")}
                         </Button>
                         <Button size="sm" variant="destructive" onClick={() => setConfirmDeletePaymentId(p.id)}>
-                          Delete
+                          {t("delete")}
                         </Button>
                       </div>
                     </>
@@ -523,7 +526,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
           ) : (
             <div className="text-center py-6 text-muted-foreground">
               <Banknote className="h-8 w-8 mx-auto mb-2 opacity-20" />
-              <p className="text-sm">No payments recorded yet.</p>
+              <p className="text-sm">{t("noPaymentsRecorded")}</p>
             </div>
           )}
         </CardContent>
@@ -534,19 +537,19 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" /> Delete Payment
+              <AlertTriangle className="h-5 w-5" /> {t("deletePayment")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this payment record? This action cannot be undone.
+              {t("deletePaymentConfirm")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive hover:bg-destructive/90"
               onClick={() => { if (confirmDeletePaymentId) { handleDeletePayment(confirmDeletePaymentId); setConfirmDeletePaymentId(null); } }}
             >
-              <Trash2 className="h-4 w-4 mr-2" /> Delete Payment
+              <Trash2 className="h-4 w-4 mr-2" /> {t("deletePayment")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -582,6 +585,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { t } = useI18n();
   const router = useRouter();
 
   const [isSaving, setIsSaving] = useState(false);
@@ -867,14 +871,14 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         sets: ex.sets,
       })),
     });
-    toast({ title: "Session updated" });
+    toast({ title: t("sessionUpdated") });
     setEditSession(null);
   };
 
   const handleDeleteSession = async (sessionId: string) => {
     if (!db || !user) return;
     await deleteDoc(doc(db, "personalTrainers", user.uid, "students", id, "workoutSessions", sessionId));
-    toast({ title: "Session deleted" });
+    toast({ title: t("sessionDeleted") });
     setEditSession(null);
   };
 
@@ -915,7 +919,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         }
       );
 
-      toast({ title: "Assigned workout updated" });
+      toast({ title: t("assignedWorkoutUpdated") });
       setEditingWorkoutPlan(null);
     } catch (error: any) {
       toast({
@@ -934,7 +938,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     setDeletingWorkoutPlanId(planId);
     try {
       await deleteDoc(doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", planId));
-      toast({ title: "Assigned workout removed" });
+      toast({ title: t("assignedWorkoutRemoved") });
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -1008,14 +1012,14 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       // Also link the trainerId on the global student doc so the student can find their workouts
       setDocumentNonBlocking(globalRef, { trainerId: user.uid }, { merge: true });
       toast({
-        title: "Added to your roster",
-        description: "You can now assign programs and add coaching notes.",
+        title: t("addedToRoster"),
+        description: t("addedToRosterDesc"),
       });
     } catch {
       toast({
         variant: "destructive",
-        title: "Could not add student",
-        description: "Check Firestore permissions and try again.",
+        title: t("couldNotAddStudent"),
+        description: t("checkPermissions"),
       });
     } finally {
       setIsAddingToRoster(false);
@@ -1034,8 +1038,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         goalType: editStats.goalType,
       });
       toast({
-        title: "Profile Updated",
-        description: "Coaching data and goals have been saved.",
+        title: t("profileUpdated"),
+        description: t("coachingDataSaved"),
       });
     } catch (e) {
       toast({
@@ -1055,7 +1059,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       const result = await deleteStudent(db, user.uid, id);
       if (result.success) {
         toast({
-          title: "Student Deleted",
+          title: t("studentDeleted"),
           description: result.message,
         });
         router.push("/students");
@@ -1096,10 +1100,10 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         { merge: true }
       );
       toast({
-        title: newBlocked ? "Student Blocked" : "Student Unblocked",
+        title: newBlocked ? t("studentBlocked") : t("studentUnblocked"),
         description: newBlocked
-          ? "This student can no longer access their program."
-          : "This student can now access their program again.",
+          ? t("studentBlockedDesc")
+          : t("studentUnblockedDesc"),
       });
     } catch (e: any) {
       toast({
@@ -1127,9 +1131,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     return (
       <Navigation>
         <div className="text-center py-20">
-          <h2 className="text-2xl font-bold">Student not found</h2>
+          <h2 className="text-2xl font-bold">{t("studentNotFound")}</h2>
           <Button className="mt-4" asChild>
-            <Link href="/students">Back to Roster</Link>
+            <Link href="/students">{t("backToRoster")}</Link>
           </Button>
         </div>
       </Navigation>
@@ -1164,7 +1168,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 <Mail className="h-4 w-4" /> {student.email}
               </p>
               <p className="text-xs text-muted-foreground flex items-center gap-2">
-                <Calendar className="h-3 w-3" /> Member since {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
+                <Calendar className="h-3 w-3" /> {t("memberSince")} {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
               </p>
             </div>
           </div>
@@ -1180,17 +1184,17 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 ) : (
                   <UserPlus className="h-4 w-4" />
                 )}
-                Add to my roster
+                {t("addToMyRoster")}
               </Button>
             )}
             {portalOnly ? (
-              <Button className="gap-2" disabled title="Add this student to your roster first">
-                <Dumbbell className="h-4 w-4" /> Build Program
+              <Button className="gap-2" disabled title={t("addThisStudentFirst")}>
+                <Dumbbell className="h-4 w-4" /> {t("buildProgram")}
               </Button>
             ) : (
               <Button className="gap-2" asChild>
                 <Link href="/workouts/builder">
-                  <Dumbbell className="h-4 w-4" /> Build Program
+                  <Dumbbell className="h-4 w-4" /> {t("buildProgram")}
                 </Link>
               </Button>
             )}
@@ -1205,7 +1209,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              Delete Student
+              {t("deleteStudent")}
             </Button>
             {!portalOnly && (
               <Button
@@ -1221,7 +1225,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 ) : (
                   <Ban className="h-4 w-4" />
                 )}
-                {isStudentBlocked ? "Unblock" : "Block Student"}
+                {isStudentBlocked ? t("unblock") : t("blockStudent")}
               </Button>
             )}
           </div>
@@ -1232,7 +1236,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             <AlertDialogHeader>
               <AlertDialogTitle className="flex items-center gap-2 text-destructive">
                 <AlertTriangle className="h-5 w-5" />
-                Delete Student
+                {t("deleteStudent")}
               </AlertDialogTitle>
               <AlertDialogDescription asChild>
                 <div className="space-y-3 text-sm text-muted-foreground">
@@ -1243,19 +1247,19 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                     This action will permanently remove:
                   </p>
                   <ul className="list-disc list-inside space-y-1 ml-2">
-                    <li>The student from your roster</li>
-                    <li>All associated workout plans</li>
+                    <li>{t("deleteStudentItem1")}</li>
+                    <li>{t("deleteStudentItem2")}</li>
                     <li>All workout sessions and history</li>
                     <li>All payment records</li>
                   </ul>
                   <p className="font-semibold text-destructive">
-                    This action cannot be undone.
+                    {t("deleteStudentConfirmDesc")}
                   </p>
                 </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={isDeleting}>{t("cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteStudent}
                 disabled={isDeleting}
@@ -1264,12 +1268,12 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 {isDeleting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Deleting...
+                    {t("deleting")}
                   </>
                 ) : (
                   <>
                     <Trash2 className="h-4 w-4 mr-2" />
-                    Delete Student
+                    {t("deleteStudent")}
                   </>
                 )}
               </AlertDialogAction>
@@ -1283,7 +1287,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             <AlertDialogHeader>
               <AlertDialogTitle className="flex items-center gap-2">
                 {isStudentBlocked ? <ShieldOff className="h-5 w-5" /> : <Ban className="h-5 w-5 text-destructive" />}
-                {isStudentBlocked ? "Unblock Student" : "Block Student"}
+                {isStudentBlocked ? t("unblockStudent") : t("blockStudent")}
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {isStudentBlocked
@@ -1292,7 +1296,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel disabled={isBlocking}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={isBlocking}>{t("cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleToggleBlock}
                 disabled={isBlocking}
@@ -1301,7 +1305,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 {isBlocking ? (
                   <><Loader2 className="h-4 w-4 animate-spin mr-2" />{isStudentBlocked ? "Unblocking..." : "Blocking..."}</>
                 ) : (
-                  <>{isStudentBlocked ? <><ShieldOff className="h-4 w-4 mr-2" />Unblock</> : <><Ban className="h-4 w-4 mr-2" />Block Student</>}</>
+                  <>{isStudentBlocked ? <><ShieldOff className="h-4 w-4 mr-2" />{t("unblock")}</> : <><Ban className="h-4 w-4 mr-2" />{t("blockStudent")}</>}</>
                 )}
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -1313,19 +1317,19 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle className="flex items-center gap-2 text-destructive">
-                <AlertTriangle className="h-5 w-5" /> Delete Session
+                <AlertTriangle className="h-5 w-5" /> {t("deleteSession")}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Are you sure you want to delete this workout session? This action cannot be undone.
+                Are you sure you want to delete this workout session? {t("deleteStudentConfirmDesc")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive hover:bg-destructive/90"
                 onClick={() => { if (confirmDeleteSessionId) { handleDeleteSession(confirmDeleteSessionId); setConfirmDeleteSessionId(null); } }}
               >
-                <Trash2 className="h-4 w-4 mr-2" /> Delete Session
+                <Trash2 className="h-4 w-4 mr-2" /> {t("deleteSession")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -1336,19 +1340,19 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle className="flex items-center gap-2 text-destructive">
-                <AlertTriangle className="h-5 w-5" /> Remove Assigned Workout
+                <AlertTriangle className="h-5 w-5" /> {t("removeAssignedWorkout")}
               </AlertDialogTitle>
               <AlertDialogDescription>
                 Are you sure you want to remove this assigned workout? This action cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive hover:bg-destructive/90"
                 onClick={() => { if (confirmDeletePlanId) { handleDeleteWorkoutPlan(confirmDeletePlanId); setConfirmDeletePlanId(null); } }}
               >
-                <Trash2 className="h-4 w-4 mr-2" /> Remove Workout
+                <Trash2 className="h-4 w-4 mr-2" /> {t("removeAssignedWorkout")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -1356,37 +1360,43 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
 
         {portalOnly && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
-            This student is only in the portal directory. Add them to your roster to assign workouts and
-            save private coaching notes.
+            {t("portalOnlyBanner")}
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Card>
             <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
               <User className="h-4 w-4 text-primary" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">Age / Sex</p>
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("ageSex")}</p>
               <p className="text-base font-bold">{student.age || '--'} yrs / <span className="capitalize">{student.sex || '--'}</span></p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
               <Ruler className="h-4 w-4 text-primary" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">Height</p>
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("height")}</p>
               <p className="text-base font-bold">{student.heightCm || '--'} cm</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
               <Weight className="h-4 w-4 text-primary" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">Weight</p>
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("weight")}</p>
               <p className="text-base font-bold">{student.weightKg || '--'} kg</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
+              <Percent className="h-4 w-4 text-orange-500" />
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("bodyFat")}</p>
+              <p className="text-base font-bold">{student.bodyFatPercent || '--'}%</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
               <Target className="h-4 w-4 text-accent" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">Goal</p>
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("goal")}</p>
               <p className="text-base font-bold">{student.goalWeightKg || '--'} kg</p>
             </CardContent>
           </Card>
@@ -1394,17 +1404,17 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
 
         <Tabs defaultValue="progress" className="space-y-6">
           <TabsList className="bg-card border h-auto flex-wrap sm:flex-nowrap w-full">
-            <TabsTrigger value="progress" className="px-4 sm:px-8 flex-1">Progress</TabsTrigger>
-            <TabsTrigger value="milestones" className="px-4 sm:px-8 flex-1">Milestones</TabsTrigger>
-            <TabsTrigger value="management" className="px-4 sm:px-8 flex-1 text-xs sm:text-sm">Coaching & Management</TabsTrigger>
-            <TabsTrigger value="billing" className="px-4 sm:px-8 flex-1">Billing</TabsTrigger>
+            <TabsTrigger value="progress" className="px-4 sm:px-8 flex-1">{t("progress")}</TabsTrigger>
+            <TabsTrigger value="milestones" className="px-4 sm:px-8 flex-1">{t("milestones")}</TabsTrigger>
+            <TabsTrigger value="management" className="px-4 sm:px-8 flex-1 text-xs sm:text-sm">{t("coachingManagement")}</TabsTrigger>
+            <TabsTrigger value="billing" className="px-4 sm:px-8 flex-1">{t("billing")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="progress" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Weight Tracking</CardTitle>
+                  <CardTitle>{t("weightTracking")}</CardTitle>
                   <CardDescription>Path to {student.goalWeightKg}kg (<span className="capitalize">{student.goalType?.replace('_', ' ')}</span>)</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px]">
@@ -1426,7 +1436,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                     </ResponsiveContainer>
                   ) : (
                     <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                      No weekly weight records yet.
+                      {t("noWeightRecords")}
                     </div>
                   )}
                 </CardContent>
@@ -1434,8 +1444,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Strength Progression</CardTitle>
-                  <CardDescription>Estimated 1RM from logged sessions (kg)</CardDescription>
+                  <CardTitle>{t("strengthProgression")}</CardTitle>
+                  <CardDescription>{t("strengthProgressionDesc")}</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px]">
                   {strengthExerciseOptions.length > 0 ? (
@@ -1443,7 +1453,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                       <div className="w-full sm:w-[260px]">
                         <Select value={selectedStrengthExercise} onValueChange={setSelectedStrengthExercise}>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select exercise" />
+                            <SelectValue placeholder={t("selectExercise")} />
                           </SelectTrigger>
                           <SelectContent>
                             {strengthExerciseOptions.map((exerciseName) => (
@@ -1475,7 +1485,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                     </div>
                   ) : (
                     <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                      No strength session data yet.
+                      {t("noStrengthData")}
                     </div>
                   )}
                 </CardContent>
@@ -1487,9 +1497,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Dumbbell className="h-5 w-5 text-primary" />
-                    Workout History
+                    {t("workoutHistory")}
                   </CardTitle>
-                  <CardDescription>{sortedSessions.length} session{sortedSessions.length !== 1 ? "s" : ""} completed</CardDescription>
+                  <CardDescription>{sortedSessions.length} {sortedSessions.length !== 1 ? t("sessionsCompleted") : t("sessionCompleted")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {sortedSessions.length > 0 ? (
@@ -1515,7 +1525,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                               <Badge variant="outline" className="bg-green-100 text-green-800">
-                                {session.status === "completed" ? "Completed" : session.status || "Done"}
+                                {session.status === "completed" ? t("completed") : session.status || "Done"}
                               </Badge>
                             </div>
                           </div>
@@ -1547,7 +1557,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
                       <Dumbbell className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                      <p className="text-sm">No workout sessions recorded yet.</p>
+                      <p className="text-sm">{t("noWorkoutSessions")}</p>
                     </div>
                   )}
                 </CardContent>
@@ -1555,7 +1565,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
 
               <Card className="bg-primary/5 border-primary/20">
                 <CardHeader>
-                  <CardTitle className="text-sm">Assigned Workouts</CardTitle>
+                  <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
                   <CardDescription>{sortedWorkoutPlans.length} active assignment{sortedWorkoutPlans.length !== 1 ? "s" : ""}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
@@ -1585,7 +1595,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <Badge variant="outline">Active</Badge>
+                          <Badge variant="outline">{t("active")}</Badge>
                           <Button
                             size="icon"
                             variant="ghost"
@@ -1612,10 +1622,10 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-muted-foreground">No workouts assigned yet.</p>
+                    <p className="text-sm text-muted-foreground">{t("noWorkoutsAssigned")}</p>
                   )}
                   <Button variant="link" className="w-full mt-2 text-xs" asChild>
-                    <Link href="/workouts/builder">Assign Workout</Link>
+                    <Link href="/workouts/builder">{t("assignWorkout")}</Link>
                   </Button>
                 </CardContent>
               </Card>
@@ -1625,7 +1635,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             <Dialog open={!!editSession} onOpenChange={(open) => !open && setEditSession(null)}>
               <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>Edit Session — {editSession?.workoutTitle || "Workout"}</DialogTitle>
+                  <DialogTitle>{t("editSession")} — {editSession?.workoutTitle || "Workout"}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4">
                   {editExercises.map((ex, ei) => (
@@ -1695,8 +1705,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                     </div>
                   ))}
                   <div className="flex gap-2 pt-2">
-                    <Button className="flex-1" onClick={handleSaveSession}>Save Changes</Button>
-                    <Button variant="destructive" onClick={() => editSession && setConfirmDeleteSessionId(editSession.id)}>Delete Session</Button>
+                    <Button className="flex-1" onClick={handleSaveSession}>{t("saveChanges")}</Button>
+                    <Button variant="destructive" onClick={() => editSession && setConfirmDeleteSessionId(editSession.id)}>{t("deleteSession")}</Button>
                   </div>
                 </div>
               </DialogContent>
@@ -1707,19 +1717,19 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <Zap className="h-4 w-4 text-accent" />
-                    Current Streak
+                    {t("currentStreak")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold">{currentWorkoutStreak} Workouts</p>
-                  <p className="text-xs text-muted-foreground">Keep the momentum going!</p>
+                  <p className="text-2xl font-bold">{currentWorkoutStreak} {t("workouts")}</p>
+                  <p className="text-xs text-muted-foreground">{t("keepMomentum")}</p>
                 </CardContent>
               </Card>
               <Card className="bg-primary/5">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
-                    Subscription
+                    {t("subscription")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1733,14 +1743,14 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <History className="h-4 w-4 text-primary" />
-                    Last Active
+                    {t("lastActive")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm font-medium">
-                    {lastActiveAt ? new Date(lastActiveAt).toLocaleDateString() : "No recent activity"}
+                    {lastActiveAt ? new Date(lastActiveAt).toLocaleDateString() : t("noRecentActivity")}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">Logged session</p>
+                  <p className="text-xs text-muted-foreground mt-1">{t("loggedSession")}</p>
                 </CardContent>
               </Card>
             </div>
@@ -1767,9 +1777,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <TrendingDown className="h-5 w-5 text-primary" />
-                      Trainer Observations & Notes
+                      {t("trainerNotes")}
                     </CardTitle>
-                    <CardDescription>Private notes only visible to you.</CardDescription>
+                    <CardDescription>{t("privateNotes")}</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <Textarea 
@@ -1787,7 +1797,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                       disabled={isSaving || portalOnly}
                     >
                       {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                      Save Coaching Notes
+                      {t("saveCoachingNotes")}
                     </Button>
                   </CardFooter>
                 </Card>
@@ -1796,12 +1806,12 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               <div className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Adjust Goals</CardTitle>
-                    <CardDescription>Update target metrics for this student.</CardDescription>
+                    <CardTitle>{t("adjustGoals")}</CardTitle>
+                    <CardDescription>{t("updateTargetMetrics")}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
-                      <Label>Goal Weight (kg)</Label>
+                      <Label>{t("goalWeight")}</Label>
                       <Input 
                         type="number" 
                         value={editStats.goalWeightKg}
@@ -1809,7 +1819,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Goal Type</Label>
+                      <Label>{t("goalType")}</Label>
                       <Input 
                         placeholder="e.g. Muscle Gain"
                         value={editStats.goalType}
@@ -1822,7 +1832,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                       onClick={handleUpdateStudent}
                       disabled={isSaving || portalOnly}
                     >
-                      Update Targets
+                      {t("updateTargets")}
                     </Button>
                   </CardContent>
                 </Card>
@@ -1918,11 +1928,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditingWorkoutPlan(null)} disabled={isSavingWorkoutPlan}>
-                Cancel
+                {t("cancel")}
               </Button>
               <Button onClick={handleSaveWorkoutPlan} disabled={isSavingWorkoutPlan}>
                 {isSavingWorkoutPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save Changes
+                {t("saveChanges")}
               </Button>
             </DialogFooter>
           </DialogContent>

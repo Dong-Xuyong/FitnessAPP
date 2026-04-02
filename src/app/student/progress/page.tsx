@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -48,6 +49,7 @@ function computeEpleyOneRm(weight: number, reps: number): number {
 }
 
 export default function StudentProgressPage() {
+  const { t } = useI18n();
   const { user } = useUser();
   const db = useFirestore();
   const [totalVolumeKg, setTotalVolumeKg] = useState(0);
@@ -345,8 +347,8 @@ export default function StudentProgressPage() {
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">My Progress</h1>
-          <p className="text-muted-foreground">Visualize your journey and celebrate your wins.</p>
+          <h1 className="text-3xl font-bold font-headline">{t("myProgress")}</h1>
+          <p className="text-muted-foreground">{t("visualizeJourney")}</p>
         </header>
 
         <div className="grid md:grid-cols-3 gap-6">
@@ -354,12 +356,12 @@ export default function StudentProgressPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Flame className="h-4 w-4" />
-                Current Streak
+                {t("currentStreak")}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{currentStreak} Workouts</div>
-              <p className="text-xs opacity-80 mt-1">Consecutive planned workouts completed without missing one.</p>
+              <div className="text-3xl font-bold">{currentStreak} {t("workoutsLabel")}</div>
+              <p className="text-xs opacity-80 mt-1">{t("consecutiveWorkouts")}</p>
             </CardContent>
           </Card>
 
@@ -367,14 +369,14 @@ export default function StudentProgressPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Target className="h-4 w-4" />
-                Goal Completion
+                {t("goalCompletion")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">{goalCompletionPercent}%</div>
               <Progress value={goalCompletionPercent} className="h-2 mt-2 bg-accent-foreground/20" />
               <p className="text-xs opacity-80 mt-1">
-                {monthlyDoneCount} / {monthlyPlannedCount} workouts completed this month.
+                {monthlyDoneCount} / {monthlyPlannedCount} {t("workoutsCompletedThisMonth")}
               </p>
             </CardContent>
           </Card>
@@ -383,12 +385,12 @@ export default function StudentProgressPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-primary" />
-                Total Volume
+                {t("totalVolume")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">{formattedTotalVolume}</div>
-              <p className="text-xs text-muted-foreground mt-1">Calculated from workout history (sets x reps x weight).</p>
+              <p className="text-xs text-muted-foreground mt-1">{t("totalVolumeDesc")}</p>
             </CardContent>
           </Card>
         </div>
@@ -396,8 +398,8 @@ export default function StudentProgressPage() {
         <div className="grid lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Weight Tracking</CardTitle>
-              <CardDescription>Progress towards your 75kg goal</CardDescription>
+              <CardTitle>{t("weightTracking")}</CardTitle>
+              <CardDescription>{t("progressTowardsGoal")}</CardDescription>
             </CardHeader>
             <CardContent className="h-[300px] pt-4">
               <ResponsiveContainer width="100%" height="100%">
@@ -423,15 +425,15 @@ export default function StudentProgressPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Strength Progression</CardTitle>
+              <CardTitle>{t("strengthProgressionTitle")}</CardTitle>
               <CardDescription>
-                1RM estimated gains (kg) using Epley: 1RM = W x (1 + R/30)
+                {t("strengthProgressionChartDesc")}
               </CardDescription>
               {strengthExerciseOptions.length > 0 ? (
                 <div className="pt-2">
                   <Select value={selectedStrengthExercise} onValueChange={handleStrengthExerciseChange}>
                     <SelectTrigger className="w-full sm:w-[260px]">
-                      <SelectValue placeholder="Select exercise" />
+                      <SelectValue placeholder={t("selectExercise")} />
                     </SelectTrigger>
                     <SelectContent>
                       {strengthExerciseOptions.map((exercise) => (
@@ -466,8 +468,8 @@ export default function StudentProgressPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Personal Bests</CardTitle>
-            <CardDescription>Best estimated 1RM per exercise (Epley)</CardDescription>
+            <CardTitle>{t("personalBests")}</CardTitle>
+            <CardDescription>{t("personalBestsDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             {personalBests.length > 0 ? (
@@ -480,7 +482,7 @@ export default function StudentProgressPage() {
                     <div>
                       <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">{pb.exerciseName}</p>
                       <p className="text-lg font-bold">{pb.weight} kg x {pb.reps}</p>
-                      <p className="text-[10px] text-muted-foreground">Estimated 1RM: {pb.oneRm} kg</p>
+                      <p className="text-[10px] text-muted-foreground">{t("estimated1RM")} {pb.oneRm} kg</p>
                       <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                         <Calendar className="h-3 w-3" /> {pb.date}
                       </p>
@@ -489,7 +491,7 @@ export default function StudentProgressPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No personal bests yet. Complete workouts with logged weight and reps to populate this section.</p>
+              <p className="text-sm text-muted-foreground">{t("noPersonalBests")}</p>
             )}
           </CardContent>
         </Card>

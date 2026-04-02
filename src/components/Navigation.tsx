@@ -28,6 +28,7 @@ import { doc } from "firebase/firestore";
 import { useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Globe } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const navItemKeys = [
   { key: "dashboard" as const, href: "/dashboard", icon: LayoutDashboard },
@@ -362,6 +363,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
               </h1>
             </div>
             <div className="flex items-center gap-3">
+              <ThemeToggle />
               {/* Language Switcher */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

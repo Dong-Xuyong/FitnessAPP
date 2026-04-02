@@ -27,6 +27,7 @@ import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const navItems = [
   { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
@@ -219,6 +220,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             </h1>
           </div>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">

@@ -14,6 +14,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, UserCircle, Camera } from "lucide-react";
 import Link from "next/link";
+import { useI18n } from "@/lib/i18n";
 
 const ALLOWED_GOALS = new Set(["muscle_gain", "weight_loss", "endurance", "general"]);
 const ALLOWED_SEX = new Set(["male", "female", "other"]);
@@ -22,6 +23,7 @@ export default function StudentProfilePage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { t } = useI18n();
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -34,6 +36,7 @@ export default function StudentProfilePage() {
     sex: "male",
     weightKg: "",
     heightCm: "",
+    bodyFatPercent: "",
     goalType: "muscle_gain",
     goalWeightKg: ""
   });
@@ -81,6 +84,7 @@ export default function StudentProfilePage() {
             sex,
             weightKg: data.weightKg?.toString() || "",
             heightCm: data.heightCm?.toString() || "",
+            bodyFatPercent: data.bodyFatPercent?.toString() || "",
             goalType,
             goalWeightKg: data.goalWeightKg?.toString() || "",
           });
@@ -124,6 +128,7 @@ export default function StudentProfilePage() {
       sex: formData.sex,
       weightKg: Number(formData.weightKg) || 0,
       heightCm: Number(formData.heightCm) || 0,
+      bodyFatPercent: Number(formData.bodyFatPercent) || 0,
       goalType: formData.goalType,
       goalWeightKg: Number(formData.goalWeightKg) || 0,
       email: user.email,
@@ -139,14 +144,14 @@ export default function StudentProfilePage() {
       }
 
       toast({
-        title: "Profile Updated",
-        description: "Your information has been successfully saved.",
+        title: t("profileUpdated"),
+        description: t("infoSaved"),
       });
     } catch (e) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Failed to update profile.",
+        title: t("error"),
+        description: t("failedToUpdateProfile"),
       });
     } finally {
       setIsSaving(false);
@@ -167,12 +172,12 @@ export default function StudentProfilePage() {
     return (
       <StudentNavigation>
         <div className="max-w-md mx-auto py-16 text-center space-y-4">
-          <h2 className="text-xl font-bold font-headline">Sign in required</h2>
+          <h2 className="text-xl font-bold font-headline">{t("signInRequired")}</h2>
           <p className="text-muted-foreground">
-            Sign in as a student to view and edit your profile.
+            {t("signInAsStudent")}
           </p>
           <Button asChild>
-            <Link href="/login?role=student">Go to sign in</Link>
+            <Link href="/login?role=student">{t("goToSignIn")}</Link>
           </Button>
         </div>
       </StudentNavigation>
@@ -183,8 +188,8 @@ export default function StudentProfilePage() {
     <StudentNavigation>
       <div className="max-w-2xl mx-auto space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">My Profile</h1>
-          <p className="text-muted-foreground">Keep your physical stats and goals up to date.</p>
+          <h1 className="text-3xl font-bold font-headline">{t("myProfile")}</h1>
+          <p className="text-muted-foreground">{t("keepStatsUpToDate")}</p>
         </header>
 
         <form onSubmit={handleSave}>
@@ -195,8 +200,8 @@ export default function StudentProfilePage() {
                   <UserCircle className="h-8 w-8 text-primary" />
                 </div>
                 <div>
-                  <CardTitle>Personal Information</CardTitle>
-                  <CardDescription>Managed via your global student account.</CardDescription>
+                  <CardTitle>{t("personalInformation")}</CardTitle>
+                  <CardDescription>{t("personalInfoDesc")}</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -212,7 +217,7 @@ export default function StudentProfilePage() {
                   </div>
                 </div>
                 <div className="w-full max-w-sm space-y-2">
-                  <Label htmlFor="photoUrl">Profile Photo URL</Label>
+                  <Label htmlFor="photoUrl">{t("profilePhotoUrl")}</Label>
                   <Input 
                     id="photoUrl" 
                     placeholder="https://example.com/photo.jpg" 
@@ -223,7 +228,7 @@ export default function StudentProfilePage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
+                <Label htmlFor="name">{t("fullName")}</Label>
                 <Input 
                   id="name" 
                   value={formData.name} 
@@ -234,7 +239,7 @@ export default function StudentProfilePage() {
 
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="age">Age</Label>
+                  <Label htmlFor="age">{t("age")}</Label>
                   <Input 
                     id="age" 
                     type="number" 
@@ -243,20 +248,20 @@ export default function StudentProfilePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="sex">Sex</Label>
+                  <Label htmlFor="sex">{t("sex")}</Label>
                   <Select value={formData.sex} onValueChange={(v) => setFormData({...formData, sex: v})}>
                     <SelectTrigger id="sex">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      <SelectItem value="male">{t("male")}</SelectItem>
+                      <SelectItem value="female">{t("female")}</SelectItem>
+                      <SelectItem value="other">{t("other")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="heightCm">Height (cm)</Label>
+                  <Label htmlFor="heightCm">{t("heightCm")}</Label>
                   <Input 
                     id="heightCm" 
                     type="number" 
@@ -268,7 +273,7 @@ export default function StudentProfilePage() {
 
               <div className="grid sm:grid-cols-2 gap-6 pt-4 border-t">
                 <div className="space-y-2">
-                  <Label htmlFor="weightKg">Current Weight (kg)</Label>
+                  <Label htmlFor="weightKg">{t("currentWeightKgLabel")}</Label>
                   <Input 
                     id="weightKg" 
                     type="number" 
@@ -278,7 +283,7 @@ export default function StudentProfilePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="goalWeightKg">Goal Weight (kg)</Label>
+                  <Label htmlFor="goalWeightKg">{t("goalWeightKg")}</Label>
                   <Input 
                     id="goalWeightKg" 
                     type="number" 
@@ -289,17 +294,32 @@ export default function StudentProfilePage() {
                 </div>
               </div>
 
+              <div className="grid sm:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="bodyFatPercent">{t("bodyFatPercent")}</Label>
+                  <Input 
+                    id="bodyFatPercent" 
+                    type="number" 
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={formData.bodyFatPercent} 
+                    onChange={(e) => setFormData({...formData, bodyFatPercent: e.target.value})} 
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
-                <Label htmlFor="goalType">Primary Fitness Goal</Label>
+                <Label htmlFor="goalType">{t("primaryFitnessGoal")}</Label>
                 <Select value={formData.goalType} onValueChange={(v) => setFormData({...formData, goalType: v})}>
                   <SelectTrigger id="goalType">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="muscle_gain">Muscle Gain</SelectItem>
-                    <SelectItem value="weight_loss">Weight Loss</SelectItem>
-                    <SelectItem value="endurance">Endurance</SelectItem>
-                    <SelectItem value="general">General Fitness</SelectItem>
+                    <SelectItem value="muscle_gain">{t("muscleGain")}</SelectItem>
+                    <SelectItem value="weight_loss">{t("weightLoss")}</SelectItem>
+                    <SelectItem value="endurance">{t("endurance")}</SelectItem>
+                    <SelectItem value="general">{t("generalFitness")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -307,7 +327,7 @@ export default function StudentProfilePage() {
             <CardFooter className="bg-muted/10 border-t py-4">
               <Button type="submit" className="w-full gap-2" disabled={isSaving}>
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save Changes
+                {t("saveChanges")}
               </Button>
             </CardFooter>
           </Card>

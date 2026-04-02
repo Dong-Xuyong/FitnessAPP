@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useI18n } from "@/lib/i18n";
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -124,6 +125,7 @@ interface WorkoutPlan {
 export default function StudentWorkoutsPage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
+  const { t } = useI18n();
   const [workouts, setWorkouts] = useState<WorkoutPlan[]>([]);
   const [completedWorkouts, setCompletedWorkouts] = useState<WorkoutSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -281,8 +283,8 @@ export default function StudentWorkoutsPage() {
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">My Workouts</h1>
-          <p className="text-muted-foreground">Follow your assigned training programs and log your sets.</p>
+          <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
+          <p className="text-muted-foreground">{t("followAssigned")}</p>
         </header>
 
         {workouts.length === 0 ? (
@@ -291,9 +293,9 @@ export default function StudentWorkoutsPage() {
               <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
                 <Dumbbell className="h-8 w-8 text-muted-foreground" />
               </div>
-              <h3 className="text-xl font-bold">No active workouts assigned</h3>
+              <h3 className="text-xl font-bold">{t("noActiveWorkouts")}</h3>
               <p className="text-muted-foreground max-w-md mx-auto">
-                You have no active workouts right now. Completed sessions are shown in your workout history below.
+                {t("noActiveWorkoutsDesc")}
               </p>
             </CardContent>
           </Card>
@@ -301,8 +303,8 @@ export default function StudentWorkoutsPage() {
           <div className="grid gap-6">
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Current Week</h2>
-                <Badge variant="outline">Current schedule</Badge>
+                <h2 className="text-lg font-semibold">{t("currentWeek")}</h2>
+                <Badge variant="outline">{t("currentSchedule")}</Badge>
               </div>
 
               {currentWeekWorkouts.map((workout) => {
@@ -315,11 +317,11 @@ export default function StudentWorkoutsPage() {
                           <h2 className="text-2xl font-bold">{workout.title}</h2>
                           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mt-2">
                             <span className="flex items-center gap-1">
-                              <Dumbbell className="h-4 w-4" /> {workout.exercises?.length || 0} Exercises
+                              <Dumbbell className="h-4 w-4" /> {workout.exercises?.length || 0} {t("exercisesLabel")}
                             </span>
                             {(workout.assignedAt || workout.createdAt) && (
                               <span className="flex items-center gap-1">
-                                <Clock className="h-4 w-4" /> Assigned {new Date(workout.assignedAt || workout.createdAt || "").toLocaleDateString()}
+                                <Clock className="h-4 w-4" /> {t("assigned")} {new Date(workout.assignedAt || workout.createdAt || "").toLocaleDateString()}
                               </span>
                             )}
                           </div>
@@ -357,13 +359,13 @@ export default function StudentWorkoutsPage() {
                           {canStartToday ? (
                             <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2 flex-1 sm:flex-none" asChild>
                               <Link href={`/student/workouts/${workout.id}/session`}>
-                                <Play className="h-4 w-4" /> Start Session
+                                <Play className="h-4 w-4" /> {t("startSession")}
                               </Link>
                             </Button>
                           ) : (
                             <Button className="gap-2 flex-1 sm:flex-none" variant="outline" disabled>
                               <Play className="h-4 w-4" />
-                              Available in {daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt)} {daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt) === 1 ? "day" : "days"}
+                              {t("availableInDays").replace("{n}", String(daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt)))}
                             </Button>
                           )}
                           <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform hidden sm:block" />
@@ -378,8 +380,8 @@ export default function StudentWorkoutsPage() {
             {otherWorkouts.length > 0 ? (
               <Card className="border-dashed bg-muted/20">
                 <CardHeader>
-                  <CardTitle className="text-base">Other Assigned Workouts</CardTitle>
-                  <CardDescription>Previous weeks and upcoming sessions outside the current week.</CardDescription>
+                  <CardTitle className="text-base">{t("otherAssignedWorkouts")}</CardTitle>
+                  <CardDescription>{t("otherAssignedWorkoutsDesc")}</CardDescription>
                 </CardHeader>
               </Card>
             ) : null}
@@ -394,11 +396,11 @@ export default function StudentWorkoutsPage() {
                         <h2 className="text-2xl font-bold">{workout.title}</h2>
                         <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mt-2">
                           <span className="flex items-center gap-1">
-                            <Dumbbell className="h-4 w-4" /> {workout.exercises?.length || 0} Exercises
+                            <Dumbbell className="h-4 w-4" /> {workout.exercises?.length || 0} {t("exercisesLabel")}
                           </span>
                           {(workout.assignedAt || workout.createdAt) && (
                             <span className="flex items-center gap-1">
-                              <Clock className="h-4 w-4" /> Assigned {new Date(workout.assignedAt || workout.createdAt || "").toLocaleDateString()}
+                              <Clock className="h-4 w-4" /> {t("assigned")} {new Date(workout.assignedAt || workout.createdAt || "").toLocaleDateString()}
                             </span>
                           )}
                         </div>
@@ -436,13 +438,13 @@ export default function StudentWorkoutsPage() {
                         {canStartToday ? (
                           <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2 flex-1 sm:flex-none" asChild>
                             <Link href={`/student/workouts/${workout.id}/session`}>
-                              <Play className="h-4 w-4" /> Start Session
+                              <Play className="h-4 w-4" /> {t("startSession")}
                             </Link>
                           </Button>
                         ) : (
                           <Button className="gap-2 flex-1 sm:flex-none" variant="outline" disabled>
                             <Play className="h-4 w-4" />
-                            Available in {daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt)} {daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt) === 1 ? "day" : "days"}
+                            {t("availableInDays").replace("{n}", String(daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt)))}
                           </Button>
                         )}
                         <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform hidden sm:block" />
@@ -458,8 +460,8 @@ export default function StudentWorkoutsPage() {
         {completedWorkouts.length > 0 ? (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Workout History</h2>
-              <Badge variant="secondary">{completedWorkouts.length} completed</Badge>
+              <h2 className="text-lg font-semibold">{t("workoutHistory")}</h2>
+              <Badge variant="secondary">{completedWorkouts.length} {t("completedCount")}</Badge>
             </div>
 
             <div className="grid gap-4">
@@ -477,22 +479,22 @@ export default function StudentWorkoutsPage() {
                         <div className="space-y-2 flex-1">
                           <div className="flex items-center gap-2">
                             <CheckCircle2 className="h-4 w-4 text-accent" />
-                            <h3 className="text-lg font-semibold">{session.workoutTitle || "Completed workout"}</h3>
+                            <h3 className="text-lg font-semibold">{session.workoutTitle || t("completedWorkout")}</h3>
                           </div>
                           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
-                              <Dumbbell className="h-4 w-4" /> {(session.exercises || []).length} Exercises
+                              <Dumbbell className="h-4 w-4" /> {(session.exercises || []).length} {t("exercisesLabel")}
                             </span>
-                            <span>{totalSets} Sets</span>
+                            <span>{totalSets} {t("setsLabel")}</span>
                             {completedDate ? (
                               <span className="flex items-center gap-1">
-                                <Clock className="h-4 w-4" /> Completed {new Date(completedDate).toLocaleDateString()}
+                                <Clock className="h-4 w-4" /> {t("completed")} {new Date(completedDate).toLocaleDateString()}
                               </span>
                             ) : null}
                           </div>
                         </div>
 
-                        <Badge variant="outline" className="w-fit">Completed</Badge>
+                        <Badge variant="outline" className="w-fit">{t("completed")}</Badge>
                       </div>
                     </CardContent>
                   </Card>

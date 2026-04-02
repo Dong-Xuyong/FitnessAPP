@@ -8,9 +8,10 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target } from "lucide-react";
+import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target, Percent } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
+import { useI18n } from "@/lib/i18n";
 import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 
@@ -28,6 +29,7 @@ function getWeekKey(date: Date): string {
 export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
+  const { t } = useI18n();
 
   const [studentData, setStudentData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
@@ -121,12 +123,12 @@ export default function StudentDashboardPage() {
     return (
       <StudentNavigation>
         <div className="max-w-lg mx-auto py-16 text-center space-y-4">
-          <h2 className="text-2xl font-bold font-headline">Welcome</h2>
+          <h2 className="text-2xl font-bold font-headline">{t("welcome")}</h2>
           <p className="text-muted-foreground">
-            We couldn&apos;t find your student profile yet. Complete your profile so your trainer can link your account.
+            {t("noProfileYet")}
           </p>
           <Button asChild>
-            <Link href="/student/profile">Go to profile</Link>
+            <Link href="/student/profile">{t("goToProfile")}</Link>
           </Button>
         </div>
       </StudentNavigation>
@@ -138,10 +140,10 @@ export default function StudentDashboardPage() {
 
   const trainingStatusDescription =
     !studentData.trainerId
-      ? "No trainer linked to your account yet."
+      ? t("noTrainerLinked")
       : studentData.currentProgramId
-        ? "Active Program in Progress"
-        : "Waiting for Coach to assign program";
+        ? t("activeProgramInProgress")
+        : t("waitingForCoach");
 
   const currentWeekKey = getWeekKey(new Date());
   const lastCheckinWeekKey = studentData?.lastWeeklyWeightCheckInWeekKey || "";
@@ -204,9 +206,9 @@ export default function StudentDashboardPage() {
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">Welcome back, {firstName}!</h1>
+          <h1 className="text-3xl font-bold font-headline">{t("welcomeBack2")}{firstName}!</h1>
           <p className="text-muted-foreground capitalize">
-            Goal: {studentData.goalType?.replace("_", " ") || "—"}
+            {t("goalPrefix")}{studentData.goalType?.replace("_", " ") || "—"}
           </p>
         </header>
 
@@ -214,7 +216,7 @@ export default function StudentDashboardPage() {
           <Card className="md:col-span-2 bg-primary text-primary-foreground">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle>Training Status</CardTitle>
+                <CardTitle>{t("trainingStatus")}</CardTitle>
                 <CardDescription className="text-primary-foreground/80">
                   {trainingStatusDescription}
                 </CardDescription>
@@ -224,9 +226,9 @@ export default function StudentDashboardPage() {
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span>Current Streak</span>
+                  <span>{t("currentStreak")}</span>
                   <span>
-                    {currentStreak} Workouts{" "}
+                    {currentStreak}{t("workoutsLabel")}{" "}
                     <Flame className="inline h-4 w-4" />
                   </span>
                 </div>
@@ -239,16 +241,16 @@ export default function StudentDashboardPage() {
                 <div className="flex items-center gap-2">
                   <Calendar className="h-4 w-4" />
                   <span className="text-sm">
-                    Last session:{" "}
+                    {t("lastSession")}{" "}
                     {lastSessionDoneAt
                       ? new Date(lastSessionDoneAt).toLocaleDateString()
-                      : "No history"}
+                      : t("noHistory")}
                   </span>
                 </div>
                 {studentData.currentProgramId && (
                   <Button variant="secondary" asChild>
                     <Link href={`/student/workouts/${studentData.currentProgramId}/session`}>
-                      <Play className="h-4 w-4 mr-2" /> Resume
+                      <Play className="h-4 w-4 mr-2" /> {t("resume")}
                     </Link>
                   </Button>
                 )}
@@ -258,7 +260,7 @@ export default function StudentDashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Physical Stats</CardTitle>
+              <CardTitle>{t("physicalStats")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-3 p-3 border rounded-lg">
@@ -266,7 +268,7 @@ export default function StudentDashboardPage() {
                 <div>
                   <p className="text-sm font-bold">{studentData.weightKg} kg</p>
                   <p className="text-xs text-muted-foreground">
-                    Weight (Goal: {studentData.goalWeightKg} kg)
+                    {t("weightGoalLabel").replace("{n}", String(studentData.goalWeightKg))}
                   </p>
                 </div>
               </div>
@@ -274,11 +276,20 @@ export default function StudentDashboardPage() {
                 <Target className="h-5 w-5 text-accent" />
                 <div>
                   <p className="text-sm font-bold">{studentData.heightCm} cm</p>
-                  <p className="text-xs text-muted-foreground">Height</p>
+                  <p className="text-xs text-muted-foreground">{t("height")}</p>
                 </div>
               </div>
+              {studentData.bodyFatPercent > 0 && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <Percent className="h-5 w-5 text-orange-500" />
+                  <div>
+                    <p className="text-sm font-bold">{studentData.bodyFatPercent}%</p>
+                    <p className="text-xs text-muted-foreground">{t("bodyFat")}</p>
+                  </div>
+                </div>
+              )}
               <div className="text-xs text-center py-2 bg-muted rounded">
-                Status:{" "}
+                {t("statusLabel")}{" "}
                 <span className="font-bold capitalize">
                   {studentData.subscriptionStatus || "—"}
                 </span>
@@ -290,14 +301,14 @@ export default function StudentDashboardPage() {
         <Dialog open={requiresWeeklyWeightCheckIn} onOpenChange={() => {}}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Weekly Weight Check-in</DialogTitle>
+              <DialogTitle>{t("weeklyWeightCheckin")}</DialogTitle>
               <DialogDescription>
-                Start of the week check-in: enter your current weight to continue.
+                {t("weeklyCheckinDesc")}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-2">
-              <Label htmlFor="weekly-weight">Current weight (kg)</Label>
+              <Label htmlFor="weekly-weight">{t("currentWeightKg")}</Label>
               <Input
                 id="weekly-weight"
                 type="number"

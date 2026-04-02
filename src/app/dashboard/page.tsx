@@ -169,11 +169,11 @@ function DashboardContent() {
             planId: d.id,
             studentId: student.id,
             studentName: `${student.firstName || student.name || ""} ${student.lastName || ""}`.trim(),
-            title: data.title || "Untitled",
+            title: data.title || t("untitled"),
             assignedAt: data.assignedAt || data.createdAt || "",
             scheduledTime: data.scheduledTime || "",
             exercises: (data.exercises || []).map((ex: any) => ({
-              name: ex.name || ex.exerciseName || "Unnamed",
+              name: ex.name || ex.exerciseName || t("unnamed"),
               sets: ex.sets || 0,
               reps: ex.reps || 0,
               weight: ex.weight,
@@ -255,11 +255,11 @@ function DashboardContent() {
     if (!db || !user) return;
     try {
       await deleteDoc(doc(db, "personalTrainers", user.uid, "students", a.studentId, "workoutPlans", a.planId));
-      toast({ title: "Workout removed" });
+      toast({ title: t("workoutRemoved") });
       setSelectedAssignment(null);
       fetchAssignments();
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      toast({ title: t("error"), description: e.message, variant: "destructive" });
     }
   };
 
@@ -273,12 +273,12 @@ function DashboardContent() {
         doc(db, "personalTrainers", user.uid, "students", selectedAssignment.studentId, "workoutPlans", selectedAssignment.planId),
         { title: editTitle, exercises: editExercises, assignedAt: updatedAssignedAt, scheduledTime: editTime }
       );
-      toast({ title: "Workout updated" });
+      toast({ title: t("workoutUpdated") });
       setIsEditing(false);
       setSelectedAssignment(null);
       fetchAssignments();
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      toast({ title: t("error"), description: e.message, variant: "destructive" });
     }
   };
 
@@ -330,10 +330,10 @@ function DashboardContent() {
       change: `${rosterCount} ${t("onYourRoster")}`,
     },
     {
-      label: "Team Velocity",
+      label: t("teamVelocity"),
       value: `${teamVelocityPercent}%`,
       icon: Activity,
-      change: "Workout completion rate this week",
+      change: t("workoutCompletionRate"),
     },
     {
       label: t("avgStreak"),
@@ -357,7 +357,7 @@ function DashboardContent() {
       <div className="space-y-6">
         <header className="flex justify-between items-center">
           <div>
-            <h2 className="text-3xl font-bold font-headline">Welcome, Coach {trainer?.lastName || ""}</h2>
+            <h2 className="text-3xl font-bold font-headline">{t("welcomeCoach")} {trainer?.lastName || ""}</h2>
             <p className="text-muted-foreground">{t("overviewDescription")}</p>
           </div>
           <Button asChild>
@@ -443,11 +443,11 @@ function DashboardContent() {
           <Card className="lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle>Students</CardTitle>
-                <CardDescription>Everyone on the student portal; roster members include your private notes</CardDescription>
+                <CardTitle>{t("students")}</CardTitle>
+                <CardDescription>{t("studentsCardDescription")}</CardDescription>
               </div>
               <Button variant="outline" size="sm" asChild>
-                <Link href="/students">Open directory</Link>
+                <Link href="/students">{t("openDirectory")}</Link>
               </Button>
             </CardHeader>
             <CardContent>
@@ -486,20 +486,20 @@ function DashboardContent() {
                             </p>
                             {student._onRoster ? (
                               <Badge variant="secondary" className="text-[9px] h-4 px-1.5">
-                                Roster
+                                {t("roster")}
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="text-[9px] h-4 px-1.5">
-                                Portal
+                                {t("portal")}
                               </Badge>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground capitalize mt-1">
-                            {String(student.goalType || "not set").replace(/_/g, " ")}
+                            {String(student.goalType || t("notSet")).replace(/_/g, " ")}
                           </p>
                           {student._onRoster && typeof student.coachingNotes === "string" && student.coachingNotes.trim() && (
                             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                              Private note: {student.coachingNotes.trim()}
+                              {t("privateNote")}: {student.coachingNotes.trim()}
                             </p>
                           )}
                           <div className="flex items-center gap-2 mt-2">
@@ -519,13 +519,13 @@ function DashboardContent() {
                         <Badge variant="secondary" className="text-[10px] h-5">
                           {student._onRoster
                             ? (streakByStudentId[student.id] ?? 0)
-                            : 0}d Streak
+                            : 0}{t("dStreak")}
                         </Badge>
                         <p className="text-[10px] text-muted-foreground mt-2">
-                          Joined{" "}
+                          {t("memberSince")}{" "}
                           {student.joinedAt
                             ? new Date(String(student.joinedAt)).toLocaleDateString()
-                            : "Recently"}
+                            : t("today")}
                         </p>
                       </div>
                     </Link>
@@ -533,9 +533,9 @@ function DashboardContent() {
                   {sortedStudents.length === 0 && (
                     <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
                       <Users className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                      <p className="text-sm">No students in the portal yet.</p>
+                      <p className="text-sm">{t("noStudentsYet")}</p>
                       <Button variant="outline" size="sm" className="mt-4" asChild>
-                        <Link href="/students">Student directory</Link>
+                        <Link href="/students">{t("studentDirectory")}</Link>
                       </Button>
                     </div>
                   )}
@@ -596,21 +596,21 @@ function DashboardContent() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Dumbbell className="h-5 w-5 text-primary" />
-                {isEditing ? "Edit Workout" : "Workout Details"}
+                {isEditing ? t("editWorkout") : t("workoutDetails")}
               </DialogTitle>
             </DialogHeader>
             {selectedAssignment && !isEditing && (
               <div className="space-y-4">
                 <div>
                   <p className="text-lg font-bold">{selectedAssignment.title}</p>
-                  <p className="text-sm text-muted-foreground">Assigned to {selectedAssignment.studentName}</p>
+                  <p className="text-sm text-muted-foreground">{t("assignedTo")} {selectedAssignment.studentName}</p>
                   <p className="text-xs text-muted-foreground">
                     {selectedAssignment.assignedAt ? new Date(selectedAssignment.assignedAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : ""}
                     {selectedAssignment.scheduledTime ? ` at ${selectedAssignment.scheduledTime}` : ""}
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold">Exercises ({selectedAssignment.exercises.length})</p>
+                  <p className="text-sm font-semibold">{t("exercises")} ({selectedAssignment.exercises.length})</p>
                   {selectedAssignment.exercises.length > 0 ? (
                     selectedAssignment.exercises.map((ex, i) => (
                       <div key={i} className="p-3 border rounded-lg flex items-center justify-between">
@@ -624,40 +624,40 @@ function DashboardContent() {
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-muted-foreground">No exercises defined.</p>
+                    <p className="text-sm text-muted-foreground">{t("noExercisesDefined")}</p>
                   )}
                 </div>
                 <div className="flex gap-2 pt-2">
                   <Button className="flex-1 gap-1" variant="outline" onClick={() => setIsEditing(true)}>
-                    <Pencil className="h-4 w-4" /> Edit
+                    <Pencil className="h-4 w-4" /> {t("edit")}
                   </Button>
                   <Button className="flex-1 gap-1" variant="destructive" onClick={() => handleDeleteAssignment(selectedAssignment)}>
-                    <Trash2 className="h-4 w-4" /> Delete
+                    <Trash2 className="h-4 w-4" /> {t("delete")}
                   </Button>
                 </div>
                 <Button variant="link" className="w-full text-xs" asChild>
-                  <Link href={`/students/${selectedAssignment.studentId}`}>View Student Profile</Link>
+                  <Link href={`/students/${selectedAssignment.studentId}`}>{t("viewStudentProfile")}</Link>
                 </Button>
               </div>
             )}
             {selectedAssignment && isEditing && (
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Workout Title</label>
+                  <label className="text-sm font-medium">{t("workoutTitle")}</label>
                   <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="mt-1" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-sm font-medium">Date</label>
+                    <label className="text-sm font-medium">{t("date")}</label>
                     <Input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="mt-1" />
                   </div>
                   <div>
-                    <label className="text-sm font-medium">Time</label>
+                    <label className="text-sm font-medium">{t("time")}</label>
                     <Input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} className="mt-1" />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold">Exercises</p>
+                  <p className="text-sm font-semibold">{t("exercises")}</p>
                   {editExercises.map((ex, i) => (
                     <div key={i} className="p-3 border rounded-lg space-y-2">
                       <div className="flex items-center justify-between">
@@ -668,7 +668,7 @@ function DashboardContent() {
                             copy[i] = { ...copy[i], name: e.target.value };
                             setEditExercises(copy);
                           }}
-                          placeholder="Exercise name"
+                          placeholder={t("exerciseName")}
                           className="text-sm"
                         />
                         <Button
@@ -682,7 +682,7 @@ function DashboardContent() {
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
-                          <label className="text-[10px] text-muted-foreground">Sets</label>
+                          <label className="text-[10px] text-muted-foreground">{t("sets")}</label>
                           <Input
                             type="number"
                             value={ex.sets}
@@ -695,7 +695,7 @@ function DashboardContent() {
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] text-muted-foreground">Reps</label>
+                          <label className="text-[10px] text-muted-foreground">{t("reps")}</label>
                           <Input
                             type="number"
                             value={ex.reps}
@@ -708,7 +708,7 @@ function DashboardContent() {
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] text-muted-foreground">Weight (kg)</label>
+                          <label className="text-[10px] text-muted-foreground">{t("weightKg")}</label>
                           <Input
                             type="number"
                             value={ex.weight || ""}
@@ -729,15 +729,15 @@ function DashboardContent() {
                     className="w-full text-xs"
                     onClick={() => setEditExercises([...editExercises, { name: "", sets: 3, reps: 10 }])}
                   >
-                    + Add Exercise
+                    {t("addExercise")}
                   </Button>
                 </div>
                 <div className="flex gap-2 pt-2">
                   <Button className="flex-1" variant="outline" onClick={() => setIsEditing(false)}>
-                    Cancel
+                    {t("cancel")}
                   </Button>
                   <Button className="flex-1" onClick={handleSaveEdit}>
-                    Save Changes
+                    {t("saveChanges")}
                   </Button>
                 </div>
               </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ import { collection } from "firebase/firestore";
 const categories = ["All", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body", "Cardio", "Other"];
 
 export default function StudentExercisesPage() {
+  const { t } = useI18n();
   const { user } = useUser();
   const db = useFirestore();
 
@@ -40,14 +42,14 @@ export default function StudentExercisesPage() {
     <StudentNavigation>
       <div className="space-y-4">
         <header>
-          <h1 className="text-2xl md:text-3xl font-bold font-headline">Exercises</h1>
-          <p className="text-sm text-muted-foreground">Exercise library shared by your coach.</p>
+          <h1 className="text-2xl md:text-3xl font-bold font-headline">{t("exercises")}</h1>
+          <p className="text-sm text-muted-foreground">{t("exerciseLibraryShared")}</p>
         </header>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search exercises..."
+            placeholder={t("searchExercises")}
             className="pl-10"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
@@ -74,13 +76,13 @@ export default function StudentExercisesPage() {
               <Card key={exercise.id} className="group hover:border-primary transition-colors">
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="text-base lg:text-lg leading-tight line-clamp-2">{exercise.name || "Unnamed Exercise"}</CardTitle>
+                    <CardTitle className="text-base lg:text-lg leading-tight line-clamp-2">{exercise.name || t("unnamedExercise")}</CardTitle>
                     <Badge variant="secondary" className="shrink-0 w-fit">{exercise.category || "Other"}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <p className="text-sm text-muted-foreground line-clamp-2">
-                    {exercise.description || "No description available."}
+                    {exercise.description || t("noDescriptionAvailable")}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     {exercise.difficulty && (
@@ -99,7 +101,7 @@ export default function StudentExercisesPage() {
                       rel="noreferrer"
                       className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
                     >
-                      Watch demo
+                      {t("watchDemo")}
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   ) : null}
@@ -111,8 +113,8 @@ export default function StudentExercisesPage() {
 
         {!isLoading && filteredExercises.length === 0 ? (
           <div className="py-12 text-center text-muted-foreground border-2 border-dashed rounded-lg">
-            <p className="font-medium">No exercises found</p>
-            <p className="text-sm mt-1">Try a different search term or category.</p>
+            <p className="font-medium">{t("noExercisesFound")}</p>
+            <p className="text-sm mt-1">{t("tryDifferentSearch")}</p>
           </div>
         ) : null}
       </div>

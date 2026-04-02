@@ -4,6 +4,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { FirebaseClientProvider } from "@/firebase/client-provider";
 import { I18nProvider } from "@/lib/i18n";
+import { ThemeProvider } from "next-themes";
 
 export const metadata: Metadata = {
   title: 'ElevateFit - Personal Training Management',
@@ -23,12 +24,14 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       </head>
       <body className="font-body antialiased bg-background text-foreground" suppressHydrationWarning>
-        <FirebaseClientProvider>
-          <I18nProvider>
-            {children}
-            <Toaster />
-          </I18nProvider>
-        </FirebaseClientProvider>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <FirebaseClientProvider>
+            <I18nProvider>
+              {children}
+              <Toaster />
+            </I18nProvider>
+          </FirebaseClientProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useI18n } from "@/lib/i18n";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ type Assignment = {
 };
 
 export default function AssignmentCalendarPage() {
+  const { t } = useI18n();
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -121,25 +123,25 @@ export default function AssignmentCalendarPage() {
     <Navigation>
       <div className="space-y-6">
         <header>
-          <h2 className="text-3xl font-bold font-headline">Assignment Calendar</h2>
-          <p className="text-muted-foreground">Track assigned workouts by date.</p>
+          <h2 className="text-3xl font-bold font-headline">{t("assignmentCalendar")}</h2>
+          <p className="text-muted-foreground">{t("trackAssignedByDate")}</p>
         </header>
 
         <div className="grid lg:grid-cols-5 gap-6">
           <Card className="lg:col-span-3">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-primary" /> Date View
+                <CalendarDays className="h-4 w-4 text-primary" /> {t("dateView")}
               </CardTitle>
-              <CardDescription>Pick a student and date to see assigned workouts</CardDescription>
+              <CardDescription>{t("pickStudentAndDate")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Choose student" />
+                  <SelectValue placeholder={t("chooseStudent")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All students</SelectItem>
+                  <SelectItem value="all">{t("allStudentsOption")}</SelectItem>
                   {(rosterStudents || []).map((student: any) => {
                     const name = `${student.firstName || student.name || ""} ${student.lastName || ""}`.trim() || "Unnamed";
                     return (
@@ -195,15 +197,15 @@ export default function AssignmentCalendarPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">No assignments on this date.</p>
+                <p className="text-xs text-muted-foreground">{t("noAssignmentsOnDate")}</p>
               )}
             </CardContent>
           </Card>
 
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>Upcoming Assignments</CardTitle>
-              <CardDescription>Next scheduled workouts</CardDescription>
+              <CardTitle>{t("upcomingAssignments")}</CardTitle>
+              <CardDescription>{t("nextScheduledWorkouts")}</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -235,7 +237,7 @@ export default function AssignmentCalendarPage() {
                               <Badge variant="outline" className="text-[10px] h-4 px-1.5">{a.scheduledTime}</Badge>
                             )}
                             {isToday && (
-                              <Badge className="text-[10px] h-4 px-1.5 bg-green-100 text-green-800">Today</Badge>
+                              <Badge className="text-[10px] h-4 px-1.5 bg-green-100 text-green-800">{t("today")}</Badge>
                             )}
                           </div>
                         </div>
@@ -244,7 +246,7 @@ export default function AssignmentCalendarPage() {
                   })}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No upcoming assignments.</p>
+                <p className="text-sm text-muted-foreground">{t("noUpcomingAssignments")}</p>
               )}
             </CardContent>
           </Card>

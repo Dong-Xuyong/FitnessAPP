@@ -22,6 +22,7 @@ import {
 } from "@/lib/firestore/training-programs";
 import type { DayOfWeek, TrainingProgramDocument, WeeklyProgramItem } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n, useDayLabel } from "@/lib/i18n";
 
 type TrainingProgramListItem = TrainingProgramDocument & {
   id: string;
@@ -128,6 +129,8 @@ export default function WorkoutsPage() {
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { t } = useI18n();
+  const dayLabel = useDayLabel();
   const [isInitializing, setIsInitializing] = useState(false);
   const [isSavingWeekly, setIsSavingWeekly] = useState(false);
   const [isAssigningWeekly, setIsAssigningWeekly] = useState(false);
@@ -245,8 +248,8 @@ export default function WorkoutsPage() {
     if (selectedProgramsForWeekly.length === 0) {
       toast({
         variant: "destructive",
-        title: "Select programs",
-        description: "Select at least 1 training program to build a weekly cycle.",
+        title: t("selectProgramsRequired"),
+        description: t("selectAtLeast1Program"),
       });
       return;
     }
@@ -272,7 +275,7 @@ export default function WorkoutsPage() {
       });
 
       toast({
-        title: "Weekly program created",
+        title: t("weeklyProgramCreated"),
         description: `${name} is now available in Weekly Programs.`,
       });
 
@@ -283,8 +286,8 @@ export default function WorkoutsPage() {
     } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Create failed",
-        description: error?.message || "Could not create the weekly program.",
+        title: t("createFailed"),
+        description: error?.message || t("couldNotCreateWeekly"),
       });
     } finally {
       setIsSavingWeekly(false);
@@ -303,8 +306,8 @@ export default function WorkoutsPage() {
     if (!selectedStudentId || !assignmentStartDate) {
       toast({
         variant: "destructive",
-        title: "Assignment details required",
-        description: "Select a student and when the weekly cycle should start.",
+        title: t("assignmentDetailsRequired"),
+        description: t("selectStudentAndDate"),
       });
       return;
     }
@@ -322,8 +325,8 @@ export default function WorkoutsPage() {
     if (weeklyPlan.length === 0) {
       toast({
         variant: "destructive",
-        title: "Nothing to assign",
-        description: "This weekly program has no cycle weeks.",
+        title: t("nothingToAssign"),
+        description: t("noCycleWeeks"),
       });
       return;
     }
@@ -359,8 +362,8 @@ export default function WorkoutsPage() {
       }
 
       toast({
-        title: "Weekly program assigned",
-        description: `${selectedWeeklyProgram.name} has been scheduled starting ${new Date(assignmentStartDate).toLocaleDateString()}.`,
+        title: t("weeklyProgramAssigned"),
+        description: `${selectedWeeklyProgram.name} ${t("scheduledStartingDesc")} ${new Date(assignmentStartDate).toLocaleDateString()}.`,
       });
 
       setIsAssignDialogOpen(false);
@@ -368,8 +371,8 @@ export default function WorkoutsPage() {
     } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Assignment failed",
-        description: error?.message || "Could not assign the weekly program.",
+        title: t("assignmentFailed"),
+        description: error?.message || t("couldNotAssignWeekly"),
       });
     } finally {
       setIsAssigningWeekly(false);
@@ -381,13 +384,13 @@ export default function WorkoutsPage() {
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-2xl font-bold font-headline">Training Programs</h2>
-            <p className="text-muted-foreground">Manage and assign workouts to your students.</p>
+            <h2 className="text-2xl font-bold font-headline">{t("trainingPrograms")}</h2>
+            <p className="text-muted-foreground">{t("manageAndAssign")}</p>
           </div>
           <Button className="gap-2" asChild>
             <Link href="/workouts/builder">
               <Plus className="h-4 w-4" />
-              Create Program
+              {t("createProgram")}
             </Link>
           </Button>
         </div>
@@ -397,24 +400,24 @@ export default function WorkoutsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CalendarRange className="h-5 w-5 text-primary" />
-                Weekly Programs
+                {t("weeklyPrograms")}
               </CardTitle>
               <CardDescription>
-                Build a weekly cycle with per-program workout day, kg increase, rep increase, defined cycle length, and student assignment.
+                {t("weeklyProgramsDesc")}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Weekly program name</Label>
+                  <Label>{t("weeklyProgramName")}</Label>
                   <Input
                     value={weeklyProgramName}
                     onChange={(event) => setWeeklyProgramName(event.target.value)}
-                    placeholder="Example: 6-Week Strength Cycle"
+                    placeholder={t("exampleWeeklyCycle")}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Number of weeks</Label>
+                  <Label>{t("numberOfWeeks")}</Label>
                   <Input
                     type="number"
                     min="1"
@@ -423,15 +426,15 @@ export default function WorkoutsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Program rotation</Label>
+                  <Label>{t("programRotation")}</Label>
                   <p className="text-sm text-muted-foreground pt-2">
-                    Selected programs repeat in order until all chosen weeks are filled. Each selected program keeps its own day and kg increase.
+                    {t("programRotationDesc")}
                   </p>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <p className="text-sm font-medium">Select programs to rotate through the cycle</p>
+                <p className="text-sm font-medium">{t("selectProgramsToRotate")}</p>
                 <div className="grid md:grid-cols-2 gap-3">
                   {basePrograms.map((program) => (
                     <label
@@ -451,8 +454,8 @@ export default function WorkoutsPage() {
               {selectedProgramsForWeekly.length > 0 && (
                 <div className="space-y-3 rounded-lg border p-4 bg-background">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">Program settings</p>
-                    <Badge variant="outline">Shared across repeated weeks</Badge>
+                    <p className="text-sm font-medium">{t("programSettings")}</p>
+                    <Badge variant="outline">{t("sharedAcrossWeeks")}</Badge>
                   </div>
                   <div className="space-y-3">
                     {selectedProgramsForWeekly.map((program) => {
@@ -461,10 +464,10 @@ export default function WorkoutsPage() {
                         <div key={`program-setting-${program.id}`} className="grid md:grid-cols-[1fr_180px_140px_120px] gap-3 items-end rounded-md border p-3">
                           <div>
                             <p className="text-sm font-medium">{program.name}</p>
-                            <p className="text-xs text-muted-foreground">These values apply every time this program appears in the cycle.</p>
+                            <p className="text-xs text-muted-foreground">{t("settingsApplyEveryTime")}</p>
                           </div>
                           <div className="space-y-2">
-                            <Label>Day of workout</Label>
+                            <Label>{t("dayOfWorkout")}</Label>
                             <Select
                               value={setting.dayOfWeek}
                               onValueChange={(value) =>
@@ -478,19 +481,19 @@ export default function WorkoutsPage() {
                               }
                             >
                               <SelectTrigger>
-                                <SelectValue placeholder="Choose day" />
+                                <SelectValue placeholder={t("chooseDay")} />
                               </SelectTrigger>
                               <SelectContent>
                                 {DAYS_OF_WEEK.map((day) => (
                                   <SelectItem key={`${program.id}-${day}`} value={day}>
-                                    {formatDayOfWeek(day)}
+                                    {dayLabel(day)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label>kg increase</Label>
+                            <Label>{t("kgIncrease")}</Label>
                             <Input
                               type="number"
                               step="0.5"
@@ -507,7 +510,7 @@ export default function WorkoutsPage() {
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label>rep increase</Label>
+                            <Label>{t("repIncrease")}</Label>
                             <Input
                               type="number"
                               step="1"
@@ -532,7 +535,7 @@ export default function WorkoutsPage() {
               )}
 
               <div className="text-sm text-muted-foreground">
-                {selectedProgramIds.length} selected
+                {selectedProgramIds.length} {t("selected")}
               </div>
 
               <Button
@@ -541,7 +544,7 @@ export default function WorkoutsPage() {
                 disabled={isSavingWeekly || weeklyPreview.length === 0}
               >
                 {isSavingWeekly ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
-                Create Weekly Program
+                {t("createWeeklyProgram")}
               </Button>
             </CardContent>
           </Card>
@@ -571,16 +574,16 @@ export default function WorkoutsPage() {
         {!isLoading && programs && programs.length === 0 && (
           <Card className="border-dashed">
             <CardHeader>
-              <CardTitle>No programs yet</CardTitle>
+              <CardTitle>{t("noProgramsYet")}</CardTitle>
               <CardDescription>
-                Build a routine in the program builder, or load default programs to get started.
+                {t("noProgramsYetDesc")}
               </CardDescription>
             </CardHeader>
             <CardFooter className="flex flex-wrap gap-3">
               <Button asChild className="gap-2">
                 <Link href="/workouts/builder">
                   <Plus className="h-4 w-4" />
-                  Create Program
+                  {t("createProgram")}
                 </Link>
               </Button>
               <Button
@@ -605,7 +608,7 @@ export default function WorkoutsPage() {
                 }}
               >
                 {isInitializing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                Load Default Programs
+                {t("loadDefaultPrograms")}
               </Button>
             </CardFooter>
           </Card>
@@ -613,7 +616,7 @@ export default function WorkoutsPage() {
 
         {!isLoading && weeklyPrograms.length > 0 && (
           <div className="space-y-3">
-            <h3 className="text-lg font-semibold">Saved Weekly Programs</h3>
+            <h3 className="text-lg font-semibold">{t("savedWeeklyPrograms")}</h3>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {weeklyPrograms.map((program) => {
                 const plan = program.weeklyPlan || [];
@@ -624,7 +627,7 @@ export default function WorkoutsPage() {
                     <CardHeader>
                       <div className="flex justify-between items-start mb-2">
                         <Badge variant="outline" className="text-primary border-primary/40">
-                          Weekly cycle
+                          {t("weeklyCycle")}
                         </Badge>
                         <Badge>{weeks} weeks</Badge>
                       </div>
@@ -640,7 +643,7 @@ export default function WorkoutsPage() {
                         <div key={`${program.id}-program-${programWeek.trainingProgramId}`} className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">{programWeek.trainingProgramName}</span>
                           <span className="font-medium text-primary">
-                            {formatDayOfWeek(programWeek.dayOfWeek)} • +{programWeek.weightIncreaseKg} kg • +{programWeek.repIncrease} reps
+                            {dayLabel(programWeek.dayOfWeek)} • +{programWeek.weightIncreaseKg} kg • +{programWeek.repIncrease} reps
                           </span>
                         </div>
                       ))}
@@ -652,7 +655,7 @@ export default function WorkoutsPage() {
                     </CardContent>
                     <CardFooter className="pt-0 flex gap-2 justify-end">
                       <Button className="gap-2" variant="secondary" onClick={() => openAssignDialog(program)}>
-                        <Send className="h-4 w-4" /> Assign to student
+                        <Send className="h-4 w-4" /> {t("assignToStudent")}
                       </Button>
                       <Button
                         variant="ghost"
@@ -663,7 +666,7 @@ export default function WorkoutsPage() {
                           if (!confirm(`Delete weekly program "${program.name}"?`)) return;
                           const ref = doc(db, "personalTrainers", user.uid, "personalTrainingPrograms", program.id);
                           deleteDocumentNonBlocking(ref);
-                          toast({ title: "Deleted", description: `"${program.name}" has been removed.` });
+                          toast({ title: t("deleted"), description: `"${program.name}" ${t("hasBeenRemoved")}` });
                         }}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -682,7 +685,7 @@ export default function WorkoutsPage() {
               const exerciseCount = totalExercisesInProgram(program.sessions);
               const category = program.category ?? "Program library";
               const levelLabel =
-                program.level === "all" || !program.level ? "All levels" : program.level;
+                program.level === "all" || !program.level ? t("allLevels") : program.level;
 
               return (
                 <Card key={program.id} className="flex flex-col">
@@ -702,13 +705,13 @@ export default function WorkoutsPage() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground flex items-center gap-1.5">
-                          <Dumbbell className="h-4 w-4" /> Exercises
+                          <Dumbbell className="h-4 w-4" /> {t("exercisesCount")}
                         </span>
                         <span className="font-medium">{exerciseCount}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground flex items-center gap-1.5">
-                          <Clock className="h-4 w-4" /> Sessions
+                          <Clock className="h-4 w-4" /> {t("sessionsCount")}
                         </span>
                         <span className="font-medium">{program.sessions?.length ?? 0}</span>
                       </div>
@@ -717,7 +720,7 @@ export default function WorkoutsPage() {
                   <CardFooter className="pt-0 flex gap-2">
                     <Button className="flex-1 gap-2" variant="secondary" asChild>
                       <Link href={`/workouts/builder?edit=${program.id}`}>
-                        Edit in builder <ArrowRight className="h-4 w-4" />
+                        {t("editInBuilder")} <ArrowRight className="h-4 w-4" />
                       </Link>
                     </Button>
                     <Button
@@ -729,7 +732,7 @@ export default function WorkoutsPage() {
                         if (!confirm(`Delete "${program.name}"?`)) return;
                         const ref = doc(db, "personalTrainers", user.uid, "personalTrainingPrograms", program.id);
                         deleteDocumentNonBlocking(ref);
-                        toast({ title: "Deleted", description: `"${program.name}" has been removed.` });
+                        toast({ title: t("deleted"), description: `"${program.name}" ${t("hasBeenRemoved")}` });
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -744,18 +747,18 @@ export default function WorkoutsPage() {
         <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Assign Weekly Program</DialogTitle>
+              <DialogTitle>{t("assignWeeklyProgram")}</DialogTitle>
               <DialogDescription>
-                Select a student and when this weekly cycle should start.
+                {t("assignWeeklyProgramDesc")}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Student</Label>
+                <Label>{t("student")}</Label>
                 <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select a student" />
+                    <SelectValue placeholder={t("selectAStudent")} />
                   </SelectTrigger>
                   <SelectContent>
                     {students?.filter((s: any) => !s.blocked).map((student) => (
@@ -768,7 +771,7 @@ export default function WorkoutsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Start date</Label>
+                <Label>{t("startDate")}</Label>
                 <Input
                   type="date"
                   value={assignmentStartDate}
@@ -779,7 +782,7 @@ export default function WorkoutsPage() {
               {selectedWeeklyProgram?.weeklyPlan?.length ? (
                 <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">Cycle length</span>
+                    <span className="font-medium">{t("cycleLength")}</span>
                     <Badge variant="outline">{selectedWeeklyProgram.weeklyPlan.length} weeks</Badge>
                   </div>
                   {Array.from(
@@ -800,11 +803,11 @@ export default function WorkoutsPage() {
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAssignDialogOpen(false)} disabled={isAssigningWeekly}>
-                Cancel
+                {t("cancel")}
               </Button>
               <Button onClick={handleAssignWeeklyProgram} disabled={isAssigningWeekly || !selectedStudentId || !assignmentStartDate}>
                 {isAssigningWeekly ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Assign Weekly Program
+                {t("assignWeeklyProgram")}
               </Button>
             </DialogFooter>
           </DialogContent>

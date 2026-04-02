@@ -47,6 +47,7 @@ import {
 } from "@/lib/firestore/milestones";
 import type { Firestore } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n } from "@/lib/i18n";
 
 type MilestoneCategory = "weight" | "strength" | "endurance" | "flexibility" | "milestone" | "other";
 type MilestoneStatus = "active" | "completed" | "missed" | "paused";
@@ -69,6 +70,7 @@ export function MilestonesTab({
   onMilestonesChange,
 }: MilestonesTabProps) {
   const { toast } = useToast();
+  const { t } = useI18n();
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -92,17 +94,17 @@ export function MilestonesTab({
     active: {
       color: "bg-blue-100 text-blue-800",
       icon: <Target className="h-4 w-4" />,
-      label: "Active",
+      label: t("active"),
     },
     completed: {
       color: "bg-green-100 text-green-800",
       icon: <CheckCircle2 className="h-4 w-4" />,
-      label: "Completed",
+      label: t("completed"),
     },
     missed: {
       color: "bg-red-100 text-red-800",
       icon: <AlertCircle className="h-4 w-4" />,
-      label: "Missed",
+      label: t("overdue"),
     },
     paused: {
       color: "bg-yellow-100 text-yellow-800",
@@ -141,8 +143,8 @@ export function MilestonesTab({
   const handleSaveMilestone = async () => {
     if (!formData.title || !formData.targetValue || !formData.dueDate || !formData.currentValue) {
       toast({
-        title: "Incomplete Form",
-        description: "Please fill in all required fields.",
+        title: t("incompleteForm"),
+        description: t("fillRequiredFields"),
         variant: "destructive",
       });
       return;
@@ -164,8 +166,8 @@ export function MilestonesTab({
           dueDate: new Date(formData.dueDate).toISOString(),
         });
         toast({
-          title: "Milestone Updated",
-          description: "The milestone has been successfully updated.",
+          title: t("milestoneUpdated"),
+          description: t("milestoneUpdatedDesc"),
         });
       } else {
         // Create new milestone
@@ -180,8 +182,8 @@ export function MilestonesTab({
           status: "active",
         });
         toast({
-          title: "Milestone Created",
-          description: "The milestone has been successfully created.",
+          title: t("milestoneCreated"),
+          description: t("milestoneCreatedDesc"),
         });
       }
       resetForm();
@@ -205,8 +207,8 @@ export function MilestonesTab({
     try {
       await deleteMilestone(db, deletingId);
       toast({
-        title: "Milestone Deleted",
-        description: "The milestone has been removed.",
+        title: t("milestoneDeletedTitle"),
+        description: t("milestoneDeletedDesc"),
       });
       setDeletingId(null);
       onMilestonesChange?.();
@@ -226,8 +228,8 @@ export function MilestonesTab({
     try {
       await updateMilestoneProgress(db, milestone.id, Number(newValue));
       toast({
-        title: "Progress Updated",
-        description: "Milestone progress has been updated.",
+        title: t("progressUpdated"),
+        description: t("progressUpdatedDesc"),
       });
       onMilestonesChange?.();
     } catch (error: any) {
@@ -248,25 +250,25 @@ export function MilestonesTab({
       {/* Add/Edit Milestone Dialog */}
       <Dialog open={isAddingMilestone} onOpenChange={setIsAddingMilestone}>
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold">Milestones</h3>
+          <h3 className="text-xl font-bold">{t("milestones")}</h3>
           <DialogTrigger asChild>
             <Button className="gap-2" onClick={() => resetForm()}>
               <Plus className="h-4 w-4" />
-              Add Milestone
+              {t("addMilestone")}
             </Button>
           </DialogTrigger>
         </div>
 
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingMilestone ? "Edit Milestone" : "Create New Milestone"}</DialogTitle>
+            <DialogTitle>{editingMilestone ? t("editMilestone") : t("createNewMilestone")}</DialogTitle>
             <DialogDescription>
-              {editingMilestone ? "Update milestone details." : "Set a new goal for the student."}
+              {editingMilestone ? t("updateMilestoneDetails") : t("setNewGoal")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Title *</Label>
+              <Label>{t("titleRequired")}</Label>
               <Input
                 placeholder="e.g., Reach 75kg"
                 value={formData.title}
@@ -274,7 +276,7 @@ export function MilestonesTab({
               />
             </div>
             <div className="space-y-2">
-              <Label>Description</Label>
+              <Label>{t("descriptionLabel")}</Label>
               <Textarea
                 placeholder="Optional details about this milestone..."
                 rows={2}
@@ -284,41 +286,41 @@ export function MilestonesTab({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Category *</Label>
+                <Label>{t("categoryRequired")}</Label>
                 <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v as MilestoneCategory })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="weight">Weight</SelectItem>
-                    <SelectItem value="strength">Strength</SelectItem>
-                    <SelectItem value="endurance">Endurance</SelectItem>
-                    <SelectItem value="flexibility">Flexibility</SelectItem>
-                    <SelectItem value="milestone">Milestone</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    <SelectItem value="weight">{t("weight")}</SelectItem>
+                    <SelectItem value="strength">{t("strengthCategory")}</SelectItem>
+                    <SelectItem value="endurance">{t("enduranceCategory")}</SelectItem>
+                    <SelectItem value="flexibility">{t("flexibilityCategory")}</SelectItem>
+                    <SelectItem value="milestone">{t("milestoneCategory")}</SelectItem>
+                    <SelectItem value="other">{t("otherCategory")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Unit *</Label>
+                <Label>{t("unitRequired")}</Label>
                 <Select value={formData.targetUnit} onValueChange={(v) => setFormData({ ...formData, targetUnit: v })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="kg">Kilograms (kg)</SelectItem>
-                    <SelectItem value="lbs">Pounds (lbs)</SelectItem>
-                    <SelectItem value="reps">Reps</SelectItem>
-                    <SelectItem value="km">Kilometers (km)</SelectItem>
-                    <SelectItem value="miles">Miles</SelectItem>
-                    <SelectItem value="%">Percentage (%)</SelectItem>
+                    <SelectItem value="kg">{t("kilogramsUnit")}</SelectItem>
+                    <SelectItem value="lbs">{t("poundsUnit")}</SelectItem>
+                    <SelectItem value="reps">{t("repsUnit")}</SelectItem>
+                    <SelectItem value="km">{t("kilometersUnit")}</SelectItem>
+                    <SelectItem value="miles">{t("milesUnit")}</SelectItem>
+                    <SelectItem value="%">{t("percentageUnit")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Current Value *</Label>
+                <Label>{t("currentValueRequired")}</Label>
                 <Input
                   type="number"
                   placeholder="0"
@@ -327,7 +329,7 @@ export function MilestonesTab({
                 />
               </div>
               <div className="space-y-2">
-                <Label>Target Value *</Label>
+                <Label>{t("targetValueRequired")}</Label>
                 <Input
                   type="number"
                   placeholder="0"
@@ -337,7 +339,7 @@ export function MilestonesTab({
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Due Date *</Label>
+              <Label>{t("dueDateRequired")}</Label>
               <Input
                 type="date"
                 value={formData.dueDate}
@@ -352,10 +354,10 @@ export function MilestonesTab({
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Saving...
+                  {t("saving")}
                 </>
               ) : (
-                editingMilestone ? "Save Changes" : "Create Milestone"
+                editingMilestone ? t("saveChanges") : t("createMilestone")
               )}
             </Button>
           </div>
@@ -367,7 +369,7 @@ export function MilestonesTab({
         <div className="space-y-3">
           <h4 className="font-semibold flex items-center gap-2">
             <Target className="h-4 w-4 text-primary" />
-            Active Milestones ({activeMilestones.length})
+            {t("activeMilestones")} ({activeMilestones.length})
           </h4>
           {activeMilestones.map((milestone) => {
             const progress = calculateProgress(milestone.currentValue, milestone.targetValue);
@@ -420,8 +422,8 @@ export function MilestonesTab({
                     {/* Due Date and Status */}
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-muted-foreground">
-                        Due: {new Date(milestone.dueDate).toLocaleDateString()}
-                        {isOverdue && <span className="text-red-600 ml-2 font-semibold">OVERDUE</span>}
+                        {t("due")}{new Date(milestone.dueDate).toLocaleDateString()}
+                        {isOverdue && <span className="text-red-600 ml-2 font-semibold">{t("overdueLabel")}</span>}
                       </div>
                       <Badge className="capitalize">{milestone.category}</Badge>
                     </div>
@@ -430,7 +432,7 @@ export function MilestonesTab({
                     <div className="flex gap-2 mt-3">
                       <Input
                         type="number"
-                        placeholder="Update progress"
+                        placeholder={t("updateProgress")}
                         defaultValue={milestone.currentValue}
                         className="text-sm h-8"
                         onKeyDown={(e) => {
@@ -450,7 +452,7 @@ export function MilestonesTab({
                           handleUpdateProgress(milestone, input.value);
                         }}
                       >
-                        Update
+                        {t("update")}
                       </Button>
                     </div>
                   </div>
@@ -466,7 +468,7 @@ export function MilestonesTab({
         <div className="space-y-3">
           <h4 className="font-semibold flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-green-600" />
-            Completed Milestones ({completedMilestones.length})
+            {t("completedMilestones")} ({completedMilestones.length})
           </h4>
           {completedMilestones.map((milestone) => (
             <Card key={milestone.id} className="bg-green-50/50 border-green-200">
@@ -477,7 +479,7 @@ export function MilestonesTab({
                     <p className="text-sm text-green-700">
                       {milestone.currentValue}
                       {milestone.targetUnit} / {milestone.targetValue}
-                      {milestone.targetUnit} · Completed on{" "}
+                      {milestone.targetUnit} · {t("completedOn")}
                       {milestone.completedAt
                         ? new Date(milestone.completedAt).toLocaleDateString()
                         : "—"}

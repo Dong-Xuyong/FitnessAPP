@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
 import { doc, getDoc, collection, addDoc } from "firebase/firestore";
 import type { DayOfWeek } from "@/lib/types";
@@ -112,6 +113,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   const router = useRouter();
   const { user } = useUser();
   const db = useFirestore();
+  const { t } = useI18n();
   
   const [workout, setWorkout] = useState<WorkoutPlan | null>(null);
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(true);
@@ -272,8 +274,8 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
       <StudentNavigation>
         <div className="text-center py-20 space-y-4">
           <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
-          <h2 className="text-2xl font-bold">Workout not found</h2>
-          <Button asChild><Link href="/student/workouts">Back to Workouts</Link></Button>
+          <h2 className="text-2xl font-bold">{t("workoutNotFound")}</h2>
+          <Button asChild><Link href="/student/workouts">{t("backToWorkouts")}</Link></Button>
         </div>
       </StudentNavigation>
     );
@@ -287,11 +289,11 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
             <Dumbbell className="h-10 w-10 text-muted-foreground" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold font-headline">This workout is not available today</h1>
-            <p className="text-muted-foreground">Available in {daysUntilScheduledDay(workout?.scheduledDayOfWeek, workout?.assignedAt || workout?.createdAt)} {daysUntilScheduledDay(workout?.scheduledDayOfWeek, workout?.assignedAt || workout?.createdAt) === 1 ? "day" : "days"}.</p>
+            <h1 className="text-2xl font-bold font-headline">{t("workoutNotAvailableToday")}</h1>
+            <p className="text-muted-foreground">{t("availableInDaysMsg").replace("{n}", String(daysUntilScheduledDay(workout?.scheduledDayOfWeek, workout?.assignedAt || workout?.createdAt)))}</p>
           </div>
           <Button className="w-full" asChild>
-            <Link href="/student/workouts">Back to Workouts</Link>
+            <Link href="/student/workouts">{t("backToWorkouts")}</Link>
           </Button>
         </div>
       </StudentNavigation>
@@ -306,25 +308,25 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
             <CheckCircle2 className="h-12 w-12" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-3xl font-bold font-headline">Workout Complete!</h1>
-            <p className="text-muted-foreground">Great job today. Your session has been saved.</p>
+            <h1 className="text-3xl font-bold font-headline">{t("workoutComplete")}</h1>
+            <p className="text-muted-foreground">{t("greatJobToday")}</p>
           </div>
           <Card>
             <CardContent className="pt-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center p-3 rounded-lg bg-secondary/30">
-                  <p className="text-xs text-muted-foreground uppercase font-bold">Exercises</p>
+                  <p className="text-xs text-muted-foreground uppercase font-bold">{t("exercises")}</p>
                   <p className="text-xl font-bold">{totalExercises}</p>
                 </div>
                 <div className="text-center p-3 rounded-lg bg-secondary/30">
-                  <p className="text-xs text-muted-foreground uppercase font-bold">Total Sets</p>
+                  <p className="text-xs text-muted-foreground uppercase font-bold">{t("totalSets")}</p>
                   <p className="text-xl font-bold">{exercises.reduce((acc, curr) => acc + curr.sets, 0)}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
           <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-            <Link href="/student/workouts">Back to Workouts</Link>
+            <Link href="/student/workouts">{t("backToWorkouts")}</Link>
           </Button>
         </div>
       </StudentNavigation>
@@ -337,12 +339,12 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
         <header className="flex items-center justify-between">
           <div className="space-y-1">
             <Link href="/student/workouts" className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1">
-              <X className="h-3 w-3" /> End Session
+              <X className="h-3 w-3" /> {t("endSession")}
             </Link>
             <h1 className="text-2xl font-bold">{workout.title}</h1>
           </div>
           <div className="text-right">
-            <p className="text-xs font-bold text-muted-foreground uppercase">Progress</p>
+            <p className="text-xs font-bold text-muted-foreground uppercase">{t("progress")}</p>
             <p className="text-sm font-medium">{currentExerciseIndex + 1} of {totalExercises}</p>
           </div>
         </header>
@@ -355,7 +357,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
             <div className="flex items-center gap-3">
               <TimerIcon className={cn("h-6 w-6", isTimerRunning ? "text-primary animate-pulse" : "text-muted-foreground")} />
               <div>
-                <p className="text-xs font-bold text-muted-foreground uppercase">Rest Timer</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase">{t("restTimer")}</p>
                 <p className="text-2xl font-mono font-bold">
                   {Math.floor(timerSeconds / 60)}:{(timerSeconds % 60).toString().padStart(2, '0')}
                 </p>
@@ -380,15 +382,15 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
                 <CardTitle className="text-xl">{currentExercise.exerciseName}</CardTitle>
                 <CardDescription>{currentExercise.notes}</CardDescription>
               </div>
-              <Badge variant="secondary">{currentExercise.sets} Sets</Badge>
+              <Badge variant="secondary">{currentExercise.sets} {t("setsLabel")}</Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-4 gap-4 text-xs font-bold text-muted-foreground uppercase px-2">
-              <div className="col-span-1">Set</div>
-              <div className="col-span-1">Weight (kg)</div>
-              <div className="col-span-1">Reps</div>
-              <div className="col-span-1 text-right">Done</div>
+              <div className="col-span-1">{t("set")}</div>
+              <div className="col-span-1">{t("weightKg")}</div>
+              <div className="col-span-1">{t("reps")}</div>
+              <div className="col-span-1 text-right">{t("done")}</div>
             </div>
             
             {(sessionLogs[currentExerciseIndex] || []).map((set, i) => (
@@ -434,7 +436,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
           </CardContent>
           <CardFooter className="flex justify-between border-t pt-6">
             <Button variant="ghost" onClick={handlePrevious} disabled={currentExerciseIndex === 0}>
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+              <ChevronLeft className="h-4 w-4 mr-1" /> {t("previous")}
             </Button>
             <Button 
               className="gap-2 bg-primary text-primary-foreground" 
@@ -442,9 +444,9 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
               disabled={isSaving}
             >
               {currentExerciseIndex === totalExercises - 1 ? (
-                <>{isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Finish Workout</>
+                <>{isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {t("finishWorkout")}</>
               ) : (
-                <>Next Exercise <ChevronRight className="h-4 w-4" /></>
+                <>{t("nextExercise")} <ChevronRight className="h-4 w-4" /></>
               )}
             </Button>
           </CardFooter>

@@ -10,12 +10,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser, useFirestore, useDoc, useMemoFirebase, updateDocumentNonBlocking } from "@/firebase";
 import { doc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n } from "@/lib/i18n";
 import { Loader2, Save, UserCircle, Camera, Mail } from "lucide-react";
 
 export default function TrainerProfilePage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { t } = useI18n();
 
   const trainerRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -58,14 +60,14 @@ export default function TrainerProfilePage() {
     try {
       updateDocumentNonBlocking(trainerRef, updateData);
       toast({
-        title: "Profile Updated",
-        description: "Your professional information has been saved.",
+        title: t("profileUpdated"),
+        description: t("professionalInfoSaved"),
       });
     } catch (e) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Failed to update profile.",
+        title: t("error"),
+        description: t("failedToUpdateProfile"),
       });
     } finally {
       setIsSaving(false);
@@ -86,8 +88,8 @@ export default function TrainerProfilePage() {
     <Navigation>
       <div className="max-w-2xl mx-auto space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">Coach Profile</h1>
-          <p className="text-muted-foreground">Manage your public identity on the ElevateFit platform.</p>
+          <h1 className="text-3xl font-bold font-headline">{t("coachProfile")}</h1>
+          <p className="text-muted-foreground">{t("coachProfileDesc")}</p>
         </header>
 
         <form onSubmit={handleSave}>
@@ -98,8 +100,8 @@ export default function TrainerProfilePage() {
                   <UserCircle className="h-8 w-8 text-primary" />
                 </div>
                 <div>
-                  <CardTitle>Professional Details</CardTitle>
-                  <CardDescription>This information is visible to your students.</CardDescription>
+                  <CardTitle>{t("professionalDetails")}</CardTitle>
+                  <CardDescription>{t("professionalDetailsDesc")}</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -117,7 +119,7 @@ export default function TrainerProfilePage() {
                   </div>
                 </div>
                 <div className="w-full max-w-sm space-y-2">
-                  <Label htmlFor="photoUrl">Profile Photo URL</Label>
+                  <Label htmlFor="photoUrl">{t("profilePhotoUrl")}</Label>
                   <Input 
                     id="photoUrl" 
                     placeholder="https://example.com/coach-photo.jpg" 
@@ -129,7 +131,7 @@ export default function TrainerProfilePage() {
 
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="firstName">First Name</Label>
+                  <Label htmlFor="firstName">{t("firstName")}</Label>
                   <Input 
                     id="firstName" 
                     value={formData.firstName} 
@@ -138,7 +140,7 @@ export default function TrainerProfilePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="lastName">Last Name</Label>
+                  <Label htmlFor="lastName">{t("lastName")}</Label>
                   <Input 
                     id="lastName" 
                     value={formData.lastName} 
@@ -149,7 +151,7 @@ export default function TrainerProfilePage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">Work Email</Label>
+                <Label htmlFor="email">{t("workEmail")}</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input 
@@ -159,13 +161,13 @@ export default function TrainerProfilePage() {
                     className="pl-10 bg-muted/50"
                   />
                 </div>
-                <p className="text-[10px] text-muted-foreground">Email is managed via account settings.</p>
+                <p className="text-[10px] text-muted-foreground">{t("emailManagedViaAccount")}</p>
               </div>
             </CardContent>
             <CardFooter className="bg-muted/10 border-t py-4">
               <Button type="submit" className="w-full gap-2" disabled={isSaving}>
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Update Coach Profile
+                {t("updateCoachProfile")}
               </Button>
             </CardFooter>
           </Card>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ type ExerciseHistoryEntry = {
 };
 
 export default function StudentExerciseHistoryPage() {
+  const { t } = useI18n();
   const { user } = useUser();
   const db = useFirestore();
   const [search, setSearch] = useState("");
@@ -101,18 +103,18 @@ export default function StudentExerciseHistoryPage() {
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">Exercise History</h1>
-          <p className="text-muted-foreground">Search your exercises and review weight and reps done.</p>
+          <h1 className="text-3xl font-bold font-headline">{t("exerciseHistory")}</h1>
+          <p className="text-muted-foreground">{t("searchExerciseHistory")}</p>
         </header>
 
         <Card>
           <CardHeader>
-            <CardTitle>Search Exercises</CardTitle>
-            <CardDescription>Type an exercise name to filter your history.</CardDescription>
+            <CardTitle>{t("searchExercisesTitle")}</CardTitle>
+            <CardDescription>{t("typeExerciseName")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Input
-              placeholder="Search exercise"
+              placeholder={t("searchExercisePlaceholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -123,9 +125,9 @@ export default function StudentExerciseHistoryPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Dumbbell className="h-5 w-5 text-primary" />
-              Logged Sets
+              {t("loggedSets")}
             </CardTitle>
-            <CardDescription>{filteredEntries.length} result{filteredEntries.length !== 1 ? "s" : ""}</CardDescription>
+            <CardDescription>{filteredEntries.length} {t("results")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {filteredEntries.length > 0 ? (
@@ -136,13 +138,13 @@ export default function StudentExerciseHistoryPage() {
                     <Badge variant="outline" className="text-[10px]">Set {entry.setNumber}</Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    {entry.date ? new Date(entry.date).toLocaleDateString() : "Unknown date"}
+                    {entry.date ? new Date(entry.date).toLocaleDateString() : t("unknownDate")}
                   </p>
                   <p className="text-sm">{entry.weight} kg x {entry.reps} reps</p>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">No exercise history found.</p>
+              <p className="text-sm text-muted-foreground">{t("noExerciseHistoryFound")}</p>
             )}
           </CardContent>
         </Card>

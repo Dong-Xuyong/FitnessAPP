@@ -1,9 +1,12 @@
+"use client";
 
 import Link from "next/link";
 import { Dumbbell, ArrowRight, ShieldCheck, Zap, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 
 export default function Home() {
+  const { t } = useI18n();
   return (
     <div className="min-h-screen flex flex-col">
       <header className="px-6 h-16 flex items-center border-b bg-card">
@@ -13,7 +16,7 @@ export default function Home() {
         </Link>
         <div className="ml-auto">
           <Button variant="ghost" asChild>
-            <Link href="/login">Sign In</Link>
+            <Link href="/login">{t("signIn")}</Link>
           </Button>
         </div>
       </header>
@@ -22,15 +25,15 @@ export default function Home() {
         <section className="py-20 px-6 text-center bg-gradient-to-b from-secondary/50 to-background">
           <div className="max-w-3xl mx-auto space-y-6">
             <h1 className="text-5xl font-extrabold tracking-tight sm:text-6xl font-headline">
-              Elevate Your <span className="text-primary">Coaching</span> Business
+              {t("elevateYour")}<span className="text-primary">{t("coaching")}</span>{t("business")}
             </h1>
             <p className="text-xl text-muted-foreground">
-              A professional platform for personal trainers to manage students, build programs, and track results.
+              {t("landingDescription")}
             </p>
             <div className="pt-4">
               <Button size="lg" className="h-12 px-8 text-lg gap-2" asChild>
                 <Link href="/login">
-                  Get Started <ArrowRight className="h-5 w-5" />
+                  {t("getStarted")} <ArrowRight className="h-5 w-5" />
                 </Link>
               </Button>
             </div>
@@ -42,28 +45,28 @@ export default function Home() {
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
               <Users className="h-6 w-6" />
             </div>
-            <h3 className="text-xl font-bold font-headline">Student Management</h3>
-            <p className="text-muted-foreground">Keep all your student data, goals, and history in one centralized, secure location.</p>
+            <h3 className="text-xl font-bold font-headline">{t("studentManagement")}</h3>
+            <p className="text-muted-foreground">{t("studentManagementDesc")}</p>
           </div>
           <div className="space-y-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
               <Zap className="h-6 w-6" />
             </div>
-            <h3 className="text-xl font-bold font-headline">AI Program Builder</h3>
-            <p className="text-muted-foreground">Generate tailored workout plans instantly based on student goals and fitness levels.</p>
+            <h3 className="text-xl font-bold font-headline">{t("aiProgramBuilder")}</h3>
+            <p className="text-muted-foreground">{t("aiProgramBuilderDesc")}</p>
           </div>
           <div className="space-y-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
               <ShieldCheck className="h-6 w-6" />
             </div>
-            <h3 className="text-xl font-bold font-headline">Progress Tracking</h3>
-            <p className="text-muted-foreground">Visual charts for weight and strength progress help keep students motivated and on track.</p>
+            <h3 className="text-xl font-bold font-headline">{t("progressTracking")}</h3>
+            <p className="text-muted-foreground">{t("progressTrackingDesc")}</p>
           </div>
         </section>
       </main>
 
       <footer className="py-8 px-6 border-t text-center text-muted-foreground text-sm">
-        <p>© 2024 ElevateFit. Built for champions.</p>
+        <p>{t("footerText")}</p>
       </footer>
     </div>
   );

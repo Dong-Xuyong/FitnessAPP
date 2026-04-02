@@ -84,7 +84,7 @@ function WorkoutBuilderContent() {
   const [isSavingLibrary, setIsSavingLibrary] = useState(false);
   const [loaded, setLoaded] = useState(false);
   
-  const [programTitle, setProgramTitle] = useState("New Workout Plan");
+  const [programTitle, setProgramTitle] = useState(t("newWorkoutPlan"));
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
@@ -229,8 +229,8 @@ function WorkoutBuilderContent() {
     if (exercises.some((ex) => !ex.name)) {
       toast({
         variant: "destructive",
-        title: "Incomplete Program",
-        description: "Please ensure all exercises have a name.",
+        title: t("incompleteProgram"),
+        description: t("ensureAllExercisesNamed"),
       });
       return false;
     }
@@ -253,7 +253,7 @@ function WorkoutBuilderContent() {
           updatedAt: now,
         });
         toast({
-          title: "Program updated",
+          title: t("programUpdated"),
           description: `"${programTitle.trim() || "Untitled program"}" has been saved.`,
         });
       } else {
@@ -267,14 +267,14 @@ function WorkoutBuilderContent() {
           updatedAt: now,
         });
         toast({
-          title: "Saved to library",
+          title: t("savedToLibrary"),
           description: `"${programTitle.trim() || "Untitled program"}" is available under Training Programs.`,
         });
       }
     } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Save failed",
+        title: t("saveFailed"),
         description: error?.message || "Could not save the program.",
       });
     } finally {
@@ -286,8 +286,8 @@ function WorkoutBuilderContent() {
     if (!db || !user || !selectedStudentId) {
       toast({
         variant: "destructive",
-        title: "Selection Required",
-        description: "Please select a student to assign this program to.",
+        title: t("selectionRequired"),
+        description: t("selectStudentToAssign"),
       });
       return;
     }
@@ -340,14 +340,14 @@ function WorkoutBuilderContent() {
     try {
       const docRef = await addDoc(workoutRef, payload);
       toast({
-        title: "Program Assigned!",
+        title: t("programAssigned"),
         description: `Successfully assigned "${programTitle}" to the selected student.`,
       });
     } catch (e: any) {
       console.error("Assignment error:", e);
       toast({
         variant: "destructive",
-        title: "Assignment Failed",
+        title: t("assignmentFailedTitle"),
         description: e?.message || "Could not save the program. Please check your permissions.",
       });
     } finally {
@@ -366,7 +366,7 @@ function WorkoutBuilderContent() {
               className="text-3xl font-bold font-headline border-none p-0 h-auto focus-visible:ring-0 bg-transparent"
             />
             <p className="text-muted-foreground">
-              {editProgramId ? "Editing existing program." : "Drafting program for student assignment."}
+              {editProgramId ? t("editingExistingProgram") : t("draftingForAssignment")}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -381,7 +381,7 @@ function WorkoutBuilderContent() {
               ) : (
                 <Library className="h-4 w-4" />
               )}
-              {editProgramId ? "Save changes" : "Save to library"}
+              {editProgramId ? t("saveChangesBtn") : t("saveToLibrary")}
             </Button>
             <Button 
               className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
@@ -441,18 +441,18 @@ function WorkoutBuilderContent() {
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                   <CardTitle>{t("routineSteps")}</CardTitle>
-                  <CardDescription>{exercises.length} exercises total</CardDescription>
+                  <CardDescription>{exercises.length} {t("exercisesTotal")}</CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <Button variant="ghost" size="sm" asChild className="gap-2">
                     <Link href="/exercises" target="_blank">
                       <ExternalLink className="h-4 w-4" />
-                      Browse Library
+                      {t("browseLibrary")}
                     </Link>
                   </Button>
                   <Button variant="outline" size="sm" onClick={handleAddExercise} className="gap-2">
                     <Plus className="h-4 w-4" />
-                    Add Row
+                    {t("addRow")}
                   </Button>
                 </div>
               </CardHeader>
@@ -470,23 +470,23 @@ function WorkoutBuilderContent() {
                     <div className="grid gap-4">
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label>Exercise Name</Label>
+                          <Label>{t("exerciseName")}</Label>
                           <Select value={ex.name} onValueChange={(val) => handleUpdateExercise(i, "name", val)}>
                             <SelectTrigger>
-                              <SelectValue placeholder="Select exercise" />
+                              <SelectValue placeholder={t("selectExercise")} />
                             </SelectTrigger>
                             <SelectContent>
                               {exerciseNames.map((name) => (
                                 <SelectItem key={name} value={name}>{name}</SelectItem>
                               ))}
                               {exerciseNames.length === 0 && (
-                                <SelectItem value="none" disabled>No exercises — add some in the Exercise Library</SelectItem>
+                                <SelectItem value="none" disabled>{t("noExercisesAddSome")}</SelectItem>
                               )}
                             </SelectContent>
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Sets</Label>
+                          <Label>{t("sets")}</Label>
                           <Input
                             type="number"
                             min="1"
@@ -498,10 +498,10 @@ function WorkoutBuilderContent() {
 
                       <div className="space-y-2">
                         <div className="grid grid-cols-4 gap-2 text-xs font-semibold text-muted-foreground uppercase px-1">
-                          <span>Set</span>
-                          <span>Reps</span>
-                          <span>kg</span>
-                          <span>s</span>
+                          <span>{t("set")}</span>
+                          <span>{t("reps")}</span>
+                          <span>{t("kg")}</span>
+                          <span>{t("seconds")}</span>
                         </div>
                         <div className="space-y-2">
                           {ex.setDetails.map((set, setIndex) => (
@@ -514,7 +514,7 @@ function WorkoutBuilderContent() {
                               <Input
                                 type="number"
                                 value={set.weight}
-                                placeholder="Optional"
+                                placeholder={t("optional")}
                                 onChange={(e) => handleUpdateSetDetail(i, setIndex, "weight", e.target.value)}
                               />
                               <Input
@@ -527,10 +527,10 @@ function WorkoutBuilderContent() {
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <Label>Coach's Notes</Label>
+                        <Label>{t("coachNotes")}</Label>
                         <Textarea 
                           value={ex.notes} 
-                          placeholder="Cue: Keep core tight..." 
+                          placeholder={t("coachNotesPlaceholder")} 
                           className="h-16"
                           onChange={(e) => handleUpdateExercise(i, "notes", e.target.value)}
                         />

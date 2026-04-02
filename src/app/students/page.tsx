@@ -16,17 +16,18 @@ import {
   Banknote,
 } from "lucide-react";
 import Link from "next/link";
+import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, getDocs } from "firebase/firestore";
 
-function getStudentDisplayName(s: Record<string, unknown>): string {
+function getStudentDisplayName(s: Record<string, unknown>, fallback: string): string {
   const single = typeof s.name === "string" ? s.name.trim() : "";
   if (single) return single;
   const fn = typeof s.firstName === "string" ? s.firstName.trim() : "";
   const ln = typeof s.lastName === "string" ? s.lastName.trim() : "";
   const combined = [fn, ln].filter(Boolean).join(" ").trim();
   if (combined) return combined;
-  return "Unnamed student";
+  return fallback;
 }
 
 function getStudentEmail(s: Record<string, unknown>): string {
@@ -37,6 +38,7 @@ function getStudentEmail(s: Record<string, unknown>): string {
 export default function StudentsPage() {
   const { user } = useUser();
   const db = useFirestore();
+  const { t } = useI18n();
   
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -114,7 +116,7 @@ export default function StudentsPage() {
     <Navigation>
       <div className="space-y-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-3xl font-bold font-headline">All Students</h2>
+          <h2 className="text-3xl font-bold font-headline">{t("allStudents")}</h2>
         </div>
 
         <div className="space-y-6">
@@ -122,7 +124,7 @@ export default function StudentsPage() {
             <div className="relative w-full sm:w-96">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input 
-                placeholder="Search by name or email..." 
+                placeholder={t("searchByNameOrEmail")} 
                 className="pl-10" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -139,14 +141,14 @@ export default function StudentsPage() {
               {filteredStudents.map((student) => {
                 const row = student as Record<string, unknown>;
                 const rosterRow = rosterByStudentId[student.id] as Record<string, unknown> | undefined;
-                const displayName = getStudentDisplayName(row);
+                const displayName = getStudentDisplayName(row, t("unnamed"));
                 const email = getStudentEmail(row);
                 const privateNote =
                   typeof rosterRow?.coachingNotes === "string" ? rosterRow.coachingNotes.trim() : "";
                 const isBlocked = rosterRow?.blocked === true;
                 const paymentInfo = paymentStatusMap[student.id];
                 const initial =
-                  (displayName !== "Unnamed student" ? displayName[0] : undefined) ||
+                  (displayName !== t("unnamed") ? displayName[0] : undefined) ||
                   email[0]?.toUpperCase() ||
                   "?";
 
@@ -161,17 +163,17 @@ export default function StudentsPage() {
                       <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-start sm:items-center min-w-0">
                         <div className="min-w-0 sm:col-span-1 md:col-span-1">
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">
-                            Name
+                            {t("name")}
                           </p>
                           <h3 className="font-semibold group-hover:text-primary transition-colors truncate">
                             {displayName}
                           </h3>
                           {rosterRow && (
-                            <Badge variant="outline" className="mt-1 text-[10px] uppercase tracking-wide">Roster</Badge>
+                            <Badge variant="outline" className="mt-1 text-[10px] uppercase tracking-wide">{t("roster")}</Badge>
                           )}
                           {isBlocked && (
                             <Badge variant="destructive" className="mt-1 text-[10px] uppercase tracking-wide gap-1">
-                              <Ban className="h-3 w-3" /> Blocked
+                              <Ban className="h-3 w-3" /> {t("blocked")}
                             </Badge>
                           )}
                           {rosterRow && paymentInfo && (
@@ -186,30 +188,30 @@ export default function StudentsPage() {
                             </Badge>
                           )}
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mt-2 mb-0.5">
-                            Email
+                            {t("email")}
                           </p>
                           <p
                             className={`text-sm break-all ${email ? "text-foreground" : "text-muted-foreground italic"}`}
                           >
-                            {email || "No email on file"}
+                            {email || t("noEmailOnFile")}
                           </p>
                           {privateNote && (
                             <>
                               <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mt-2 mb-0.5">
-                                Private Note
+                                {t("privateNote")}
                               </p>
                               <p className="text-sm text-muted-foreground line-clamp-2">{privateNote}</p>
                             </>
                           )}
                         </div>
                         <div className="hidden md:block text-center">
-                          <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Goal</p>
+                          <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">{t("goal")}</p>
                           <p className="text-sm font-medium capitalize">
                             {String(row.goalType || "not set").replace(/_/g, " ")}
                           </p>
                         </div>
                         <div className="hidden md:block text-center">
-                          <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Weight</p>
+                          <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">{t("weight")}</p>
                           <p className="text-sm font-medium">{student.weightKg || '--'} kg</p>
                         </div>
                         <div className="text-right flex items-center justify-end gap-4 sm:col-span-2 md:col-span-1">
@@ -224,9 +226,9 @@ export default function StudentsPage() {
               {filteredStudents.length === 0 && !isLoading && (
                 <div className="text-center py-20 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
                   <Users className="h-10 w-10 mx-auto mb-4 opacity-20" />
-                  <p className="text-lg font-medium">No students found</p>
+                  <p className="text-lg font-medium">{t("noStudentsFound")}</p>
                   <p className="text-sm">
-                    {searchQuery ? 'Try a different search term.' : 'There are no students in the system yet.'}
+                    {searchQuery ? t("tryDifferentSearchTerm") : t("noStudentsInSystem")}
                   </p>
                 </div>
               )}

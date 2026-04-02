@@ -9,6 +9,7 @@ import { TrendingUp, Users, Award, Calendar, Loader2 } from "lucide-react";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, query, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 function computeEpleyOneRm(weight: number, reps: number): number {
   if (!Number.isFinite(weight) || !Number.isFinite(reps) || weight <= 0 || reps <= 0) return 0;
@@ -16,6 +17,7 @@ function computeEpleyOneRm(weight: number, reps: number): number {
 }
 
 export default function ProgressPage() {
+  const { t } = useI18n();
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const [leaderboard, setLeaderboard] = useState<Array<{ name: string; score: number }>>([]);
@@ -171,12 +173,12 @@ export default function ProgressPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Award className="h-5 w-5" />
-                Team Velocity
+                {t("teamVelocity")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-4xl font-bold mb-2">{leaderboard.length > 0 ? Math.round(leaderboard.reduce((sum, s) => sum + s.score, 0) / leaderboard.length) : 0}%</div>
-              <p className="text-sm opacity-90">Average completion rate this month.</p>
+              <p className="text-sm opacity-90">{t("avgCompletionRate")}</p>
             </CardContent>
           </Card>
           
@@ -184,12 +186,12 @@ export default function ProgressPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                Growth Metric
+                {t("growthMetric")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-4xl font-bold mb-2">+{growthMetric}kg</div>
-              <p className="text-sm opacity-90">Team's estimated 1RM growth this month.</p>
+              <p className="text-sm opacity-90">{t("teamGrowthDesc")}</p>
             </CardContent>
           </Card>
 
@@ -197,7 +199,7 @@ export default function ProgressPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-primary" />
-                Top Performer
+                {t("topPerformer")}
               </CardTitle>
             </CardHeader>
             <CardContent className="flex items-center gap-4">
@@ -209,11 +211,11 @@ export default function ProgressPage() {
                   </Avatar>
                   <div>
                     <p className="font-bold">{topPerformer.name}</p>
-                    <p className="text-xs text-muted-foreground">{topPerformer.dynamicStreak || 0} sessions streak 🔥</p>
+                    <p className="text-xs text-muted-foreground">{(topPerformer.dynamicStreak || 0) + " " + t("sessionsStreak")}</p>
                   </div>
                 </>
               ) : (
-                <p className="text-sm text-muted-foreground">No roster students yet</p>
+                <p className="text-sm text-muted-foreground">{t("noRosterStudentsYet")}</p>
               )}
             </CardContent>
           </Card>
@@ -222,8 +224,8 @@ export default function ProgressPage() {
         <div className="grid lg:grid-cols-2 gap-8">
           <Card>
             <CardHeader>
-              <CardTitle>Completion Leaderboard</CardTitle>
-              <CardDescription>Consistency tracking across your roster (this month)</CardDescription>
+              <CardTitle>{t("completionLeaderboard")}</CardTitle>
+              <CardDescription>{t("completionLeaderboardDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {leaderboard.length > 0 ? (
@@ -237,15 +239,15 @@ export default function ProgressPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground">No students assigned</p>
+                <p className="text-sm text-muted-foreground">{t("noStudentsAssigned")}</p>
               )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Upcoming Milestones</CardTitle>
-              <CardDescription>Next goals to celebrate</CardDescription>
+              <CardTitle>{t("upcomingMilestones")}</CardTitle>
+              <CardDescription>{t("nextGoalsToCelebrate")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {activeMilestones.length > 0 ? (
@@ -253,7 +255,7 @@ export default function ProgressPage() {
                   const dueDate = new Date(milestone.dueDate);
                   const today = new Date();
                   const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                  const dateText = daysLeft < 0 ? "Overdue" : daysLeft === 0 ? "Today" : `In ${daysLeft} days`;
+                  const dateText = daysLeft < 0 ? t("overdue") : daysLeft === 0 ? t("today") : t("inDays").replace("{n}", String(daysLeft));
                   
                   return (
                     <div key={milestone.id} className="flex items-center justify-between p-3 border rounded-lg bg-card/50">
@@ -268,7 +270,7 @@ export default function ProgressPage() {
                   );
                 })
               ) : (
-                <p className="text-sm text-muted-foreground">No milestones yet</p>
+                <p className="text-sm text-muted-foreground">{t("noMilestonesYet")}</p>
               )}
             </CardContent>
           </Card>

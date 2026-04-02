@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase";
 import { collection, doc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n, useCategoryLabel } from "@/lib/i18n";
 
 const categories = ["All", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body", "Cardio", "Other"];
 
@@ -31,6 +32,8 @@ export default function ExercisesPage() {
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { t } = useI18n();
+  const catLabel = useCategoryLabel();
   
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -68,8 +71,8 @@ export default function ExercisesPage() {
     if (!newExercise.name || !newExercise.category) {
       toast({
         variant: "destructive",
-        title: "Missing Information",
-        description: "Please provide at least a name and category.",
+        title: t("missingInformation"),
+        description: t("provideNameAndCategory"),
       });
       return;
     }
@@ -84,8 +87,8 @@ export default function ExercisesPage() {
       });
 
       toast({
-        title: "Exercise Added",
-        description: `${newExercise.name} has been added to the library.`,
+        title: t("exerciseAdded"),
+        description: `${newExercise.name} ${t("addedToLibrary")}`,
       });
 
       setNewExercise({
@@ -100,8 +103,8 @@ export default function ExercisesPage() {
     } catch (error) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Failed to add exercise. Please try again.",
+        title: t("error"),
+        description: t("failedToAdd"),
       });
     } finally {
       setIsSaving(false);
@@ -125,8 +128,8 @@ export default function ExercisesPage() {
       });
 
       toast({
-        title: "Exercise Updated",
-        description: `${editingExercise.name} has been updated.`,
+        title: t("exerciseUpdatedTitle"),
+        description: `${editingExercise.name} ${t("exerciseUpdatedDesc")}`,
       });
 
       setEditingExercise(null);
@@ -134,8 +137,8 @@ export default function ExercisesPage() {
     } catch (error) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Failed to update exercise.",
+        title: t("error"),
+        description: t("failedToUpdate"),
       });
     } finally {
       setIsSaving(false);
@@ -145,21 +148,21 @@ export default function ExercisesPage() {
   const handleDeleteExercise = async (exerciseId: string, exerciseName: string) => {
     if (!db || !user) return;
     
-    if (!confirm(`Are you sure you want to delete "${exerciseName}"?`)) return;
+    if (!confirm(t("confirmDeleteExercise"))) return;
 
     try {
       const exerciseRef = doc(db, "exercises", exerciseId);
       await deleteDocumentNonBlocking(exerciseRef);
 
       toast({
-        title: "Exercise Deleted",
-        description: `${exerciseName} has been removed from the library.`,
+        title: t("exerciseDeleted"),
+        description: `${exerciseName} ${t("removedFromLibrary")}`,
       });
     } catch (error) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Failed to delete exercise.",
+        title: t("error"),
+        description: t("failedToDelete"),
       });
     }
   };
@@ -174,11 +177,11 @@ export default function ExercisesPage() {
       <div className="space-y-6 overflow-hidden">
         <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
           <div className="flex-1 w-full">
-            <h2 className="text-2xl font-bold font-headline mb-4">Exercise Library</h2>
+            <h2 className="text-2xl font-bold font-headline mb-4">{t("exerciseLibrary")}</h2>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input 
-                placeholder="Search exercises..." 
+                placeholder={t("searchExercises")} 
                 className="pl-10 h-12 text-lg" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -190,36 +193,36 @@ export default function ExercisesPage() {
             <DialogTrigger asChild>
               <Button className="gap-2 shrink-0">
                 <Plus className="h-4 w-4" />
-                Add Exercise
+                {t("addExerciseBtn")}
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Add New Exercise</DialogTitle>
+                <DialogTitle>{t("addNewExercise")}</DialogTitle>
                 <DialogDescription>
-                  Add a new exercise to your library for use in workout programs.
+                  {t("addNewExerciseDesc")}
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="name">Exercise Name *</Label>
+                    <Label htmlFor="name">{t("exerciseNameRequired")}</Label>
                     <Input 
                       id="name"
-                      placeholder="e.g. Barbell Bench Press"
+                      placeholder={t("placeholderExerciseName")}
                       value={newExercise.name}
                       onChange={(e) => setNewExercise({...newExercise, name: e.target.value})}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="category">Category *</Label>
+                    <Label htmlFor="category">{t("categoryRequired")}</Label>
                     <Select value={newExercise.category} onValueChange={(val) => setNewExercise({...newExercise, category: val})}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {categories.filter(c => c !== "All").map((cat) => (
-                          <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          <SelectItem key={cat} value={cat}>{catLabel(cat)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -227,43 +230,43 @@ export default function ExercisesPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="difficulty">Difficulty</Label>
+                    <Label htmlFor="difficulty">{t("difficulty")}</Label>
                     <Select value={newExercise.difficulty} onValueChange={(val) => setNewExercise({...newExercise, difficulty: val})}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="beginner">Beginner</SelectItem>
-                        <SelectItem value="intermediate">Intermediate</SelectItem>
-                        <SelectItem value="advanced">Advanced</SelectItem>
+                        <SelectItem value="beginner">{t("beginner")}</SelectItem>
+                        <SelectItem value="intermediate">{t("intermediate")}</SelectItem>
+                        <SelectItem value="advanced">{t("advanced")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="equipment">Equipment</Label>
+                    <Label htmlFor="equipment">{t("equipment")}</Label>
                     <Input 
                       id="equipment"
-                      placeholder="e.g. Barbell, Bench"
+                      placeholder={t("placeholderEquipment")}
                       value={newExercise.equipment}
                       onChange={(e) => setNewExercise({...newExercise, equipment: e.target.value})}
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
+                  <Label htmlFor="description">{t("description")}</Label>
                   <Textarea 
                     id="description"
-                    placeholder="Brief description of the exercise and technique..."
+                    placeholder={t("placeholderDescription")}
                     className="h-24"
                     value={newExercise.description}
                     onChange={(e) => setNewExercise({...newExercise, description: e.target.value})}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="videoUrl">Video URL (optional)</Label>
+                  <Label htmlFor="videoUrl">{t("videoUrl")}</Label>
                   <Input 
                     id="videoUrl"
-                    placeholder="https://youtube.com/..."
+                    placeholder={t("placeholderVideoUrl")}
                     type="url"
                     value={newExercise.videoUrl}
                     onChange={(e) => setNewExercise({...newExercise, videoUrl: e.target.value})}
@@ -272,11 +275,11 @@ export default function ExercisesPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddingExercise(false)}>
-                  Cancel
+                  {t("cancel")}
                 </Button>
                 <Button onClick={handleAddExercise} disabled={isSaving}>
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-                  Add Exercise
+                  {t("addExerciseBtn")}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -287,16 +290,16 @@ export default function ExercisesPage() {
         <Dialog open={isEditingExercise} onOpenChange={setIsEditingExercise}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Edit Exercise</DialogTitle>
+              <DialogTitle>{t("editExerciseTitle")}</DialogTitle>
               <DialogDescription>
-                Update the exercise details.
+                {t("editExerciseDesc")}
               </DialogDescription>
             </DialogHeader>
             {editingExercise && (
               <div className="space-y-4 py-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="edit-name">Exercise Name *</Label>
+                    <Label htmlFor="edit-name">{t("exerciseNameRequired")}</Label>
                     <Input 
                       id="edit-name"
                       value={editingExercise.name}
@@ -304,14 +307,14 @@ export default function ExercisesPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="edit-category">Category *</Label>
+                    <Label htmlFor="edit-category">{t("categoryRequired")}</Label>
                     <Select value={editingExercise.category} onValueChange={(val) => setEditingExercise({...editingExercise, category: val})}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {categories.filter(c => c !== "All").map((cat) => (
-                          <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          <SelectItem key={cat} value={cat}>{catLabel(cat)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -319,20 +322,20 @@ export default function ExercisesPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="edit-difficulty">Difficulty</Label>
+                    <Label htmlFor="edit-difficulty">{t("difficulty")}</Label>
                     <Select value={editingExercise.difficulty} onValueChange={(val) => setEditingExercise({...editingExercise, difficulty: val})}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="beginner">Beginner</SelectItem>
-                        <SelectItem value="intermediate">Intermediate</SelectItem>
-                        <SelectItem value="advanced">Advanced</SelectItem>
+                        <SelectItem value="beginner">{t("beginner")}</SelectItem>
+                        <SelectItem value="intermediate">{t("intermediate")}</SelectItem>
+                        <SelectItem value="advanced">{t("advanced")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="edit-equipment">Equipment</Label>
+                    <Label htmlFor="edit-equipment">{t("equipment")}</Label>
                     <Input 
                       id="edit-equipment"
                       value={editingExercise.equipment || ""}
@@ -341,7 +344,7 @@ export default function ExercisesPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-description">Description</Label>
+                  <Label htmlFor="edit-description">{t("description")}</Label>
                   <Textarea 
                     id="edit-description"
                     className="h-24"
@@ -350,7 +353,7 @@ export default function ExercisesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-videoUrl">Video URL</Label>
+                  <Label htmlFor="edit-videoUrl">{t("videoUrl")}</Label>
                   <Input 
                     id="edit-videoUrl"
                     type="url"
@@ -362,11 +365,11 @@ export default function ExercisesPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsEditingExercise(false)}>
-                Cancel
+                {t("cancel")}
               </Button>
               <Button onClick={handleEditExercise} disabled={isSaving}>
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Save Changes
+                {t("saveChanges")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -376,7 +379,7 @@ export default function ExercisesPage() {
           <TabsList className="flex flex-wrap h-auto gap-1 bg-card border p-1 mb-4">
             {categories.map((cat) => (
               <TabsTrigger key={cat} value={cat} className="px-3 py-1.5 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                {cat}
+                {catLabel(cat)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -415,11 +418,11 @@ export default function ExercisesPage() {
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
-                      {ex.description || "No description available."}
+                      {ex.description || t("noDescriptionAvailable")}
                     </p>
                     {ex.equipment && (
                       <p className="text-xs text-muted-foreground mb-2">
-                        <strong>Equipment:</strong> {ex.equipment}
+                        <strong>{t("equipmentLabel")}</strong> {ex.equipment}
                       </p>
                     )}
                     {ex.difficulty && (
@@ -432,11 +435,11 @@ export default function ExercisesPage() {
               ))}
               {filteredExercises.length === 0 && !isLoading && (
                 <div className="col-span-full py-12 text-center text-muted-foreground border-2 border-dashed rounded-lg px-4">
-                  <p className="text-base sm:text-lg font-medium mb-2">No exercises found</p>
+                  <p className="text-base sm:text-lg font-medium mb-2">{t("noExercisesFound")}</p>
                   <p className="text-xs sm:text-sm break-words mb-4">
                     {searchQuery
-                      ? "Try a different search term or category."
-                      : "Add exercises manually or initialize with defaults."}
+                      ? t("tryDifferentSearch")
+                      : t("addExercisesManually")}
                   </p>
                   {!searchQuery && (
                     <Button
@@ -461,7 +464,7 @@ export default function ExercisesPage() {
                       }}
                     >
                       {isInitializing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                      Load Default Exercises
+                      {t("loadDefaultExercises")}
                     </Button>
                   )}
                 </div>

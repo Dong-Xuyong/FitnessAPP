@@ -5,10 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Banknote, Smartphone, Clock, CheckCircle2, AlertCircle } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useDoc, useCollection, useMemoFirebase } from "@/firebase";
 import { doc, collection } from "firebase/firestore";
 
 export default function StudentBillingPage() {
+  const { t } = useI18n();
   const { user } = useUser();
   const db = useFirestore();
 
@@ -60,22 +62,22 @@ export default function StudentBillingPage() {
     <StudentNavigation>
       <div className="space-y-6">
         <header>
-          <h1 className="text-3xl font-bold font-headline">Billing</h1>
-          <p className="text-muted-foreground">View your payment status and history.</p>
+          <h1 className="text-3xl font-bold font-headline">{t("billing")}</h1>
+          <p className="text-muted-foreground">{t("viewPaymentStatus")}</p>
         </header>
 
         <div className="grid md:grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
               <Banknote className="h-6 w-6 text-primary" />
-              <p className="text-xs text-muted-foreground uppercase font-bold">Monthly Rate</p>
-              <p className="text-2xl font-bold">{monthlyAmount > 0 ? `€${monthlyAmount}` : "Not set"}</p>
+              <p className="text-xs text-muted-foreground uppercase font-bold">{t("monthlyRate")}</p>
+              <p className="text-2xl font-bold">{monthlyAmount > 0 ? `€${monthlyAmount}` : t("notSet")}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
               <Smartphone className="h-6 w-6 text-primary" />
-              <p className="text-xs text-muted-foreground uppercase font-bold">Payment Method</p>
+              <p className="text-xs text-muted-foreground uppercase font-bold">{t("paymentMethod")}</p>
               <p className="text-lg font-bold capitalize">
                 {paymentMethod === "mbway" ? "MB WAY" : paymentMethod === "bank_transfer" ? "Bank Transfer" : paymentMethod}
               </p>
@@ -84,7 +86,7 @@ export default function StudentBillingPage() {
           <Card>
             <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
               {statusIcon}
-              <p className="text-xs text-muted-foreground uppercase font-bold">Status</p>
+              <p className="text-xs text-muted-foreground uppercase font-bold">{t("status")}</p>
               <Badge className={statusColor + " capitalize"}>{billingStatus.replace("_", " ")}</Badge>
             </CardContent>
           </Card>
@@ -93,7 +95,7 @@ export default function StudentBillingPage() {
         {billing?.paymentDetails && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Payment Instructions</CardTitle>
+              <CardTitle className="text-sm">{t("paymentInstructionsTitle")}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="p-4 rounded-lg bg-muted/50 border text-sm whitespace-pre-wrap">
@@ -105,19 +107,19 @@ export default function StudentBillingPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Payment History</CardTitle>
-            <CardDescription>Payments recorded by your coach</CardDescription>
+            <CardTitle>{t("paymentHistory")}</CardTitle>
+            <CardDescription>{t("paymentsRecordedByCoach")}</CardDescription>
           </CardHeader>
           <CardContent>
             {sortedPayments.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Period</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Method</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Date Paid</TableHead>
+                    <TableHead>{t("period")}</TableHead>
+                    <TableHead>{t("amount")}</TableHead>
+                    <TableHead>{t("method")}</TableHead>
+                    <TableHead>{t("status")}</TableHead>
+                    <TableHead>{t("datePaid")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -133,7 +135,7 @@ export default function StudentBillingPage() {
                           variant={p.status === "paid" ? "default" : "outline"}
                           className={p.status === "paid" ? "bg-green-100 text-green-800" : p.status === "pending" ? "bg-yellow-100 text-yellow-800" : ""}
                         >
-                          {p.status || "pending"}
+                          {p.status === "paid" ? t("paid") : t("pending")}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -146,7 +148,7 @@ export default function StudentBillingPage() {
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <Banknote className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                <p className="text-sm">No payment records yet.</p>
+                <p className="text-sm">{t("noPaymentRecords")}</p>
               </div>
             )}
           </CardContent>
