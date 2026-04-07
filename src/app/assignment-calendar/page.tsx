@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, getDocs, deleteDoc, updateDoc, doc } from "firebase/firestore";
-import { CalendarDays, Dumbbell, Loader2, Pencil, Trash2, ExternalLink } from "lucide-react";
+import { CalendarDays, Dumbbell, Loader2, Pencil, Trash2, ExternalLink, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Assignment = {
@@ -34,6 +34,7 @@ type Assignment = {
   title: string;
   assignedAt: string;
   scheduledTime: string;
+  status?: string;
 };
 
 export default function AssignmentCalendarPage() {
@@ -88,6 +89,7 @@ export default function AssignmentCalendarPage() {
             title: data.title || "Untitled",
             assignedAt: data.assignedAt || data.createdAt || "",
             scheduledTime: data.scheduledTime || "",
+            status: data.status || "",
           });
         });
       } catch {}
@@ -141,6 +143,14 @@ export default function AssignmentCalendarPage() {
     return source
       .filter((a) => a.assignedAt && new Date(a.assignedAt) >= new Date(now.toDateString()))
       .slice(0, 12);
+  }, [assignments, selectedStudentId]);
+
+  const expiredAssignments = useMemo(() => {
+    const source = selectedStudentId === "all"
+      ? assignments
+      : assignments.filter((a) => a.studentId === selectedStudentId);
+
+    return source.filter((a) => a.status === "expired");
   }, [assignments, selectedStudentId]);
 
   const handleDelete = async () => {
@@ -198,10 +208,15 @@ export default function AssignmentCalendarPage() {
 
   // Reusable assignment card with edit/delete actions
   const AssignmentRow = ({ a }: { a: Assignment }) => (
-    <div className="flex items-center gap-2 p-2 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
-      <Dumbbell className="h-3.5 w-3.5 text-primary shrink-0" />
+    <div className={`flex items-center gap-2 p-2 rounded-lg border bg-card hover:bg-accent/5 transition-colors ${a.status === "expired" ? "border-orange-300 bg-orange-50 dark:bg-orange-950/20" : ""}`}>
+      <Dumbbell className={`h-3.5 w-3.5 shrink-0 ${a.status === "expired" ? "text-orange-500" : "text-primary"}`} />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium truncate">{a.title}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-medium truncate">{a.title}</p>
+          {a.status === "expired" && (
+            <Badge className="text-[9px] h-4 px-1 bg-orange-100 text-orange-700 border-orange-300 shrink-0">Expirado</Badge>
+          )}
+        </div>
         <p className="text-[10px] text-muted-foreground truncate">
           {a.studentName}{a.scheduledTime ? ` · ${a.scheduledTime}` : ""}
         </p>
@@ -394,27 +409,47 @@ export default function AssignmentCalendarPage() {
             </CardContent>
           </Card>
 
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>{t("upcomingAssignments")}</CardTitle>
-              <CardDescription>{t("nextScheduledWorkouts")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                </div>
-              ) : upcomingAssignments.length > 0 ? (
-                <div className="grid sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-3">
-                  {upcomingAssignments.map((a) => (
-                    <UpcomingCard key={`${a.studentId}-${a.planId}`} a={a} />
+          <div className="lg:col-span-2 flex flex-col gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("upcomingAssignments")}</CardTitle>
+                <CardDescription>{t("nextScheduledWorkouts")}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  </div>
+                ) : upcomingAssignments.length > 0 ? (
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-3">
+                    {upcomingAssignments.map((a) => (
+                      <UpcomingCard key={`${a.studentId}-${a.planId}`} a={a} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t("noUpcomingAssignments")}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {expiredAssignments.length > 0 && (
+              <Card className="border-orange-300 dark:border-orange-800">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-400 text-base">
+                    <AlertTriangle className="h-4 w-4" />
+                    Treinos Expirados
+                    <Badge className="ml-auto bg-orange-100 text-orange-700 border-orange-300">{expiredAssignments.length}</Badge>
+                  </CardTitle>
+                  <CardDescription>Treinos não realizados — data de atribuição já passou</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {expiredAssignments.map((a) => (
+                    <AssignmentRow key={`${a.studentId}-${a.planId}`} a={a} />
                   ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("noUpcomingAssignments")}</p>
-              )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       </div>
     </Navigation>

@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dumbbell, Clock, Play, CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
-import { doc, getDoc, collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, updateDoc } from "firebase/firestore";
+import { AlertTriangle } from "lucide-react";
 import type { DayOfWeek } from "@/lib/types";
 
 interface WorkoutSession {
@@ -42,57 +43,26 @@ function getWorkoutAssignedTimestamp(workout: WorkoutPlan): number {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
-function getTodayDayOfWeek(): DayOfWeek {
-  const days: DayOfWeek[] = [
-    "sunday",
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-  ];
-  return days[new Date().getDay()];
-}
-
 function getWorkoutScheduledTimestamp(workout: WorkoutPlan): number {
   return getWorkoutAssignedTimestamp(workout);
 }
 
-function isSameLocalDate(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-function isWorkoutAvailableToday(workout: WorkoutPlan, todayDayOfWeek: DayOfWeek): boolean {
-  // Check if this workout is scheduled for today's day of week
-  if (workout.scheduledDayOfWeek !== todayDayOfWeek) return false;
-  
-  // Also verify the assigned date is today, not a future occurrence of the same day
-  const assignedRaw = workout.assignedAt || workout.createdAt;
-  if (!assignedRaw) return false;
-  
-  const assignedDate = new Date(assignedRaw);
-  if (Number.isNaN(assignedDate.getTime())) return false;
-  
-  return isSameLocalDate(assignedDate, new Date());
-}
-
-function daysUntilScheduledDay(scheduledDayOfWeek: DayOfWeek | undefined, assignedRaw: string | undefined): number {
-  if (!scheduledDayOfWeek || !assignedRaw) return -1;
-  
-  const assignedDate = new Date(assignedRaw);
-  if (Number.isNaN(assignedDate.getTime())) return -1;
-  
+/** Returns the number of whole calendar days between today (midnight) and the assigned date.
+ *  Negative = past, 0 = today, positive = future. */
+function daysUntilDate(raw: string | undefined): number {
+  if (!raw) return 0;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return 0;
   const today = new Date();
-  const diffMs = assignedDate.getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  
-  // Return the difference, but minimum of 1 day for future dates
-  return diffDays > 0 ? diffDays : (diffDays === 0 ? 0 : -1);
+  const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const planMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((planMs - todayMs) / 86_400_000);
+}
+
+function isWorkoutAvailableToday(workout: WorkoutPlan): boolean {
+  const assignedRaw = workout.assignedAt || workout.createdAt;
+  if (!assignedRaw) return true; // no date restriction → always startable
+  return daysUntilDate(assignedRaw) === 0; // exactly today
 }
 
 interface WorkoutPlan {
@@ -129,7 +99,7 @@ export default function StudentWorkoutsPage() {
   const [workouts, setWorkouts] = useState<WorkoutPlan[]>([]);
   const [completedWorkouts, setCompletedWorkouts] = useState<WorkoutSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const todayDayOfWeek = getTodayDayOfWeek();
+  const [expiredCount, setExpiredCount] = useState(0);
 
   const { currentWeekWorkouts, otherWorkouts } = useMemo(() => {
     const weekNumbers = workouts
@@ -248,15 +218,42 @@ export default function StudentWorkoutsPage() {
             return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
           });
 
-        const activePlans = plans.filter(
-          (plan) =>
-            !plan.completedAt &&
-            plan.status !== "completed" &&
-            !completedPlanIds.has(plan.id)
-        );
+        // Detect plans whose assigned date has already passed (expired)
+        const expiredPlans = plans.filter((plan) => {
+          if (plan.completedAt || plan.status === "completed" || plan.status === "expired") return false;
+          if (completedPlanIds.has(plan.id)) return false;
+          const raw = plan.assignedAt || plan.createdAt;
+          if (!raw) return false;
+          return daysUntilDate(raw) < 0; // strictly before today
+        });
 
-        // Sort newest assigned date first
-        activePlans.sort((a, b) => getWorkoutAssignedTimestamp(b) - getWorkoutAssignedTimestamp(a));
+        // Soft-delete expired plans in Firestore so the coach can see them
+        for (const plan of expiredPlans) {
+          try {
+            await updateDoc(
+              doc(db, "personalTrainers", trainerId, "students", rosterDocId, "workoutPlans", plan.id),
+              { status: "expired", expiredAt: new Date().toISOString() }
+            );
+          } catch {}
+        }
+
+        if (!cancelled && expiredPlans.length > 0) {
+          setExpiredCount(expiredPlans.length);
+        }
+
+        // Only show plans that are today or in the future (not expired, not completed)
+        const activePlans = plans.filter((plan) => {
+          if (plan.completedAt || plan.status === "completed" || plan.status === "expired") return false;
+          if (completedPlanIds.has(plan.id)) return false;
+          // Also filter out newly-expired ones we just caught above
+          if (expiredPlans.some((e) => e.id === plan.id)) return false;
+          const raw = plan.assignedAt || plan.createdAt;
+          if (!raw) return true; // no date → always show
+          return daysUntilDate(raw) >= 0; // today or future
+        });
+
+        // Sort by assigned date ascending (soonest first)
+        activePlans.sort((a, b) => getWorkoutAssignedTimestamp(a) - getWorkoutAssignedTimestamp(b));
         setWorkouts(activePlans);
         setCompletedWorkouts(completedSessions);
       } catch (e) {
@@ -290,6 +287,15 @@ export default function StudentWorkoutsPage() {
           <p className="text-muted-foreground">{t("followAssigned")}</p>
         </header>
 
+        {expiredCount > 0 && (
+          <div className="flex items-start gap-3 rounded-lg border border-orange-400/40 bg-orange-50 dark:bg-orange-950/20 px-4 py-3 text-sm text-orange-800 dark:text-orange-200">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-orange-500" />
+            <span>
+              {expiredCount} {expiredCount === 1 ? t("workoutExpiredSingular") || "treino expirou" : t("workoutExpiredPlural") || "treinos expiraram"} {t("workoutExpiredCoachNotified") || "e foram removidos. O teu treinador foi notificado."}
+            </span>
+          </div>
+        )}
+
         {workouts.length === 0 ? (
           <Card className="border-dashed bg-muted/20">
             <CardContent className="p-12 text-center space-y-4">
@@ -311,7 +317,7 @@ export default function StudentWorkoutsPage() {
               </div>
 
               {currentWeekWorkouts.map((workout) => {
-                const canStartToday = isWorkoutAvailableToday(workout, todayDayOfWeek);
+                const canStartToday = isWorkoutAvailableToday(workout);
                 return (
                   <Card key={workout.id} className="group hover:border-accent transition-colors">
                     <CardContent className="p-6">
@@ -368,7 +374,7 @@ export default function StudentWorkoutsPage() {
                           ) : (
                             <Button className="gap-2 flex-1 sm:flex-none" variant="outline" disabled>
                               <Play className="h-4 w-4" />
-                              {t("availableInDays").replace("{n}", String(daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt)))}
+                              {t("availableInDays").replace("{n}", String(daysUntilDate(workout.assignedAt || workout.createdAt)))}
                             </Button>
                           )}
                           <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform hidden sm:block" />
@@ -390,7 +396,7 @@ export default function StudentWorkoutsPage() {
             ) : null}
 
             {otherWorkouts.map((workout) => {
-              const canStartToday = isWorkoutAvailableToday(workout, todayDayOfWeek);
+              const canStartToday = isWorkoutAvailableToday(workout);
               return (
                 <Card key={workout.id} className="group hover:border-accent transition-colors">
                   <CardContent className="p-6">
@@ -447,7 +453,7 @@ export default function StudentWorkoutsPage() {
                         ) : (
                           <Button className="gap-2 flex-1 sm:flex-none" variant="outline" disabled>
                             <Play className="h-4 w-4" />
-                            {t("availableInDays").replace("{n}", String(daysUntilScheduledDay(workout.scheduledDayOfWeek, workout.assignedAt || workout.createdAt)))}
+                            {t("availableInDays").replace("{n}", String(daysUntilDate(workout.assignedAt || workout.createdAt)))}
                           </Button>
                         )}
                         <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform hidden sm:block" />
