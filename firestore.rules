@@ -31,6 +31,15 @@ service cloud.firestore {
       return !(field in request.resource.data) || request.resource.data[field] == resource.data[field];
     }
 
+    // Allows a student to access trainer subcollection data stored under a different doc ID
+    // (rosterDocId) by verifying it via their global student profile.
+    function isLinkedStudent(personalTrainerId, studentId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/students/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/students/$(request.auth.uid)).data.rosterDocId == studentId &&
+        get(/databases/$(database)/documents/students/$(request.auth.uid)).data.trainerId == personalTrainerId;
+    }
+
     // Global Exercises Library
     match /exercises/{exerciseId} {
       allow read: if isSignedIn();
@@ -46,6 +55,7 @@ service cloud.firestore {
     match /students/{studentId} {
       allow read: if isSignedIn();
       allow create: if isOwner(studentId);
+      // Trainers can update to set trainerId / rosterDocId linking fields
       allow update: if isOwner(studentId) || isTrainer();
       allow delete: if false;
     }
@@ -92,7 +102,7 @@ service cloud.firestore {
 
       match /students/{studentId} {
         // Allow trainers to manage their students, and students to read/manage their own records
-        allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
+        allow get, list: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
         
         allow create: if (isOwner(personalTrainerId) && matchesPath('trainerId', personalTrainerId)) || 
                       isOwner(studentId);
@@ -103,18 +113,19 @@ service cloud.firestore {
         allow delete: if isOwner(personalTrainerId);
 
         match /workoutPlans/{workoutPlanId} {
-          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
-          allow create, update, delete: if isOwner(personalTrainerId);
+          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
+          allow create, update: if isOwner(personalTrainerId);
+          allow delete: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
         }
 
         match /workoutSessions/{workoutSessionId} {
-          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
-          allow create, update: if isOwner(personalTrainerId) || isOwner(studentId);
+          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
+          allow create, update: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
           allow delete: if isOwner(personalTrainerId);
         }
 
         match /payments/{paymentId} {
-          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId);
+          allow get, list: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
           allow create, update, delete: if isOwner(personalTrainerId);
         }
       }

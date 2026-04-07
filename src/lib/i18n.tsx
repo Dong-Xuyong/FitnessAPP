@@ -369,6 +369,8 @@ const translations = {
     assignedWorkoutUpdated: "Assigned workout updated",
     assignedWorkoutRemoved: "Assigned workout removed",
     removeAssignedWorkout: "Remove Assigned Workout",
+    assignmentDeleted: "Assignment deleted",
+    editAssignment: "Edit Assignment",
     portalOnlyBanner: "This student is only in the portal directory. Add them to your roster to assign programs and add coaching notes.",
 
     // Coach Profile
@@ -990,6 +992,8 @@ const translations = {
     assignedWorkoutUpdated: "Treino atribuído atualizado",
     assignedWorkoutRemoved: "Treino atribuído removido",
     removeAssignedWorkout: "Remover Treino Atribuído",
+    assignmentDeleted: "Atribuição removida",
+    editAssignment: "Editar Atribuição",
     portalOnlyBanner: "Este aluno está apenas no diretório do portal. Adicione-o à sua lista para atribuir programas e adicionar notas de coaching.",
 
     // Coach Profile

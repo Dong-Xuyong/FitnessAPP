@@ -201,6 +201,9 @@ export default function StudentWorkoutsPage() {
           setIsLoading(false);
           return;
         }
+        // Use rosterDocId if set (handles cases where workouts were stored under
+        // a different roster doc ID than the student's Auth UID).
+        const rosterDocId = (studentDoc.data()?.rosterDocId as string | undefined) || user!.uid;
 
         // Fetch workout plans assigned by the trainer
         const plansCol = collection(
@@ -208,7 +211,7 @@ export default function StudentWorkoutsPage() {
           "personalTrainers",
           trainerId,
           "students",
-          user!.uid,
+          rosterDocId,
           "workoutPlans"
         );
         const sessionsCol = collection(
@@ -216,7 +219,7 @@ export default function StudentWorkoutsPage() {
           "personalTrainers",
           trainerId,
           "students",
-          user!.uid,
+          rosterDocId,
           "workoutSessions"
         );
         const [plansSnap, sessionsSnap] = await Promise.all([getDocs(plansCol), getDocs(sessionsCol)]);

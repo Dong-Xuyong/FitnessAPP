@@ -22,19 +22,21 @@ export default function StudentBillingPage() {
   const { data: studentData } = useDoc(studentRef);
 
   const trainerId = studentData?.trainerId as string | undefined;
+  // Use rosterDocId if set (handles cases where data was stored under a different doc ID)
+  const rosterDocId = (studentData?.rosterDocId as string | undefined) || user?.uid;
 
   // Get billing config from trainer's student subdoc
   const billingConfigRef = useMemoFirebase(() => {
-    if (!db || !trainerId || !user) return null;
-    return doc(db, "personalTrainers", trainerId, "students", user.uid);
-  }, [db, trainerId, user]);
+    if (!db || !trainerId || !rosterDocId) return null;
+    return doc(db, "personalTrainers", trainerId, "students", rosterDocId);
+  }, [db, trainerId, rosterDocId]);
   const { data: rosterData } = useDoc(billingConfigRef);
 
   // Get payment records
   const paymentsRef = useMemoFirebase(() => {
-    if (!db || !trainerId || !user) return null;
-    return collection(db, "personalTrainers", trainerId, "students", user.uid, "payments");
-  }, [db, trainerId, user]);
+    if (!db || !trainerId || !rosterDocId) return null;
+    return collection(db, "personalTrainers", trainerId, "students", rosterDocId, "payments");
+  }, [db, trainerId, rosterDocId]);
   const { data: payments } = useCollection(paymentsRef);
 
   const sortedPayments = (payments || []).sort(

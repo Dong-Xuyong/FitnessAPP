@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, Send, Loader2, Library, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, useFirestore, useCollection, useDoc, useMemoFirebase, addDocumentNonBlocking, updateDocumentNonBlocking } from "@/firebase";
-import { collection, doc, addDoc } from "firebase/firestore";
+import { collection, doc, addDoc, updateDoc } from "firebase/firestore";
 import {
   buildTrainingProgramSessionsFromBuilder,
   trainerTrainingProgramsCollection,
@@ -303,7 +303,18 @@ function WorkoutBuilderContent() {
       if (globalMatch) studentAuthUid = globalMatch.id;
     }
     if (!studentAuthUid) studentAuthUid = selectedStudentId;
-    
+
+    // Link the student's global profile so they can find their data even if the
+    // roster doc ID differs from their Auth UID.
+    try {
+      await updateDoc(doc(db, "students", studentAuthUid), {
+        trainerId: user.uid,
+        ...(studentAuthUid !== selectedStudentId ? { rosterDocId: selectedStudentId } : {}),
+      });
+    } catch {
+      // Global doc may not exist yet (student hasn't signed up) — not a blocking error.
+    }
+
     const workoutRef = collection(db, "personalTrainers", user.uid, "students", studentAuthUid, "workoutPlans");
     console.log("Assigning to path:", workoutRef.path, "studentAuthUid:", studentAuthUid, "rosterDocId:", selectedStudentId);
     

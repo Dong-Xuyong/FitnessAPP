@@ -124,6 +124,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   const [isFinished, setIsFinished] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAllowedToday, setIsAllowedToday] = useState(false);
+  const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
 
   // Fetch real workout plan from Firestore
   useEffect(() => {
@@ -136,8 +137,11 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
         if (!studentDoc.exists()) return;
         const trainerId = studentDoc.data()?.trainerId;
         if (!trainerId) return;
+        // Use rosterDocId if set (handles path mismatch when roster doc ID ≠ Auth UID)
+        const resolvedStudentId = (studentDoc.data()?.rosterDocId as string | undefined) || user!.uid;
+        if (!cancelled) setEffectiveStudentId(resolvedStudentId);
         const planDoc = await getDoc(
-          doc(db!, "personalTrainers", trainerId, "students", user!.uid, "workoutPlans", workoutId)
+          doc(db!, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans", workoutId)
         );
         if (planDoc.exists() && !cancelled) {
           const workoutData = { ...planDoc.data(), personalTrainerId: trainerId } as WorkoutPlan;
@@ -212,8 +216,9 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
     setIsSaving(true);
     try {
       const trainerId = workout.personalTrainerId;
+      const resolvedStudentId = effectiveStudentId || user.uid;
       const sessionRef = collection(
-        db, "personalTrainers", trainerId, "students", user.uid, "workoutSessions"
+        db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions"
       );
       const exerciseResults = exercises.map((ex, i) => {
         const sets = sessionLogs[i] || [];

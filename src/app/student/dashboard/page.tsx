@@ -40,9 +40,11 @@ export default function StudentDashboardPage() {
           setStudentData(profileData);
 
           if (profileData?.trainerId) {
+            // Use rosterDocId if set (handles cases where data is stored under a different doc ID)
+            const effectiveStudentId = (profileData.rosterDocId as string | undefined) || user!.uid;
             const [sessionsSnap, workoutPlansSnap] = await Promise.all([
-              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", user!.uid, "workoutSessions")),
-              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", user!.uid, "workoutPlans")),
+              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", effectiveStudentId, "workoutSessions")),
+              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", effectiveStudentId, "workoutPlans")),
             ]);
 
             const completedPlanIds = new Set(

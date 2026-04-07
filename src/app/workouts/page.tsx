@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, CalendarRange, Send, Copy } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking, addDocumentNonBlocking } from "@/firebase";
-import { collection, doc } from "firebase/firestore";
+import { collection, doc, updateDoc } from "firebase/firestore";
 import {
   trainingProgramsRef,
   totalExercisesInProgram,
@@ -348,6 +348,18 @@ export default function WorkoutsPage() {
       if (globalMatch) studentAuthUid = globalMatch.id;
     }
     if (!studentAuthUid) studentAuthUid = selectedStudentId;
+
+    // Link the student's global profile so they can find their data even if the
+    // roster doc ID differs from their Auth UID.
+    try {
+      const globalStudentRef = doc(db, "students", studentAuthUid);
+      await updateDoc(globalStudentRef, {
+        trainerId: user.uid,
+        ...(studentAuthUid !== selectedStudentId ? { rosterDocId: selectedStudentId } : {}),
+      });
+    } catch {
+      // Global doc may not exist yet (student hasn't signed up) — not a blocking error.
+    }
 
     const weeklyPlan = selectedWeeklyProgram.weeklyPlan || [];
     const cycleWeekCount = selectedWeeklyProgram.durationWeeks || (weeklyPlan.length ? Math.max(...weeklyPlan.map((w) => w.week)) : 0);

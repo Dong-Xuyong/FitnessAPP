@@ -1172,10 +1172,10 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 w-full md:w-auto">
             {portalOnly && (
               <Button
-                className="gap-2"
+                className="gap-2 flex-1 md:flex-none"
                 onClick={handleAddToRoster}
                 disabled={isAddingToRoster}
               >
@@ -1188,11 +1188,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               </Button>
             )}
             {portalOnly ? (
-              <Button className="gap-2" disabled title={t("addThisStudentFirst")}>
+              <Button className="gap-2 flex-1 md:flex-none" disabled title={t("addThisStudentFirst")}>
                 <Dumbbell className="h-4 w-4" /> {t("buildProgram")}
               </Button>
             ) : (
-              <Button className="gap-2" asChild>
+              <Button className="gap-2 flex-1 md:flex-none" asChild>
                 <Link href="/workouts/builder">
                   <Dumbbell className="h-4 w-4" /> {t("buildProgram")}
                 </Link>
@@ -1200,7 +1200,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             )}
             <Button
               variant="destructive"
-              className="gap-2"
+              className="gap-2 flex-1 md:flex-none"
               onClick={() => setShowDeleteConfirm(true)}
               disabled={isDeleting}
             >
@@ -1214,7 +1214,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             {!portalOnly && (
               <Button
                 variant={isStudentBlocked ? "outline" : "secondary"}
-                className="gap-2"
+                className="gap-2 flex-1 md:flex-none"
                 onClick={() => setShowBlockConfirm(true)}
                 disabled={isBlocking}
               >
@@ -1403,11 +1403,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         </div>
 
         <Tabs defaultValue="progress" className="space-y-6">
-          <TabsList className="bg-card border h-auto flex-wrap sm:flex-nowrap w-full">
-            <TabsTrigger value="progress" className="px-4 sm:px-8 flex-1">{t("progress")}</TabsTrigger>
-            <TabsTrigger value="milestones" className="px-4 sm:px-8 flex-1">{t("milestones")}</TabsTrigger>
-            <TabsTrigger value="management" className="px-4 sm:px-8 flex-1 text-xs sm:text-sm">{t("coachingManagement")}</TabsTrigger>
-            <TabsTrigger value="billing" className="px-4 sm:px-8 flex-1">{t("billing")}</TabsTrigger>
+          <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-4">
+            <TabsTrigger value="progress" className="text-xs sm:text-sm">{t("progress")}</TabsTrigger>
+            <TabsTrigger value="milestones" className="text-xs sm:text-sm">{t("milestones")}</TabsTrigger>
+            <TabsTrigger value="management" className="text-xs sm:text-sm">{t("coachingManagement")}</TabsTrigger>
+            <TabsTrigger value="billing" className="text-xs sm:text-sm">{t("billing")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="progress" className="space-y-6">
@@ -1492,7 +1492,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               </Card>
             </div>
 
-            <div className="grid xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,0.9fr)] gap-6 items-start">
+            <div className="grid lg:grid-cols-[minmax(0,1.8fr)_minmax(0,0.9fr)] gap-6 items-start">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
