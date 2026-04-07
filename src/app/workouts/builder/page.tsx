@@ -471,11 +471,21 @@ function WorkoutBuilderContent() {
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>{t("exerciseName")}</Label>
-                          <Select value={ex.name} onValueChange={(val) => handleUpdateExercise(i, "name", val)}>
+                          <Select
+                            value={exerciseNames.includes(ex.name) ? ex.name : "__custom__"}
+                            onValueChange={(val) => {
+                              if (val !== "__custom__") handleUpdateExercise(i, "name", val);
+                            }}
+                          >
                             <SelectTrigger>
-                              <SelectValue placeholder={t("selectExercise")} />
+                              <SelectValue placeholder={t("selectExercise")}>
+                                {ex.name || t("selectExercise")}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
+                              {ex.name && !exerciseNames.includes(ex.name) && (
+                                <SelectItem value="__custom__">{ex.name}</SelectItem>
+                              )}
                               {exerciseNames.map((name) => (
                                 <SelectItem key={name} value={name}>{name}</SelectItem>
                               ))}

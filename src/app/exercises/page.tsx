@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Plus, Pencil, Trash2, Loader2, Zap } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Loader2, Zap, Copy } from "lucide-react";
 import { initializeDefaultExercises } from "@/lib/firestore/exercises";
 import {
   Dialog,
@@ -163,6 +163,33 @@ export default function ExercisesPage() {
         variant: "destructive",
         title: t("error"),
         description: t("failedToDelete"),
+      });
+    }
+  };
+
+  const handleDuplicateExercise = async (exercise: any) => {
+    if (!db || !user) return;
+    try {
+      const exercisesCol = collection(db, "exercises");
+      await addDocumentNonBlocking(exercisesCol, {
+        name: `Copy of ${exercise.name}`,
+        category: exercise.category,
+        description: exercise.description || "",
+        videoUrl: exercise.videoUrl || "",
+        difficulty: exercise.difficulty || "intermediate",
+        equipment: exercise.equipment || "",
+        createdBy: user.uid,
+        createdAt: new Date().toISOString(),
+      });
+      toast({
+        title: t("exerciseDuplicated"),
+        description: t("exerciseDuplicatedDesc"),
+      });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: t("error"),
+        description: t("failedToDuplicate"),
       });
     }
   };
@@ -396,6 +423,15 @@ export default function ExercisesPage() {
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="text-lg line-clamp-2">{ex.name}</CardTitle>
                       <div className="flex gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                          title={t("duplicateExercise")}
+                          onClick={() => handleDuplicateExercise(ex)}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
                         <Button 
                           variant="ghost" 
                           size="icon" 

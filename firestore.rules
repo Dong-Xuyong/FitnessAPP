@@ -36,7 +36,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isTrainer();
       allow update: if isTrainer() && resource.data.createdBy == request.auth.uid;
-      allow delete: if isTrainer() && resource.data.createdBy == request.auth.uid;
+      allow delete: if isTrainer() && (
+        resource.data.createdBy == request.auth.uid || 
+        !(resource.data.createdBy is string)
+      );
     }
 
     // Global Students Directory

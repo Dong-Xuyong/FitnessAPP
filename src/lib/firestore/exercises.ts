@@ -10,14 +10,16 @@ export async function initializeDefaultExercises(
   try {
     const exercisesRef = collection(db, "exercises");
 
-    // Check if this user already has exercises
     const existingQuery = query(exercisesRef, where("createdBy", "==", userId));
     const existingDocs = await getDocs(existingQuery);
+    const existingNames = new Set(existingDocs.docs.map((d) => d.data().name as string));
 
-    if (existingDocs.size > 0) {
+    const missing = DEFAULT_EXERCISES.filter((ex) => !existingNames.has(ex.name));
+
+    if (missing.length === 0) {
       return {
         success: true,
-        message: `You already have ${existingDocs.size} exercises in your library.`,
+        message: `Your exercise library is already up to date (${existingDocs.size} exercises).`,
         count: existingDocs.size,
       };
     }
@@ -25,7 +27,7 @@ export async function initializeDefaultExercises(
     const now = new Date().toISOString();
     let addedCount = 0;
 
-    for (const exercise of DEFAULT_EXERCISES) {
+    for (const exercise of missing) {
       try {
         await addDocumentNonBlocking(exercisesRef, {
           ...exercise,
@@ -40,7 +42,7 @@ export async function initializeDefaultExercises(
 
     return {
       success: true,
-      message: `Successfully added ${addedCount} default exercises!`,
+      message: `Added ${addedCount} missing exercise${addedCount !== 1 ? "s" : ""} to your library!`,
       count: addedCount,
     };
   } catch (error) {

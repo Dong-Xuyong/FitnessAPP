@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, CalendarRange, Send } from "lucide-react";
+import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, CalendarRange, Send, Copy } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking, addDocumentNonBlocking } from "@/firebase";
 import { collection, doc } from "firebase/firestore";
@@ -291,6 +291,35 @@ export default function WorkoutsPage() {
       });
     } finally {
       setIsSavingWeekly(false);
+    }
+  };
+
+  const handleDuplicateProgram = async (program: TrainingProgramListItem) => {
+    if (!db || !user) return;
+    try {
+      const now = new Date().toISOString();
+      await addDocumentNonBlocking(trainingProgramsRef(db, user.uid), {
+        trainerId: user.uid,
+        name: `Copy of ${program.name}`,
+        description: program.description || "",
+        category: program.category || "",
+        level: program.level || "all",
+        ...(program.durationWeeks != null ? { durationWeeks: program.durationWeeks } : {}),
+        sessions: program.sessions || [],
+        ...(program.programType != null ? { programType: program.programType } : {}),
+        createdAt: now,
+        updatedAt: now,
+      });
+      toast({
+        title: t("programDuplicated"),
+        description: t("programDuplicatedDesc"),
+      });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: t("error"),
+        description: t("failedToDuplicate"),
+      });
     }
   };
 
@@ -647,9 +676,9 @@ export default function WorkoutsPage() {
                           </span>
                         </div>
                       ))}
-                      {Array.from(new Set(plan.map((week) => week.trainingProgramId))).size > 4 && (
+                      {Array.from(new Set(plan.map((week) => week.trainingProgramId))).length > 4 && (
                         <p className="text-xs text-muted-foreground">
-                          +{Array.from(new Set(plan.map((week) => week.trainingProgramId))).size - 4} more programs
+                          +{Array.from(new Set(plan.map((week) => week.trainingProgramId))).length - 4} more programs
                         </p>
                       )}
                     </CardContent>
@@ -722,6 +751,15 @@ export default function WorkoutsPage() {
                       <Link href={`/workouts/builder?edit=${program.id}`}>
                         {t("editInBuilder")} <ArrowRight className="h-4 w-4" />
                       </Link>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title={t("duplicateProgram")}
+                      className="shrink-0"
+                      onClick={() => handleDuplicateProgram(program)}
+                    >
+                      <Copy className="h-4 w-4" />
                     </Button>
                     <Button
                       variant="ghost"

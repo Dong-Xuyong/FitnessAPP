@@ -196,4 +196,68 @@ export const DEFAULT_TRAINING_PROGRAMS: DefaultTrainingProgram[] = [
       },
     ],
   },
+  {
+    name: "Treino A - Back & Arms",
+    description: "Back and arms focused workout with rows, pulldowns, and bicep/tricep exercises. Great for building upper body strength.",
+    category: "Split",
+    level: "intermediate",
+    durationWeeks: 8,
+    sessions: [
+      {
+        order: 0,
+        name: "Treino A",
+        exercises: [
+          { exerciseName: "Remada T", sets: 4, reps: "10", restTimeSeconds: 90 },
+          { exerciseName: "Pull Down Barra", sets: 4, reps: "10", restTimeSeconds: 90 },
+          { exerciseName: "Remada Máquina", sets: 3, reps: "12", restTimeSeconds: 90 },
+          { exerciseName: "Remada Alta (cabo)", sets: 3, reps: "12", restTimeSeconds: 60 },
+          { exerciseName: "Rosca Alt. Halter", sets: 3, reps: "12", restTimeSeconds: 60 },
+          { exerciseName: "Tríceps Francês", sets: 3, reps: "12", restTimeSeconds: 60 },
+          { exerciseName: "KB Deadlift Unilateral", sets: 3, reps: "10", restTimeSeconds: 90 },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Treino B - Legs & Glutes",
+    description: "Comprehensive lower body workout targeting quads, hamstrings, glutes, and calves with unilateral and bilateral movements.",
+    category: "Split",
+    level: "intermediate",
+    durationWeeks: 8,
+    sessions: [
+      {
+        order: 0,
+        name: "Treino B",
+        exercises: [
+          { exerciseName: "Split Squat Halter", sets: 4, reps: "10", restTimeSeconds: 90 },
+          { exerciseName: "Abdução Polia", sets: 3, reps: "15", restTimeSeconds: 60 },
+          { exerciseName: "Extensão Quadril Máquina", sets: 3, reps: "12", restTimeSeconds: 90 },
+          { exerciseName: "Agachamento", sets: 4, reps: "8", restTimeSeconds: 120 },
+          { exerciseName: "Gémeos Prensa", sets: 4, reps: "15", restTimeSeconds: 60 },
+          { exerciseName: "Elevação Pélvica Unilateral", sets: 3, reps: "12", restTimeSeconds: 60 },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Treino C - Chest & Arms",
+    description: "Chest-focused workout with incline pressing and flyes, complemented by tricep and bicep exercises for complete upper body development.",
+    category: "Split",
+    level: "intermediate",
+    durationWeeks: 8,
+    sessions: [
+      {
+        order: 0,
+        name: "Treino C",
+        exercises: [
+          { exerciseName: "Supino Inclinado (Barra)", sets: 4, reps: "8", restTimeSeconds: 120 },
+          { exerciseName: "Pullover Halter", sets: 3, reps: "12", restTimeSeconds: 90 },
+          { exerciseName: "Peck Deck", sets: 3, reps: "12", restTimeSeconds: 60 },
+          { exerciseName: "Tríceps Testa", sets: 3, reps: "12", restTimeSeconds: 60 },
+          { exerciseName: "Bíceps Martelo", sets: 3, reps: "12", restTimeSeconds: 60 },
+          { exerciseName: "Femoral", sets: 3, reps: "12", restTimeSeconds: 60 },
+        ],
+      },
+    ],
+  },
 ];

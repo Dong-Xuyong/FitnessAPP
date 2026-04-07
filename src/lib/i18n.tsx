@@ -83,7 +83,6 @@ const translations = {
     saveToLibrary: "Save to library",
     saveChangesBtn: "Save changes",
     assignProgram: "Assign Program",
-    noStudentsFound: "No students found",
 
     // Student Detail
     memberSince: "Member since",
@@ -248,6 +247,13 @@ const translations = {
     failedToUpdate: "Failed to update exercise.",
     failedToDelete: "Failed to delete exercise.",
     confirmDeleteExercise: "Are you sure you want to delete this exercise?",
+    duplicateExercise: "Duplicate",
+    exerciseDuplicated: "Exercise Duplicated",
+    exerciseDuplicatedDesc: "A copy has been created.",
+    failedToDuplicate: "Failed to duplicate.",
+    duplicateProgram: "Duplicate",
+    programDuplicated: "Program Duplicated",
+    programDuplicatedDesc: "A copy has been created.",
     error: "Error",
 
     // Workouts & Programs
@@ -524,7 +530,6 @@ const translations = {
     setNewGoal: "Set a new goal for the student.",
     titleRequired: "Title *",
     descriptionLabel: "Description",
-    categoryRequired: "Category *",
     unitRequired: "Unit *",
     strengthCategory: "Strength",
     enduranceCategory: "Endurance",
@@ -699,7 +704,6 @@ const translations = {
     saveToLibrary: "Guardar na biblioteca",
     saveChangesBtn: "Guardar alterações",
     assignProgram: "Atribuir Programa",
-    noStudentsFound: "Nenhum aluno encontrado",
 
     // Student Detail
     memberSince: "Membro desde",
@@ -864,6 +868,13 @@ const translations = {
     failedToUpdate: "Falha ao atualizar exercício.",
     failedToDelete: "Falha ao eliminar exercício.",
     confirmDeleteExercise: "Tem a certeza que deseja eliminar este exercício?",
+    duplicateExercise: "Duplicar",
+    exerciseDuplicated: "Exercício Duplicado",
+    exerciseDuplicatedDesc: "Uma cópia foi criada.",
+    failedToDuplicate: "Falha ao duplicar.",
+    duplicateProgram: "Duplicar",
+    programDuplicated: "Programa Duplicado",
+    programDuplicatedDesc: "Uma cópia foi criada.",
     error: "Erro",
 
     // Workouts & Programs
@@ -1140,7 +1151,6 @@ const translations = {
     setNewGoal: "Definir um novo objetivo para o aluno.",
     titleRequired: "Título *",
     descriptionLabel: "Descrição",
-    categoryRequired: "Categoria *",
     unitRequired: "Unidade *",
     strengthCategory: "Força",
     enduranceCategory: "Resistência",

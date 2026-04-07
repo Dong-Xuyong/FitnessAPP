@@ -5,26 +5,13 @@ import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target, Percent } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
 import { useI18n } from "@/lib/i18n";
-import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { useEffect, useState } from "react";
 
-function getWeekKey(date: Date): string {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  const day = next.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  next.setDate(next.getDate() + diff);
-  const month = String(next.getMonth() + 1).padStart(2, "0");
-  const dayOfMonth = String(next.getDate()).padStart(2, "0");
-  return `${next.getFullYear()}-${month}-${dayOfMonth}`;
-}
 
 export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
@@ -33,8 +20,6 @@ export default function StudentDashboardPage() {
 
   const [studentData, setStudentData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-  const [weightInput, setWeightInput] = useState("");
-  const [isSavingWeight, setIsSavingWeight] = useState(false);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [lastSessionDoneAt, setLastSessionDoneAt] = useState<string | null>(null);
 
@@ -145,63 +130,6 @@ export default function StudentDashboardPage() {
         ? t("activeProgramInProgress")
         : t("waitingForCoach");
 
-  const currentWeekKey = getWeekKey(new Date());
-  const lastCheckinWeekKey = studentData?.lastWeeklyWeightCheckInWeekKey || "";
-  const requiresWeeklyWeightCheckIn = lastCheckinWeekKey !== currentWeekKey;
-
-  const handleSubmitWeeklyWeight = async () => {
-    if (!db || !user?.uid || !studentData) return;
-    const parsedWeight = Number(weightInput);
-    if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) return;
-
-    setIsSavingWeight(true);
-    try {
-      const ref = doc(db, "students", user.uid);
-      const trainerStudentRef = studentData?.trainerId
-        ? doc(db, "personalTrainers", studentData.trainerId, "students", user.uid)
-        : null;
-      const now = new Date().toISOString();
-      const existingHistory = Array.isArray(studentData?.weightHistory) ? studentData.weightHistory : [];
-      const nextHistory = [
-        ...existingHistory.filter((entry: any) => entry?.weekKey !== currentWeekKey),
-        {
-          weekKey: currentWeekKey,
-          date: now,
-          weightKg: parsedWeight,
-        },
-      ].sort((a: any, b: any) => Date.parse(a.date || "") - Date.parse(b.date || ""));
-
-      await updateDoc(ref, {
-        weightKg: parsedWeight,
-        lastWeeklyWeightCheckInAt: now,
-        lastWeeklyWeightCheckInWeekKey: currentWeekKey,
-        weightHistory: nextHistory,
-        updatedAt: now,
-      });
-
-      if (trainerStudentRef) {
-        await updateDoc(trainerStudentRef, {
-          weightKg: parsedWeight,
-          updatedAt: now,
-        });
-      }
-
-      setStudentData((prev: any) => ({
-        ...(prev || {}),
-        weightKg: parsedWeight,
-        lastWeeklyWeightCheckInAt: now,
-        lastWeeklyWeightCheckInWeekKey: currentWeekKey,
-        weightHistory: nextHistory,
-        updatedAt: now,
-      }));
-      setWeightInput("");
-    } catch (error) {
-      console.error("Failed to save weekly weight", error);
-    } finally {
-      setIsSavingWeight(false);
-    }
-  };
-
   return (
     <StudentNavigation>
       <div className="space-y-6">
@@ -298,36 +226,6 @@ export default function StudentDashboardPage() {
           </Card>
         </div>
 
-        <Dialog open={requiresWeeklyWeightCheckIn} onOpenChange={() => {}}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{t("weeklyWeightCheckin")}</DialogTitle>
-              <DialogDescription>
-                {t("weeklyCheckinDesc")}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-2">
-              <Label htmlFor="weekly-weight">{t("currentWeightKg")}</Label>
-              <Input
-                id="weekly-weight"
-                type="number"
-                step="0.1"
-                min="1"
-                placeholder={studentData?.weightKg ? String(studentData.weightKg) : "e.g. 72.4"}
-                value={weightInput}
-                onChange={(event) => setWeightInput(event.target.value)}
-              />
-            </div>
-
-            <DialogFooter>
-              <Button onClick={handleSubmitWeeklyWeight} disabled={isSavingWeight || !(Number(weightInput) > 0)}>
-                {isSavingWeight ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Save Weight
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </StudentNavigation>
   );
