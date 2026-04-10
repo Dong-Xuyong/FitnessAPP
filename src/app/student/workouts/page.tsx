@@ -7,11 +7,11 @@ import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dumbbell, Clock, Play, CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Dumbbell, Clock, Play, CheckCircle2, Loader2, AlertTriangle, CalendarDays } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
 import { doc, getDoc, collection, getDocs, updateDoc } from "firebase/firestore";
-import { AlertTriangle } from "lucide-react";
 import type { DayOfWeek } from "@/lib/types";
 
 interface WorkoutSession {
@@ -21,48 +21,9 @@ interface WorkoutSession {
   date?: string;
   exercises?: Array<{
     exerciseName?: string;
-    sets?: Array<{
-      setNumber?: number;
-      weight?: number;
-      reps?: number;
-      completed?: boolean;
-    }>;
+    sets?: Array<{ setNumber?: number; weight?: number; reps?: number; completed?: boolean }>;
   }>;
   completedAt?: string;
-}
-
-function formatDayOfWeek(day: DayOfWeek | undefined): string {
-  if (!day) return "Unscheduled";
-  return day.charAt(0).toUpperCase() + day.slice(1);
-}
-
-function getWorkoutAssignedTimestamp(workout: WorkoutPlan): number {
-  const rawDate = workout.assignedAt || workout.createdAt;
-  if (!rawDate) return 0;
-  const timestamp = Date.parse(rawDate);
-  return Number.isNaN(timestamp) ? 0 : timestamp;
-}
-
-function getWorkoutScheduledTimestamp(workout: WorkoutPlan): number {
-  return getWorkoutAssignedTimestamp(workout);
-}
-
-/** Returns the number of whole calendar days between today (midnight) and the assigned date.
- *  Negative = past, 0 = today, positive = future. */
-function daysUntilDate(raw: string | undefined): number {
-  if (!raw) return 0;
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return 0;
-  const today = new Date();
-  const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const planMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  return Math.round((planMs - todayMs) / 86_400_000);
-}
-
-function isWorkoutAvailableToday(workout: WorkoutPlan): boolean {
-  const assignedRaw = workout.assignedAt || workout.createdAt;
-  if (!assignedRaw) return true; // no date restriction → always startable
-  return daysUntilDate(assignedRaw) === 0; // exactly today
 }
 
 interface WorkoutPlan {
@@ -74,12 +35,6 @@ interface WorkoutPlan {
     reps: string;
     restTimeSeconds: number;
     targetWeightKg?: number;
-    setDetails?: Array<{
-      setNumber: number;
-      reps: string;
-      targetWeightKg?: number;
-      restTimeSeconds: number;
-    }>;
     notes?: string;
   }>;
   createdAt?: string;
@@ -92,6 +47,24 @@ interface WorkoutPlan {
   weightIncreaseKg?: number;
 }
 
+function daysUntilDate(raw: string | undefined): number {
+  if (!raw) return 0;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return 0;
+  const today = new Date();
+  const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const planMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((planMs - todayMs) / 86_400_000);
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
 export default function StudentWorkoutsPage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
@@ -100,160 +73,69 @@ export default function StudentWorkoutsPage() {
   const [completedWorkouts, setCompletedWorkouts] = useState<WorkoutSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [expiredCount, setExpiredCount] = useState(0);
-
-  const { currentWeekWorkouts, otherWorkouts } = useMemo(() => {
-    const weekNumbers = workouts
-      .map((workout) => workout.weekNumber)
-      .filter((week): week is number => typeof week === "number" && Number.isFinite(week));
-
-    const sortByAssignedDateAsc = (a: WorkoutPlan, b: WorkoutPlan) =>
-      getWorkoutScheduledTimestamp(a) - getWorkoutScheduledTimestamp(b);
-
-    if (weekNumbers.length === 0) {
-      return {
-        currentWeekWorkouts: [...workouts].sort(sortByAssignedDateAsc),
-        otherWorkouts: [] as WorkoutPlan[],
-      };
-    }
-
-    const workoutsByWeek = new Map<number, WorkoutPlan[]>();
-    workouts.forEach((workout) => {
-      if (typeof workout.weekNumber !== "number") return;
-      const existing = workoutsByWeek.get(workout.weekNumber) || [];
-      existing.push(workout);
-      workoutsByWeek.set(workout.weekNumber, existing);
-    });
-
-    const orderedWeeks = Array.from(workoutsByWeek.entries())
-      .map(([weekNumber, weekWorkouts]) => ({
-        weekNumber,
-        workouts: [...weekWorkouts].sort(sortByAssignedDateAsc),
-        startTimestamp: Math.min(...weekWorkouts.map((workout) => getWorkoutScheduledTimestamp(workout))),
-        endTimestamp: Math.max(...weekWorkouts.map((workout) => getWorkoutScheduledTimestamp(workout))),
-      }))
-      .sort((a, b) => a.startTimestamp - b.startTimestamp);
-
-    const now = new Date();
-    const todayTimestamp = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const activeWeek = orderedWeeks.find(
-      (week) => week.startTimestamp <= todayTimestamp && week.endTimestamp >= todayTimestamp
-    );
-    const upcomingWeek = orderedWeeks.find((week) => week.startTimestamp >= todayTimestamp);
-    const selectedWeek = activeWeek || upcomingWeek || orderedWeeks[orderedWeeks.length - 1];
-
-    return {
-      currentWeekWorkouts: selectedWeek.workouts,
-      otherWorkouts: orderedWeeks
-        .filter((week) => week.weekNumber !== selectedWeek.weekNumber)
-        .flatMap((week) => week.workouts),
-    };
-  }, [workouts]);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
   useEffect(() => {
-    if (!db || !user?.uid) {
-      setIsLoading(false);
-      return;
-    }
-
+    if (!db || !user?.uid) { setIsLoading(false); return; }
     let cancelled = false;
 
     async function fetchWorkouts() {
       setIsLoading(true);
       try {
-        // Get trainerId from the student's global profile
         const studentDoc = await getDoc(doc(db, "students", user!.uid));
-        if (!studentDoc.exists()) {
-          setIsLoading(false);
-          return;
-        }
+        if (!studentDoc.exists()) { setIsLoading(false); return; }
         const trainerId = studentDoc.data()?.trainerId;
-        if (!trainerId) {
-          setIsLoading(false);
-          return;
-        }
-        // Use rosterDocId if set (handles cases where workouts were stored under
-        // a different roster doc ID than the student's Auth UID).
+        if (!trainerId) { setIsLoading(false); return; }
         const rosterDocId = (studentDoc.data()?.rosterDocId as string | undefined) || user!.uid;
 
-        // Fetch workout plans assigned by the trainer
-        const plansCol = collection(
-          db,
-          "personalTrainers",
-          trainerId,
-          "students",
-          rosterDocId,
-          "workoutPlans"
-        );
-        const sessionsCol = collection(
-          db,
-          "personalTrainers",
-          trainerId,
-          "students",
-          rosterDocId,
-          "workoutSessions"
-        );
-        const [plansSnap, sessionsSnap] = await Promise.all([getDocs(plansCol), getDocs(sessionsCol)]);
-
+        const [plansSnap, sessionsSnap] = await Promise.all([
+          getDocs(collection(db, "personalTrainers", trainerId, "students", rosterDocId, "workoutPlans")),
+          getDocs(collection(db, "personalTrainers", trainerId, "students", rosterDocId, "workoutSessions")),
+        ]);
         if (cancelled) return;
 
-        const plans: WorkoutPlan[] = plansSnap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as WorkoutPlan[];
-        const sessions: WorkoutSession[] = sessionsSnap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as WorkoutSession[];
+        const plans: WorkoutPlan[] = plansSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as WorkoutPlan[];
+        const sessions: WorkoutSession[] = sessionsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as WorkoutSession[];
 
         const completedPlanIds = new Set(
-          sessions
-            .filter((session) => session.completedAt && session.workoutPlanId)
-            .map((session) => session.workoutPlanId as string)
+          sessions.filter((s) => s.completedAt && s.workoutPlanId).map((s) => s.workoutPlanId as string)
         );
         const completedSessions = [...sessions]
-          .filter((session) => session.completedAt)
-          .sort((a, b) => {
-            const aTime = Date.parse(a.completedAt || a.date || "");
-            const bTime = Date.parse(b.completedAt || b.date || "");
-            return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
-          });
+          .filter((s) => s.completedAt)
+          .sort((a, b) => Date.parse(b.completedAt || "") - Date.parse(a.completedAt || ""));
 
-        // Detect plans whose assigned date has already passed (expired)
-        const expiredPlans = plans.filter((plan) => {
-          if (plan.completedAt || plan.status === "completed" || plan.status === "expired") return false;
-          if (completedPlanIds.has(plan.id)) return false;
-          const raw = plan.assignedAt || plan.createdAt;
-          if (!raw) return false;
-          return daysUntilDate(raw) < 0; // strictly before today
+        const expiredPlans = plans.filter((p) => {
+          if (p.completedAt || p.status === "completed" || p.status === "expired") return false;
+          if (completedPlanIds.has(p.id)) return false;
+          const raw = p.assignedAt || p.createdAt;
+          return raw ? daysUntilDate(raw) < 0 : false;
         });
 
-        // Soft-delete expired plans in Firestore so the coach can see them
-        for (const plan of expiredPlans) {
+        for (const p of expiredPlans) {
           try {
             await updateDoc(
-              doc(db, "personalTrainers", trainerId, "students", rosterDocId, "workoutPlans", plan.id),
+              doc(db, "personalTrainers", trainerId, "students", rosterDocId, "workoutPlans", p.id),
               { status: "expired", expiredAt: new Date().toISOString() }
             );
           } catch {}
         }
 
-        if (!cancelled && expiredPlans.length > 0) {
-          setExpiredCount(expiredPlans.length);
-        }
+        if (!cancelled && expiredPlans.length > 0) setExpiredCount(expiredPlans.length);
 
-        // Only show plans that are today or in the future (not expired, not completed)
-        const activePlans = plans.filter((plan) => {
-          if (plan.completedAt || plan.status === "completed" || plan.status === "expired") return false;
-          if (completedPlanIds.has(plan.id)) return false;
-          // Also filter out newly-expired ones we just caught above
-          if (expiredPlans.some((e) => e.id === plan.id)) return false;
-          const raw = plan.assignedAt || plan.createdAt;
-          if (!raw) return true; // no date → always show
-          return daysUntilDate(raw) >= 0; // today or future
+        const activePlans = plans.filter((p) => {
+          if (p.completedAt || p.status === "completed" || p.status === "expired") return false;
+          if (completedPlanIds.has(p.id)) return false;
+          if (expiredPlans.some((e) => e.id === p.id)) return false;
+          const raw = p.assignedAt || p.createdAt;
+          return raw ? daysUntilDate(raw) >= 0 : true;
         });
 
-        // Sort by assigned date ascending (soonest first)
-        activePlans.sort((a, b) => getWorkoutAssignedTimestamp(a) - getWorkoutAssignedTimestamp(b));
+        activePlans.sort((a, b) => {
+          const at = Date.parse(a.assignedAt || a.createdAt || "");
+          const bt = Date.parse(b.assignedAt || b.createdAt || "");
+          return (isNaN(at) ? 0 : at) - (isNaN(bt) ? 0 : bt);
+        });
+
         setWorkouts(activePlans);
         setCompletedWorkouts(completedSessions);
       } catch (e) {
@@ -264,10 +146,33 @@ export default function StudentWorkoutsPage() {
     }
 
     fetchWorkouts();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [db, user?.uid]);
+
+  // Dates that have at least one workout
+  const workoutDates = useMemo(
+    () => workouts.map((w) => new Date(w.assignedAt || w.createdAt || "")).filter((d) => !isNaN(d.getTime())),
+    [workouts]
+  );
+
+  // Workouts scheduled for the currently selected date
+  const selectedDayWorkouts = useMemo(
+    () => workouts.filter((w) => {
+      const raw = w.assignedAt || w.createdAt;
+      if (!raw) return false;
+      return isSameDay(new Date(raw), selectedDate);
+    }),
+    [workouts, selectedDate]
+  );
+
+  // Next upcoming workout (soonest date)
+  const nextWorkout = useMemo(
+    () => workouts.find((w) => {
+      const raw = w.assignedAt || w.createdAt;
+      return raw && daysUntilDate(raw) >= 0;
+    }),
+    [workouts]
+  );
 
   if (isUserLoading || isLoading) {
     return (
@@ -291,7 +196,8 @@ export default function StudentWorkoutsPage() {
           <div className="flex items-start gap-3 rounded-lg border border-orange-400/40 bg-orange-50 dark:bg-orange-950/20 px-4 py-3 text-sm text-orange-800 dark:text-orange-200">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-orange-500" />
             <span>
-              {expiredCount} {expiredCount === 1 ? t("workoutExpiredSingular") || "treino expirou" : t("workoutExpiredPlural") || "treinos expiraram"} {t("workoutExpiredCoachNotified") || "e foram removidos. O teu treinador foi notificado."}
+              {expiredCount} {expiredCount === 1 ? t("workoutExpiredSingular") : t("workoutExpiredPlural")}{" "}
+              {t("workoutExpiredCoachNotified")}
             </span>
           </div>
         )}
@@ -303,184 +209,156 @@ export default function StudentWorkoutsPage() {
                 <Dumbbell className="h-8 w-8 text-muted-foreground" />
               </div>
               <h3 className="text-xl font-bold">{t("noActiveWorkouts")}</h3>
-              <p className="text-muted-foreground max-w-md mx-auto">
-                {t("noActiveWorkoutsDesc")}
-              </p>
+              <p className="text-muted-foreground max-w-md mx-auto">{t("noActiveWorkoutsDesc")}</p>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-6">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">{t("currentWeek")}</h2>
-                <Badge variant="outline">{t("currentSchedule")}</Badge>
-              </div>
+          <div className="grid lg:grid-cols-5 gap-6">
+            {/* Calendar panel */}
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CalendarDays className="h-4 w-4 text-primary" />
+                  {t("myWorkouts")}
+                </CardTitle>
+                <CardDescription>{t("followAssigned")}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(d) => { if (d) setSelectedDate(d); }}
+                  modifiers={{ workout: workoutDates }}
+                  modifiersClassNames={{ workout: "bg-primary/15 text-primary font-semibold rounded-full" }}
+                  className="w-full rounded-md border"
+                />
 
-              {currentWeekWorkouts.map((workout) => {
-                const canStartToday = isWorkoutAvailableToday(workout);
-                return (
-                  <Card key={workout.id} className="group hover:border-accent transition-colors">
-                    <CardContent className="p-6">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                        <div className="space-y-1 flex-1">
-                          <h2 className="text-2xl font-bold">{workout.title}</h2>
-                          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mt-2">
-                            <span className="flex items-center gap-1">
-                              <Dumbbell className="h-4 w-4" /> {workout.exercises?.length || 0} {t("exercisesLabel")}
-                            </span>
-                            {(workout.assignedAt || workout.createdAt) && (
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-4 w-4" /> {t("assigned")} {new Date(workout.assignedAt || workout.createdAt || "").toLocaleDateString()}
-                              </span>
-                            )}
+                {/* Selected day label */}
+                <p className="text-xs text-muted-foreground font-medium">
+                  {selectedDate.toLocaleDateString(undefined, {
+                    weekday: "long", day: "numeric", month: "long", year: "numeric",
+                  })}
+                </p>
+
+                {/* Workouts for selected day */}
+                {selectedDayWorkouts.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedDayWorkouts.map((w) => {
+                      const canStart = daysUntilDate(w.assignedAt || w.createdAt) === 0;
+                      return (
+                        <div key={w.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
+                          <Dumbbell className="h-4 w-4 text-primary shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold truncate">{w.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {w.exercises?.length || 0} {t("exercisesLabel")}
+                              {w.weekNumber ? ` · Week ${w.weekNumber}${w.totalWeeks ? `/${w.totalWeeks}` : ""}` : ""}
+                              {typeof w.weightIncreaseKg === "number" ? ` · +${w.weightIncreaseKg} kg` : ""}
+                            </p>
                           </div>
-                          {(workout.weekNumber || workout.scheduledDayOfWeek || typeof workout.weightIncreaseKg === "number") && (
-                            <div className="flex flex-wrap gap-1.5 mt-3">
-                              {workout.weekNumber ? (
-                                <Badge variant="outline" className="text-xs">
-                                  Week {workout.weekNumber}{workout.totalWeeks ? ` of ${workout.totalWeeks}` : ""}
-                                </Badge>
-                              ) : null}
-                              {workout.scheduledDayOfWeek ? (
-                                <Badge variant="outline" className="text-xs">
-                                  {formatDayOfWeek(workout.scheduledDayOfWeek)}
-                                </Badge>
-                              ) : null}
-                              {typeof workout.weightIncreaseKg === "number" ? (
-                                <Badge variant="outline" className="text-xs">
-                                  +{workout.weightIncreaseKg} kg
-                                </Badge>
-                              ) : null}
-                            </div>
-                          )}
-                          {workout.exercises && workout.exercises.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mt-3">
-                              {workout.exercises.map((ex, i) => (
-                                <Badge key={i} variant="secondary" className="text-xs">
-                                  {ex.exerciseName}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          {canStartToday ? (
-                            <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2 flex-1 sm:flex-none" asChild>
-                              <Link href={`/student/workouts/${workout.id}/session`}>
-                                <Play className="h-4 w-4" /> {t("startSession")}
+                          {canStart ? (
+                            <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90 gap-1.5 shrink-0" asChild>
+                              <Link href={`/student/workouts/${w.id}/session`}>
+                                <Play className="h-3.5 w-3.5" /> {t("startSession")}
                               </Link>
                             </Button>
                           ) : (
-                            <Button className="gap-2 flex-1 sm:flex-none" variant="outline" disabled>
-                              <Play className="h-4 w-4" />
-                              {t("availableInDays").replace("{n}", String(daysUntilDate(workout.assignedAt || workout.createdAt)))}
-                            </Button>
-                          )}
-                          <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform hidden sm:block" />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-
-            {otherWorkouts.length > 0 ? (
-              <Card className="border-dashed bg-muted/20">
-                <CardHeader>
-                  <CardTitle className="text-base">{t("otherAssignedWorkouts")}</CardTitle>
-                  <CardDescription>{t("otherAssignedWorkoutsDesc")}</CardDescription>
-                </CardHeader>
-              </Card>
-            ) : null}
-
-            {otherWorkouts.map((workout) => {
-              const canStartToday = isWorkoutAvailableToday(workout);
-              return (
-                <Card key={workout.id} className="group hover:border-accent transition-colors">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                      <div className="space-y-1 flex-1">
-                        <h2 className="text-2xl font-bold">{workout.title}</h2>
-                        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mt-2">
-                          <span className="flex items-center gap-1">
-                            <Dumbbell className="h-4 w-4" /> {workout.exercises?.length || 0} {t("exercisesLabel")}
-                          </span>
-                          {(workout.assignedAt || workout.createdAt) && (
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-4 w-4" /> {t("assigned")} {new Date(workout.assignedAt || workout.createdAt || "").toLocaleDateString()}
-                            </span>
+                            <Badge variant="outline" className="shrink-0 text-xs">
+                              {daysUntilDate(w.assignedAt || w.createdAt) > 0
+                                ? t("availableInDays").replace("{n}", String(daysUntilDate(w.assignedAt || w.createdAt)))
+                                : t("today") || "Hoje"}
+                            </Badge>
                           )}
                         </div>
-                        {(workout.weekNumber || workout.scheduledDayOfWeek || typeof workout.weightIncreaseKg === "number") && (
-                          <div className="flex flex-wrap gap-1.5 mt-3">
-                            {workout.weekNumber ? (
-                              <Badge variant="outline" className="text-xs">
-                                Week {workout.weekNumber}{workout.totalWeeks ? ` of ${workout.totalWeeks}` : ""}
-                              </Badge>
-                            ) : null}
-                            {workout.scheduledDayOfWeek ? (
-                              <Badge variant="outline" className="text-xs">
-                                {formatDayOfWeek(workout.scheduledDayOfWeek)}
-                              </Badge>
-                            ) : null}
-                            {typeof workout.weightIncreaseKg === "number" ? (
-                              <Badge variant="outline" className="text-xs">
-                                +{workout.weightIncreaseKg} kg
-                              </Badge>
-                            ) : null}
-                          </div>
-                        )}
-                        {workout.exercises && workout.exercises.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-3">
-                            {workout.exercises.map((ex, i) => (
-                              <Badge key={i} variant="secondary" className="text-xs">
-                                {ex.exerciseName}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("noAssignmentsOnDate") || "Nenhum treino neste dia."}</p>
+                )}
+              </CardContent>
+            </Card>
 
-                      <div className="flex items-center gap-3">
-                        {canStartToday ? (
-                          <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2 flex-1 sm:flex-none" asChild>
-                            <Link href={`/student/workouts/${workout.id}/session`}>
-                              <Play className="h-4 w-4" /> {t("startSession")}
-                            </Link>
-                          </Button>
-                        ) : (
-                          <Button className="gap-2 flex-1 sm:flex-none" variant="outline" disabled>
-                            <Play className="h-4 w-4" />
-                            {t("availableInDays").replace("{n}", String(daysUntilDate(workout.assignedAt || workout.createdAt)))}
-                          </Button>
-                        )}
-                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform hidden sm:block" />
+            {/* Upcoming workouts panel */}
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="text-base">{t("upcomingAssignments") || "Próximos Treinos"}</CardTitle>
+                <CardDescription>{t("nextScheduledWorkouts") || "Próximos treinos agendados"}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {workouts.map((w) => {
+                  const raw = w.assignedAt || w.createdAt;
+                  if (!raw) return null;
+                  const d = new Date(raw);
+                  if (isNaN(d.getTime())) return null;
+                  const days = daysUntilDate(raw);
+                  const isToday = days === 0;
+                  const isSelected = isSameDay(d, selectedDate);
+
+                  return (
+                    <button
+                      key={w.id}
+                      onClick={() => setSelectedDate(d)}
+                      className={`w-full flex items-start gap-3 p-3 rounded-lg border text-left transition-colors ${
+                        isSelected
+                          ? "border-primary bg-primary/5"
+                          : "bg-card hover:bg-accent/5"
+                      }`}
+                    >
+                      <div className={`flex flex-col items-center justify-center min-w-[44px] rounded-md px-2 py-1 shrink-0 ${
+                        isToday ? "bg-accent/20" : "bg-primary/10"
+                      }`}>
+                        <span className={`text-[10px] font-bold uppercase ${isToday ? "text-accent" : "text-primary"}`}>
+                          {d.toLocaleDateString(undefined, { month: "short" })}
+                        </span>
+                        <span className="text-lg font-bold leading-none">{d.getDate()}</span>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold truncate">{w.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {w.exercises?.length || 0} {t("exercisesLabel")}
+                          {w.weekNumber ? ` · Week ${w.weekNumber}${w.totalWeeks ? `/${w.totalWeeks}` : ""}` : ""}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          {isToday && (
+                            <Badge className="text-[10px] h-4 px-1.5 bg-green-100 text-green-800">{t("today")}</Badge>
+                          )}
+                          {!isToday && days > 0 && (
+                            <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                              {t("availableInDays").replace("{n}", String(days))}
+                            </Badge>
+                          )}
+                          {w.scheduledDayOfWeek && (
+                            <Badge variant="secondary" className="text-[10px] h-4 px-1.5 capitalize">
+                              {w.scheduledDayOfWeek}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+                {nextWorkout === undefined && (
+                  <p className="text-sm text-muted-foreground">{t("noUpcomingAssignments")}</p>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
 
-        {completedWorkouts.length > 0 ? (
+        {/* Workout history */}
+        {completedWorkouts.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">{t("workoutHistory")}</h2>
               <Badge variant="secondary">{completedWorkouts.length} {t("completedCount")}</Badge>
             </div>
-
             <div className="grid gap-4">
               {completedWorkouts.map((session) => {
                 const completedDate = session.completedAt || session.date;
                 const totalSets = (session.exercises || []).reduce(
-                  (sum, exercise) => sum + (exercise.sets?.length || 0),
-                  0
+                  (sum, ex) => sum + (ex.sets?.length || 0), 0
                 );
-
                 return (
                   <Card key={session.id} className="bg-muted/10 border-muted">
                     <CardContent className="p-5">
@@ -495,14 +373,13 @@ export default function StudentWorkoutsPage() {
                               <Dumbbell className="h-4 w-4" /> {(session.exercises || []).length} {t("exercisesLabel")}
                             </span>
                             <span>{totalSets} {t("setsLabel")}</span>
-                            {completedDate ? (
+                            {completedDate && (
                               <span className="flex items-center gap-1">
                                 <Clock className="h-4 w-4" /> {t("completed")} {new Date(completedDate).toLocaleDateString()}
                               </span>
-                            ) : null}
+                            )}
                           </div>
                         </div>
-
                         <Badge variant="outline" className="w-fit">{t("completed")}</Badge>
                       </div>
                     </CardContent>
@@ -511,7 +388,7 @@ export default function StudentWorkoutsPage() {
               })}
             </div>
           </div>
-        ) : null}
+        )}
       </div>
     </StudentNavigation>
   );

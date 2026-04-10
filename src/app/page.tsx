@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Dumbbell, ArrowRight, ShieldCheck, Zap, Users } from "lucide-react";
+import { Dumbbell, ArrowRight, ShieldCheck, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 
@@ -40,20 +40,13 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="py-20 px-6 max-w-7xl mx-auto grid md:grid-cols-3 gap-12">
+        <section className="py-20 px-6 max-w-7xl mx-auto grid md:grid-cols-2 gap-12 max-w-3xl">
           <div className="space-y-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
               <Users className="h-6 w-6" />
             </div>
             <h3 className="text-xl font-bold font-headline">{t("studentManagement")}</h3>
             <p className="text-muted-foreground">{t("studentManagementDesc")}</p>
-          </div>
-          <div className="space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-              <Zap className="h-6 w-6" />
-            </div>
-            <h3 className="text-xl font-bold font-headline">{t("aiProgramBuilder")}</h3>
-            <p className="text-muted-foreground">{t("aiProgramBuilderDesc")}</p>
           </div>
           <div className="space-y-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">

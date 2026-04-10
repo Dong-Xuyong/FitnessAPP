@@ -246,7 +246,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
-          {isBlocked ? (
+          {isBlocked && pathname !== "/student/billing" ? (
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4">
               <div className="rounded-full bg-destructive/10 p-6">
                 <ShieldBan className="h-12 w-12 text-destructive" />
@@ -255,7 +255,13 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
               <p className="text-muted-foreground max-w-md">
                 Your account has been suspended by your coach. Please contact your coach for more information.
               </p>
-              <Button variant="outline" className="mt-4 gap-2" onClick={handleSignOut}>
+              <Button asChild variant="outline" className="mt-4 gap-2">
+                <Link href="/student/billing">
+                  <CreditCard className="h-4 w-4" />
+                  {t("billing")}
+                </Link>
+              </Button>
+              <Button variant="ghost" className="gap-2" onClick={handleSignOut}>
                 <LogOut className="h-4 w-4" />
                 Sign Out
               </Button>

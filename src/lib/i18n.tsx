@@ -118,6 +118,8 @@ const translations = {
     // Billing
     billingSettings: "Billing Settings",
     billingDescription: "Set the monthly rate and payment method for this student",
+    currentPlan: "Current Plan",
+    perWeek: "per week",
     monthlyRate: "Monthly Rate (€)",
     paymentMethod: "Payment Method",
     mbway: "MB WAY",
@@ -744,6 +746,8 @@ const translations = {
     // Billing
     billingSettings: "Definições de Faturação",
     billingDescription: "Defina a mensalidade e o método de pagamento para este aluno",
+    currentPlan: "Plano Atual",
+    perWeek: "por semana",
     monthlyRate: "Mensalidade (€)",
     paymentMethod: "Método de Pagamento",
     mbway: "MB WAY",

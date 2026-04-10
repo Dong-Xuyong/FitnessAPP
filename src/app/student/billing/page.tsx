@@ -4,7 +4,7 @@ import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Banknote, Smartphone, Clock, CheckCircle2, AlertCircle } from "lucide-react";
+import { Banknote, Smartphone, Clock, CheckCircle2, AlertCircle, CalendarDays, Dumbbell } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useDoc, useCollection, useMemoFirebase } from "@/firebase";
 import { doc, collection } from "firebase/firestore";
@@ -45,8 +45,12 @@ export default function StudentBillingPage() {
 
   const billing = rosterData as any;
   const monthlyAmount = billing?.monthlyRate || 0;
+  const sessionsPerWeek = billing?.sessionsPerWeek as number | undefined;
+  const sessionDurationMin = billing?.sessionDurationMin as number | undefined;
   const paymentMethod = billing?.paymentMethod || "bank_transfer";
   const billingStatus = billing?.billingStatus || "inactive";
+
+  const hasPlanInfo = sessionsPerWeek || sessionDurationMin;
 
   const statusIcon = {
     active: <CheckCircle2 className="h-4 w-4 text-green-500" />,
@@ -67,6 +71,33 @@ export default function StudentBillingPage() {
           <h1 className="text-3xl font-bold font-headline">{t("billing")}</h1>
           <p className="text-muted-foreground">{t("viewPaymentStatus")}</p>
         </header>
+
+        {hasPlanInfo && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="pt-6 pb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 shrink-0">
+                  <Dumbbell className="h-6 w-6 text-primary" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase font-bold tracking-wide">{t("currentPlan") || "Plano Atual"}</p>
+                  <p className="text-xl font-bold">
+                    {sessionsPerWeek ? `${sessionsPerWeek}x ${t("perWeek") || "por semana"}` : ""}
+                    {sessionsPerWeek && sessionDurationMin ? " · " : ""}
+                    {sessionDurationMin ? `${sessionDurationMin} min` : ""}
+                  </p>
+                </div>
+                <div className="text-center sm:text-right shrink-0">
+                  <p className="text-xs text-muted-foreground uppercase font-bold tracking-wide">{t("monthlyRate")}</p>
+                  <p className="text-2xl font-bold text-primary">
+                    {monthlyAmount > 0 ? `€${monthlyAmount}` : t("notSet")}
+                    {monthlyAmount > 0 && <span className="text-sm font-normal text-muted-foreground">/mês</span>}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid md:grid-cols-3 gap-4">
           <Card>
