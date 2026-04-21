@@ -224,56 +224,12 @@ function WorkoutBuilderContent() {
               {isSavingLibrary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Library className="h-4 w-4" />}
               {editProgramId ? t("saveChangesBtn") : t("saveToLibrary")}
             </Button>
-            <Button
-              className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
-              onClick={handleAssignToStudent}
-              disabled={isAssigning || !selectedStudentId}
-            >
-              {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {t("assignProgram")}
-            </Button>
           </div>
         </header>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          {/* Assignment panel */}
-          <Card className="md:col-span-1">
-            <CardHeader>
-              <CardTitle>{t("assignment")}</CardTitle>
-              <CardDescription>{t("whoIsThisFor")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>{t("selectStudent")}</Label>
-                <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t("selectFromRoster")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {students?.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.firstName} {s.lastName}
-                      </SelectItem>
-                    ))}
-                    {(!students || students.length === 0) && (
-                      <SelectItem value="none" disabled>{t("noStudentsFound")}</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>{t("workoutDate")}</Label>
-                <Input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>{t("workoutTime")}</Label>
-                <Input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
-              </div>
-            </CardContent>
-          </Card>
-
+        <div className="grid gap-6">
           {/* Exercises panel */}
-          <div className="md:col-span-2 space-y-4">
+          <div className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>

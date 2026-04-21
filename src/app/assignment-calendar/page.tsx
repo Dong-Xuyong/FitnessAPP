@@ -187,6 +187,10 @@ export default function AssignmentCalendarPage() {
   const [assignWeekStudentId, setAssignWeekStudentId] = useState("");
   const [assignWeekProgramId, setAssignWeekProgramId] = useState("");
   const [isAssigningWeek, setIsAssigningWeek] = useState(false);
+  // Weekly program assignment from calendar
+  const [assignWeekMode, setAssignWeekMode] = useState<"single" | "weekly">("single");
+  const [assignWeeklyProgramId, setAssignWeeklyProgramId] = useState("");
+  const [isAssigningWeeklyFromCal, setIsAssigningWeeklyFromCal] = useState(false);
 
   // Student filter (0 = no filter, shows all; set = student-centric view)
   const [filterStudentId, setFilterStudentId] = useState("");
@@ -354,8 +358,11 @@ export default function AssignmentCalendarPage() {
   const selectedWeekLabel  = weekLabel(selectedWeekStart);
 
   const selectedWeekAssignments = useMemo(
-    () => weekAssignments.filter((a) => a.weekStart === selectedWeekStart),
-    [weekAssignments, selectedWeekStart]
+    () => weekAssignments.filter((a) =>
+      a.weekStart === selectedWeekStart &&
+      (!isFilterActive || a.studentId === filterStudentId)
+    ),
+    [weekAssignments, selectedWeekStart, isFilterActive, filterStudentId]
   );
 
   // Calendar modifier: all days belonging to weeks that have program assignments
@@ -721,6 +728,61 @@ export default function AssignmentCalendarPage() {
     }
   };
 
+  // ── Weekly program assignment from calendar ────────────────────────────────
+
+  const handleAssignWeeklyFromCal = async () => {
+    if (!db || !user || !assignWeekStudentId || !assignWeeklyProgramId) return;
+    const weeklyProg = programs.find((p) => p.id === assignWeeklyProgramId);
+    if (!weeklyProg) return;
+    const student = (rosterStudents || []).find((s: any) => s.id === assignWeekStudentId) as any;
+    const studentName = `${student?.firstName || ""} ${student?.lastName || ""}`.trim() || "Aluno";
+    const sourceProgramIds: string[] = weeklyProg.sourceProgramIds || [];
+    const durationWeeks: number = weeklyProg.durationWeeks || 1;
+    const baseProgs = programs.filter((p) => p.programType !== "weekly");
+    setIsAssigningWeeklyFromCal(true);
+    try {
+      const workoutPlansRef = collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans");
+      for (let w = 1; w <= durationWeeks; w++) {
+        const ws = w === 1 ? selectedWeekStart : (() => {
+          const d = new Date(selectedWeekStart + "T12:00:00");
+          d.setDate(d.getDate() + (w - 1) * 7);
+          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        })();
+        for (const progId of sourceProgramIds) {
+          const srcProg = baseProgs.find((p) => p.id === progId);
+          if (!srcProg) continue;
+          const exs = (srcProg.sessions || []).flatMap((s: any) =>
+            (s.exercises || []).map((e: any) => ({
+              exerciseName: e.exerciseName, sets: e.sets ?? 1, reps: e.reps ?? "",
+              restTimeSeconds: e.restTimeSeconds ?? 0, notes: e.notes,
+            }))
+          );
+          await setDoc(doc(collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans")), {
+            title: srcProg.name, studentId: assignWeekStudentId,
+            personalTrainerId: user.uid, weekStart: ws,
+            weekNumber: w, totalWeeks: durationWeeks,
+            weeklyProgramId: weeklyProg.id, weeklyProgramName: weeklyProg.name,
+            sourceTrainingProgramId: progId, exercises: exs,
+            createdAt: new Date().toISOString(),
+          });
+          // Week assignment record for each unique week
+          const waRef = doc(collection(db, "personalTrainers", user.uid, "weekProgramAssignments"));
+          const wa: WeekAssignment = { id: waRef.id, studentId: assignWeekStudentId, studentName, weekStart: ws, programId: progId, programTitle: srcProg.name };
+          await setDoc(waRef, wa);
+          setWeekAssignments((prev) => [...prev, wa]);
+        }
+      }
+      setAssignWeekOpen(false);
+      setAssignWeekStudentId("");
+      setAssignWeeklyProgramId("");
+      toast({ title: `${weeklyProg.name} atribuído (${durationWeeks} sem.)` });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message, variant: "destructive" });
+    } finally {
+      setIsAssigningWeeklyFromCal(false);
+    }
+  };
+
   // ── Week assignment handlers ───────────────────────────────────────────────
 
   const handleAddWeekAssignment = async () => {
@@ -799,15 +861,31 @@ export default function AssignmentCalendarPage() {
         </header>
 
         {/* ── Assign to week dialog ─────────────────────────────────────────── */}
-        <Dialog open={assignWeekOpen} onOpenChange={setAssignWeekOpen}>
+        <Dialog open={assignWeekOpen} onOpenChange={(o) => { setAssignWeekOpen(o); if (!o) setAssignWeekMode("single"); }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Dumbbell className="h-4 w-4 text-primary" /> Atribuir Programa à Semana
+                <Dumbbell className="h-4 w-4 text-primary" /> Atribuir Programa
               </DialogTitle>
               <DialogDescription>{selectedWeekLabel}</DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-2">
+
+              {/* Mode toggle */}
+              <div className="flex rounded-lg border overflow-hidden text-sm">
+                <button
+                  className={`flex-1 py-2 font-medium transition-colors ${assignWeekMode === "single" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50"}`}
+                  onClick={() => setAssignWeekMode("single")}>
+                  Treino único
+                </button>
+                <button
+                  className={`flex-1 py-2 font-medium transition-colors ${assignWeekMode === "weekly" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50"}`}
+                  onClick={() => setAssignWeekMode("weekly")}>
+                  Programa semanal
+                </button>
+              </div>
+
+              {/* Student selector (both modes) */}
               <div className="space-y-1.5">
                 <Label>Aluno</Label>
                 <Select value={assignWeekStudentId} onValueChange={setAssignWeekStudentId}>
@@ -823,28 +901,68 @@ export default function AssignmentCalendarPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label>Programa</Label>
-                <Select value={assignWeekProgramId} onValueChange={setAssignWeekProgramId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecionar programa..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {programs.filter((p) => p.programType !== "weekly").map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+
+              {assignWeekMode === "single" ? (
+                /* Single base program */
+                <div className="space-y-1.5">
+                  <Label>Treino</Label>
+                  <Select value={assignWeekProgramId} onValueChange={setAssignWeekProgramId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar treino..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {programs.filter((p) => p.programType !== "weekly").map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                /* Weekly cycle program */
+                <div className="space-y-1.5">
+                  <Label>Programa semanal</Label>
+                  <Select value={assignWeeklyProgramId} onValueChange={setAssignWeeklyProgramId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar programa semanal..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {programs.filter((p) => p.programType === "weekly").map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name} · {p.durationWeeks || "?"} sem.
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {assignWeeklyProgramId && (() => {
+                    const wp = programs.find((p) => p.id === assignWeeklyProgramId);
+                    const names: string[] = wp?.sourceProgramNames || [];
+                    return names.length > 0 ? (
+                      <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
+                        <p className="font-medium">Por semana:</p>
+                        {names.map((n: string, i: number) => <p key={i} className="ml-2">↳ {n}</p>)}
+                      </div>
+                    ) : null;
+                  })()}
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setAssignWeekOpen(false)}>Cancelar</Button>
-              <Button
-                onClick={handleAddWeekAssignment}
-                disabled={!assignWeekStudentId || !assignWeekProgramId || isAssigningWeek}>
-                {isAssigningWeek && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                Atribuir
-              </Button>
+              {assignWeekMode === "single" ? (
+                <Button
+                  onClick={handleAddWeekAssignment}
+                  disabled={!assignWeekStudentId || !assignWeekProgramId || isAssigningWeek}>
+                  {isAssigningWeek && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  Atribuir
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleAssignWeeklyFromCal}
+                  disabled={!assignWeekStudentId || !assignWeeklyProgramId || isAssigningWeeklyFromCal}>
+                  {isAssigningWeeklyFromCal && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  Atribuir ciclo
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -1452,7 +1570,7 @@ export default function AssignmentCalendarPage() {
                 <CardDescription>{selectedWeekLabel}</CardDescription>
               </div>
               <Button size="sm" className="gap-1.5 shrink-0"
-                onClick={() => { setAssignWeekStudentId(""); setAssignWeekProgramId(""); setAssignWeekOpen(true); }}>
+                onClick={() => { setAssignWeekStudentId(isFilterActive ? filterStudentId : ""); setAssignWeekProgramId(""); setAssignWeekOpen(true); }}>
                 <UserPlus className="h-4 w-4" /> Atribuir Programa
               </Button>
             </div>

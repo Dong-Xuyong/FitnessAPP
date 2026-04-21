@@ -1187,17 +1187,6 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 {t("addToMyRoster")}
               </Button>
             )}
-            {portalOnly ? (
-              <Button className="gap-2 flex-1 md:flex-none" disabled title={t("addThisStudentFirst")}>
-                <Dumbbell className="h-4 w-4" /> {t("buildProgram")}
-              </Button>
-            ) : (
-              <Button className="gap-2 flex-1 md:flex-none" asChild>
-                <Link href="/workouts/builder">
-                  <Dumbbell className="h-4 w-4" /> {t("buildProgram")}
-                </Link>
-              </Button>
-            )}
             <Button
               variant="destructive"
               className="gap-2 flex-1 md:flex-none"
@@ -1563,10 +1552,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 </CardContent>
               </Card>
 
-              <Card className="bg-primary/5 border-primary/20">
+              {/* Assigned Workouts card removed — managed via Assignment Calendar */}
+              {false && (
+                <Card className="bg-primary/5 border-primary/20">
                 <CardHeader>
                   <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
-                  <CardDescription>{sortedWorkoutPlans.length} active assignment{sortedWorkoutPlans.length !== 1 ? "s" : ""}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {sortedWorkoutPlans.length > 0 ? (
@@ -1576,22 +1566,6 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                           <Dumbbell className="h-4 w-4 text-primary shrink-0" />
                           <div className="min-w-0">
                             <span className="text-sm font-medium block truncate">{plan.title || 'Untitled'}</span>
-                            <p className="text-xs text-muted-foreground">
-                              {(plan.assignedAt || plan.createdAt)
-                                ? new Date(plan.assignedAt || plan.createdAt).toLocaleDateString()
-                                : "No date"}
-                            </p>
-                            {(plan.weekNumber || plan.scheduledDayOfWeek || typeof plan.weightIncreaseKg === 'number') && (
-                              <p className="text-xs text-muted-foreground">
-                                {plan.weekNumber ? `Week ${plan.weekNumber}${plan.totalWeeks ? ` of ${plan.totalWeeks}` : ""}` : ""}
-                                {plan.weekNumber && plan.scheduledDayOfWeek ? " • " : ""}
-                                {plan.scheduledDayOfWeek
-                                  ? plan.scheduledDayOfWeek.charAt(0).toUpperCase() + plan.scheduledDayOfWeek.slice(1)
-                                  : ""}
-                                {(plan.weekNumber || plan.scheduledDayOfWeek) && typeof plan.weightIncreaseKg === 'number' ? " • " : ""}
-                                {typeof plan.weightIncreaseKg === 'number' ? `+${plan.weightIncreaseKg} kg` : ""}
-                              </p>
-                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -1624,11 +1598,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                   ) : (
                     <p className="text-sm text-muted-foreground">{t("noWorkoutsAssigned")}</p>
                   )}
-                  <Button variant="link" className="w-full mt-2 text-xs" asChild>
-                    <Link href="/workouts/builder">{t("assignWorkout")}</Link>
-                  </Button>
                 </CardContent>
               </Card>
+              )}
             </div>
 
             {/* Edit Session Dialog */}
