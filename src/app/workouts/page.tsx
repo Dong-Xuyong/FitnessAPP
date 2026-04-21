@@ -20,9 +20,9 @@ import {
   totalExercisesInProgram,
   initializeDefaultPrograms,
 } from "@/lib/firestore/training-programs";
-import type { DayOfWeek, TrainingProgramDocument, WeeklyProgramItem } from "@/lib/types";
+import type { TrainingProgramDocument, WeeklyProgramItem } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
-import { useI18n, useDayLabel } from "@/lib/i18n";
+import { useI18n } from "@/lib/i18n";
 
 type TrainingProgramListItem = TrainingProgramDocument & {
   id: string;
@@ -37,90 +37,34 @@ type RosterStudent = {
   lastName?: string;
 };
 
-type ProgramCycleSetting = {
-  dayOfWeek: DayOfWeek;
-  weightIncreaseKg: string;
-  repIncrease: string;
-};
-
-const DAYS_OF_WEEK: DayOfWeek[] = [
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-  "sunday",
-];
-
-function formatDayOfWeek(day: DayOfWeek): string {
-  return day.charAt(0).toUpperCase() + day.slice(1);
+/** Returns YYYY-MM-DD for the Monday of the week containing `dateStr`. */
+function getWeekStart(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00");
+  const day = d.getDay();
+  const mon = new Date(d);
+  mon.setDate(d.getDate() - ((day + 6) % 7));
+  return `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, "0")}-${String(mon.getDate()).padStart(2, "0")}`;
 }
 
-function startOfMondayWeek(date: Date): Date {
-  const normalized = new Date(date);
-  normalized.setHours(0, 0, 0, 0);
-  const day = normalized.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  normalized.setDate(normalized.getDate() + diff);
-  return normalized;
+/** Returns YYYY-MM-DD for the Monday that is `offsetWeeks` weeks after `weekStartStr`. */
+function weekStartOffset(weekStartStr: string, offsetWeeks: number): string {
+  const d = new Date(weekStartStr + "T12:00:00");
+  d.setDate(d.getDate() + offsetWeeks * 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function getScheduledDate(startDate: string, weekNumber: number, dayOfWeek: DayOfWeek): string {
-  const weekStart = startOfMondayWeek(new Date(startDate));
-  const target = new Date(weekStart);
-  const dayIndex = DAYS_OF_WEEK.indexOf(dayOfWeek);
-  target.setDate(weekStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
-  return target.toISOString();
-}
-
-function increaseReps(reps: string, repIncrease: number): string {
-  if (!repIncrease) return reps;
-  const trimmed = reps.trim();
-  const rangeMatch = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
-  if (rangeMatch) {
-    const low = Number(rangeMatch[1]) + repIncrease;
-    const high = Number(rangeMatch[2]) + repIncrease;
-    return `${low}-${high}`;
-  }
-
-  const singleMatch = trimmed.match(/^\d+$/);
-  if (singleMatch) {
-    return String(Number(trimmed) + repIncrease);
-  }
-
-  return reps;
-}
-
-function flattenProgramExercises(program: TrainingProgramListItem, weightIncreaseKg: number, repIncrease: number) {
+/** Extract exercises from a source program as a flat list (no weight/rep adjustments — instructions live in notes). */
+function extractExercises(program: TrainingProgramListItem) {
   return (program.sessions || []).flatMap((session) =>
     (session.exercises || []).map((exercise) => ({
       exerciseName: exercise.exerciseName,
-      sets: exercise.setDetails?.length || exercise.sets,
-      reps: increaseReps(exercise.setDetails?.[0]?.reps || exercise.reps, repIncrease),
-      restTimeSeconds: exercise.setDetails?.[0]?.restTimeSeconds ?? exercise.restTimeSeconds,
-      ...(exercise.setDetails?.[0]?.targetWeightKg != null || exercise.targetWeightKg != null
-        ? {
-            targetWeightKg:
-              (exercise.setDetails?.[0]?.targetWeightKg ?? exercise.targetWeightKg ?? 0) + weightIncreaseKg,
-          }
-        : {}),
-      ...(exercise.setDetails?.length
-        ? {
-            setDetails: exercise.setDetails.map((set) => ({
-              ...set,
-              reps: increaseReps(set.reps, repIncrease),
-              ...(set.targetWeightKg != null
-                ? { targetWeightKg: set.targetWeightKg + weightIncreaseKg }
-                : {}),
-            })),
-          }
-        : {}),
-      ...(session.name && program.sessions.length > 1
-        ? { notes: `${session.name}: ${exercise.notes || ""}`.trim() }
-        : exercise.notes
-          ? { notes: exercise.notes }
-          : {}),
+      sets: exercise.sets ?? 1,
+      reps: exercise.reps ?? "",
+      restTimeSeconds: exercise.restTimeSeconds ?? 0,
+      notes: [
+        session.name && program.sessions.length > 1 ? session.name : "",
+        exercise.notes || "",
+      ].filter(Boolean).join(" — ") || undefined,
     }))
   );
 }
@@ -130,14 +74,12 @@ export default function WorkoutsPage() {
   const db = useFirestore();
   const { toast } = useToast();
   const { t } = useI18n();
-  const dayLabel = useDayLabel();
   const [isInitializing, setIsInitializing] = useState(false);
   const [isSavingWeekly, setIsSavingWeekly] = useState(false);
   const [isAssigningWeekly, setIsAssigningWeekly] = useState(false);
   const [weeklyProgramName, setWeeklyProgramName] = useState("");
   const [selectedProgramIds, setSelectedProgramIds] = useState<string[]>([]);
   const [cycleWeeks, setCycleWeeks] = useState("4");
-  const [programCycleSettings, setProgramCycleSettings] = useState<Record<string, ProgramCycleSetting>>({});
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [selectedWeeklyProgram, setSelectedWeeklyProgram] = useState<TrainingProgramListItem | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState("");
@@ -188,59 +130,16 @@ export default function WorkoutsPage() {
 
   const desiredWeeks = Math.max(1, Number(cycleWeeks) || 1);
 
-  const getProgramCycleSetting = (programId: string): ProgramCycleSetting => {
-    return programCycleSettings[programId] || {
-      dayOfWeek: "monday",
-      weightIncreaseKg: "0",
-      repIncrease: "0",
-    };
-  };
-
-  const weeklyPreview = useMemo<WeeklyProgramItem[]>(() => {
-    if (selectedProgramsForWeekly.length === 0) return [];
-
-    return Array.from({ length: desiredWeeks }, (_, weekIndex) =>
-      selectedProgramsForWeekly.map((sourceProgram) => {
-        const cycleSetting = getProgramCycleSetting(sourceProgram.id);
-        const baseWeightIncrease = Number(cycleSetting.weightIncreaseKg);
-        const baseRepIncrease = Number(cycleSetting.repIncrease);
-        return {
-          week: weekIndex + 1,
-          trainingProgramId: sourceProgram.id,
-          trainingProgramName: sourceProgram.name,
-          dayOfWeek: cycleSetting.dayOfWeek,
-          weightIncreaseKg: Number.isFinite(baseWeightIncrease)
-            ? baseWeightIncrease * (weekIndex + 1)
-            : 0,
-          repIncrease: Number.isFinite(baseRepIncrease)
-            ? Math.max(0, Math.round(baseRepIncrease * (weekIndex + 1)))
-            : 0,
-        };
-      })
-    ).flat();
-  }, [desiredWeeks, selectedProgramsForWeekly, programCycleSettings]);
+  // All selected programs are assigned to EVERY week (not one per week).
+  // weeklyPreview is the list of programs that each week will contain.
+  const weeklyPreview = selectedProgramsForWeekly;
 
   const toggleProgramInWeeklySelection = (programId: string, checked: boolean) => {
-    setSelectedProgramIds((prev) => {
-      if (checked) {
-        if (prev.includes(programId)) return prev;
-        setProgramCycleSettings((current) => ({
-          ...current,
-          [programId]: current[programId] || {
-            dayOfWeek: "monday",
-            weightIncreaseKg: "0",
-            repIncrease: "0",
-          },
-        }));
-        return [...prev, programId];
-      }
-      setProgramCycleSettings((current) => {
-        const next = { ...current };
-        delete next[programId];
-        return next;
-      });
-      return prev.filter((id) => id !== programId);
-    });
+    setSelectedProgramIds((prev) =>
+      checked
+        ? prev.includes(programId) ? prev : [...prev, programId]
+        : prev.filter((id) => id !== programId)
+    );
   };
 
   const handleCreateWeeklyProgram = async () => {
@@ -262,27 +161,27 @@ export default function WorkoutsPage() {
       await addDocumentNonBlocking(trainingProgramsRef(db, user.uid), {
         trainerId: user.uid,
         name,
-        description: `Program-based day, kg, and rep settings across ${desiredWeeks} weeks.`,
+        description: `${selectedProgramsForWeekly.map((p) => p.name).join(" + ")} — ${desiredWeeks} semana(s).`,
         category: "Weekly cycle",
         level: "all",
         durationWeeks: desiredWeeks,
         sessions: [],
         programType: "weekly",
-        sourceProgramIds: selectedProgramsForWeekly.map((program) => program.id),
-        weeklyPlan: weeklyPreview,
+        // All programs run together in the same week (not a rotation)
+        sourceProgramIds: selectedProgramsForWeekly.map((p) => p.id),
+        sourceProgramNames: selectedProgramsForWeekly.map((p) => p.name),
         createdAt: now,
         updatedAt: now,
       });
 
       toast({
         title: t("weeklyProgramCreated"),
-        description: `${name} is now available in Weekly Programs.`,
+        description: `${name} disponível nos Programas Semanais.`,
       });
 
       setWeeklyProgramName("");
       setSelectedProgramIds([]);
       setCycleWeeks("4");
-      setProgramCycleSettings({});
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -361,50 +260,71 @@ export default function WorkoutsPage() {
       // Global doc may not exist yet (student hasn't signed up) — not a blocking error.
     }
 
-    const weeklyPlan = selectedWeeklyProgram.weeklyPlan || [];
-    const cycleWeekCount = selectedWeeklyProgram.durationWeeks || (weeklyPlan.length ? Math.max(...weeklyPlan.map((w) => w.week)) : 0);
-    if (weeklyPlan.length === 0) {
-      toast({
-        variant: "destructive",
-        title: t("nothingToAssign"),
-        description: t("noCycleWeeks"),
-      });
+    // Support both new format (sourceProgramIds) and old rotation format (weeklyPlan)
+    const sourceProgramIds: string[] = selectedWeeklyProgram.sourceProgramIds || [];
+    const cycleWeekCount: number = selectedWeeklyProgram.durationWeeks || 1;
+
+    // Fall back to old weeklyPlan rotation if no sourceProgramIds stored
+    const legacyPlan: WeeklyProgramItem[] = selectedWeeklyProgram.weeklyPlan || [];
+    const useNewFormat = sourceProgramIds.length > 0;
+
+    if (!useNewFormat && legacyPlan.length === 0) {
+      toast({ variant: "destructive", title: t("nothingToAssign"), description: t("noCycleWeeks") });
       return;
     }
 
     setIsAssigningWeekly(true);
     try {
       const workoutPlansRef = collection(db, "personalTrainers", user.uid, "students", studentAuthUid, "workoutPlans");
+      const startWeekStart = getWeekStart(assignmentStartDate);
 
-      for (const week of weeklyPlan) {
-        const sourceProgram = basePrograms.find((program) => program.id === week.trainingProgramId);
-        if (!sourceProgram) {
-          throw new Error(`Source program for week ${week.week} was not found.`);
+      if (useNewFormat) {
+        // New model: all programs go into the same week, repeated for cycleWeekCount weeks
+        for (let w = 1; w <= cycleWeekCount; w++) {
+          const weekStart = weekStartOffset(startWeekStart, w - 1);
+          for (const progId of sourceProgramIds) {
+            const sourceProgram = basePrograms.find((p) => p.id === progId);
+            if (!sourceProgram) continue;
+            await addDocumentNonBlocking(workoutPlansRef, {
+              title: sourceProgram.name,
+              studentId: studentAuthUid,
+              personalTrainerId: user.uid,
+              weekStart,
+              weekNumber: w,
+              totalWeeks: cycleWeekCount,
+              weeklyProgramId: selectedWeeklyProgram.id,
+              weeklyProgramName: selectedWeeklyProgram.name,
+              sourceTrainingProgramId: sourceProgram.id,
+              exercises: extractExercises(sourceProgram),
+              createdAt: new Date().toISOString(),
+            });
+          }
         }
-
-        await addDocumentNonBlocking(workoutPlansRef, {
-          title: `${selectedWeeklyProgram.name} - ${sourceProgram.name}`,
-          studentId: studentAuthUid,
-          personalTrainerId: user.uid,
-          createdAt: new Date().toISOString(),
-          assignedAt: getScheduledDate(assignmentStartDate, week.week, week.dayOfWeek),
-          scheduledDayOfWeek: week.dayOfWeek,
-          scheduledStartDate: assignmentStartDate,
-          weekNumber: week.week,
-          totalWeeks: cycleWeekCount,
-          weeklyProgramId: selectedWeeklyProgram.id,
-          weeklyProgramName: selectedWeeklyProgram.name,
-          sourceTrainingProgramId: sourceProgram.id,
-          sourceTrainingProgramName: sourceProgram.name,
-          weightIncreaseKg: week.weightIncreaseKg,
-            repIncrease: week.repIncrease,
-            exercises: flattenProgramExercises(sourceProgram, week.weightIncreaseKg, week.repIncrease),
-        });
+      } else {
+        // Legacy rotation format
+        for (const week of legacyPlan) {
+          const sourceProgram = basePrograms.find((p) => p.id === week.trainingProgramId);
+          if (!sourceProgram) continue;
+          const weekStart = weekStartOffset(startWeekStart, week.week - 1);
+          await addDocumentNonBlocking(workoutPlansRef, {
+            title: `${sourceProgram.name} — Semana ${week.week}`,
+            studentId: studentAuthUid,
+            personalTrainerId: user.uid,
+            weekStart,
+            weekNumber: week.week,
+            totalWeeks: cycleWeekCount,
+            weeklyProgramId: selectedWeeklyProgram.id,
+            weeklyProgramName: selectedWeeklyProgram.name,
+            sourceTrainingProgramId: sourceProgram.id,
+            exercises: extractExercises(sourceProgram),
+            createdAt: new Date().toISOString(),
+          });
+        }
       }
 
       toast({
         title: t("weeklyProgramAssigned"),
-        description: `${selectedWeeklyProgram.name} ${t("scheduledStartingDesc")} ${new Date(assignmentStartDate).toLocaleDateString()}.`,
+        description: `${selectedWeeklyProgram.name} atribuído a partir de ${new Date(startWeekStart + "T12:00:00").toLocaleDateString()}.`,
       });
 
       setIsAssignDialogOpen(false);
@@ -448,39 +368,47 @@ export default function WorkoutsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
+              {/* Name + cycle length */}
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>{t("weeklyProgramName")}</Label>
                   <Input
                     value={weeklyProgramName}
-                    onChange={(event) => setWeeklyProgramName(event.target.value)}
-                    placeholder={t("exampleWeeklyCycle")}
+                    onChange={(e) => setWeeklyProgramName(e.target.value)}
+                    placeholder="Ex: Ciclo A/B/C · 6 semanas"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>{t("numberOfWeeks")}</Label>
+                  <Label className="leading-tight">
+                    {t("numberOfWeeks")}
+                    <span className="block text-xs text-muted-foreground font-normal">
+                      (ajuste para repetir o ciclo)
+                    </span>
+                  </Label>
                   <Input
-                    type="number"
-                    min="1"
+                    type="number" min="1" max="52"
                     value={cycleWeeks}
-                    onChange={(event) => setCycleWeeks(event.target.value)}
+                    onChange={(e) => setCycleWeeks(e.target.value)}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>{t("programRotation")}</Label>
-                  <p className="text-sm text-muted-foreground pt-2">
-                    {t("programRotationDesc")}
-                  </p>
                 </div>
               </div>
 
+              {/* Program selection */}
               <div className="space-y-2">
-                <p className="text-sm font-medium">{t("selectProgramsToRotate")}</p>
-                <div className="grid md:grid-cols-2 gap-3">
+                <p className="text-sm font-medium">Programas em rotação</p>
+                <p className="text-xs text-muted-foreground">
+                  Seleciona os programas na ordem desejada. Cada programa ocupa uma semana diferente.
+                  O número de semanas ajusta-se automaticamente.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-2">
                   {basePrograms.map((program) => (
                     <label
                       key={`weekly-source-${program.id}`}
-                      className="flex items-center gap-3 rounded-md border p-3 cursor-pointer"
+                      className={`flex items-center gap-3 rounded-md border p-3 cursor-pointer transition-colors ${
+                        selectedProgramIds.includes(program.id)
+                          ? "border-primary/40 bg-primary/5"
+                          : "hover:bg-muted/30"
+                      }`}
                     >
                       <Checkbox
                         checked={selectedProgramIds.includes(program.id)}
@@ -492,92 +420,29 @@ export default function WorkoutsPage() {
                 </div>
               </div>
 
-              {selectedProgramsForWeekly.length > 0 && (
-                <div className="space-y-3 rounded-lg border p-4 bg-background">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">{t("programSettings")}</p>
-                    <Badge variant="outline">{t("sharedAcrossWeeks")}</Badge>
+              {/* Weekly schedule preview */}
+              {weeklyPreview.length > 0 && (
+                <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Conteúdo de cada semana
+                  </p>
+                  <div className="space-y-1.5">
+                    {weeklyPreview.map((prog, idx) => (
+                      <div key={prog.id}
+                        className="flex items-center gap-2 text-sm rounded-md bg-background border px-3 py-2">
+                        <span className="font-bold text-primary tabular-nums min-w-[24px]">
+                          {idx + 1}.
+                        </span>
+                        <span className="truncate">{prog.name}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="space-y-3">
-                    {selectedProgramsForWeekly.map((program) => {
-                      const setting = getProgramCycleSetting(program.id);
-                      return (
-                        <div key={`program-setting-${program.id}`} className="grid md:grid-cols-[1fr_180px_140px_120px] gap-3 items-end rounded-md border p-3">
-                          <div>
-                            <p className="text-sm font-medium">{program.name}</p>
-                            <p className="text-xs text-muted-foreground">{t("settingsApplyEveryTime")}</p>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>{t("dayOfWorkout")}</Label>
-                            <Select
-                              value={setting.dayOfWeek}
-                              onValueChange={(value) =>
-                                setProgramCycleSettings((current) => ({
-                                  ...current,
-                                  [program.id]: {
-                                    ...getProgramCycleSetting(program.id),
-                                    dayOfWeek: value as DayOfWeek,
-                                  },
-                                }))
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder={t("chooseDay")} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {DAYS_OF_WEEK.map((day) => (
-                                  <SelectItem key={`${program.id}-${day}`} value={day}>
-                                    {dayLabel(day)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>{t("kgIncrease")}</Label>
-                            <Input
-                              type="number"
-                              step="0.5"
-                              value={setting.weightIncreaseKg}
-                              onChange={(event) =>
-                                setProgramCycleSettings((current) => ({
-                                  ...current,
-                                  [program.id]: {
-                                    ...getProgramCycleSetting(program.id),
-                                    weightIncreaseKg: event.target.value,
-                                  },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>{t("repIncrease")}</Label>
-                            <Input
-                              type="number"
-                              step="1"
-                              min="0"
-                              value={setting.repIncrease}
-                              onChange={(event) =>
-                                setProgramCycleSettings((current) => ({
-                                  ...current,
-                                  [program.id]: {
-                                    ...getProgramCycleSetting(program.id),
-                                    repIncrease: event.target.value,
-                                  },
-                                }))
-                              }
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Estes {weeklyPreview.length} treino(s) repetem-se durante{" "}
+                    <span className="font-semibold text-foreground">{desiredWeeks} semana(s)</span>.
+                  </p>
                 </div>
               )}
-
-              <div className="text-sm text-muted-foreground">
-                {selectedProgramIds.length} {t("selected")}
-              </div>
 
               <Button
                 className="gap-2"
@@ -660,8 +525,10 @@ export default function WorkoutsPage() {
             <h3 className="text-lg font-semibold">{t("savedWeeklyPrograms")}</h3>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {weeklyPrograms.map((program) => {
-                const plan = program.weeklyPlan || [];
-                const weeks = plan.length || program.durationWeeks || 0;
+                const weeks = program.durationWeeks || (program.weeklyPlan?.length) || 0;
+                // New format: sourceProgramNames; legacy: derive from weeklyPlan
+                const programNames: string[] = program.sourceProgramNames ||
+                  [...new Map((program.weeklyPlan || []).map((i: any) => [i.trainingProgramId, i.trainingProgramName])).values()];
 
                 return (
                   <Card key={program.id} className="flex flex-col border-primary/20">
@@ -670,7 +537,7 @@ export default function WorkoutsPage() {
                         <Badge variant="outline" className="text-primary border-primary/40">
                           {t("weeklyCycle")}
                         </Badge>
-                        <Badge>{weeks} weeks</Badge>
+                        <Badge>{weeks} sem.</Badge>
                       </div>
                       <CardTitle className="text-xl">{program.name}</CardTitle>
                       {program.description && (
@@ -678,21 +545,15 @@ export default function WorkoutsPage() {
                       )}
                     </CardHeader>
                     <CardContent className="flex-1 space-y-2">
-                      {Array.from(
-                        new Map(plan.map((week) => [week.trainingProgramId, week])).values()
-                      ).slice(0, 4).map((programWeek) => (
-                        <div key={`${program.id}-program-${programWeek.trainingProgramId}`} className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">{programWeek.trainingProgramName}</span>
-                          <span className="font-medium text-primary">
-                            {dayLabel(programWeek.dayOfWeek)} • +{programWeek.weightIncreaseKg} kg • +{programWeek.repIncrease} reps
-                          </span>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Treinos por semana
+                      </p>
+                      {programNames.map((name: string, idx: number) => (
+                        <div key={idx} className="flex items-center gap-2 text-sm">
+                          <span className="font-bold text-primary tabular-nums min-w-[20px]">{idx + 1}.</span>
+                          <span className="text-muted-foreground truncate">{name}</span>
                         </div>
                       ))}
-                      {Array.from(new Set(plan.map((week) => week.trainingProgramId))).length > 4 && (
-                        <p className="text-xs text-muted-foreground">
-                          +{Array.from(new Set(plan.map((week) => week.trainingProgramId))).length - 4} more programs
-                        </p>
-                      )}
                     </CardContent>
                     <CardFooter className="pt-0 flex gap-2 justify-end">
                       <Button className="gap-2" variant="secondary" onClick={() => openAssignDialog(program)}>
@@ -813,42 +674,58 @@ export default function WorkoutsPage() {
                   <SelectContent>
                     {students?.filter((s: any) => !s.blocked).map((student) => (
                       <SelectItem key={student.id} value={student.id}>
-                        {[student.firstName, student.lastName].filter(Boolean).join(" ") || student.name || student.email || "Unnamed"}
+                        {[student.firstName, student.lastName].filter(Boolean).join(" ") || student.name || student.email || "Sem nome"}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>{t("startDate")}</Label>
+              <div className="space-y-1.5">
+                <Label>Semana de início</Label>
+                <p className="text-xs text-muted-foreground">
+                  Seleciona qualquer dia — o ciclo começa na segunda-feira dessa semana.
+                </p>
                 <Input
                   type="date"
                   value={assignmentStartDate}
-                  onChange={(event) => setAssignmentStartDate(event.target.value)}
+                  onChange={(e) => setAssignmentStartDate(e.target.value)}
                 />
               </div>
 
-              {selectedWeeklyProgram?.weeklyPlan?.length ? (
-                <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{t("cycleLength")}</span>
-                    <Badge variant="outline">{selectedWeeklyProgram.weeklyPlan.length} weeks</Badge>
+              {selectedWeeklyProgram && (() => {
+                const totalWks = selectedWeeklyProgram.durationWeeks || 1;
+                const progNames: string[] = selectedWeeklyProgram.sourceProgramNames ||
+                  [...new Map((selectedWeeklyProgram.weeklyPlan || []).map((i: any) => [i.trainingProgramId, i.trainingProgramName])).values()];
+                const startWS = assignmentStartDate ? getWeekStart(assignmentStartDate) : null;
+                return (
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-2 max-h-64 overflow-y-auto">
+                  <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    <span>Pré-visualização</span>
+                    <Badge variant="outline">{totalWks} semanas · {progNames.length} treino(s)/sem.</Badge>
                   </div>
-                  {Array.from(
-                    new Map(
-                      selectedWeeklyProgram.weeklyPlan.map((week) => [week.trainingProgramId, week])
-                    ).values()
-                  ).map((programWeek) => (
-                    <div key={`assign-preview-program-${programWeek.trainingProgramId}`} className="flex items-center justify-between text-sm">
-                      <span>{programWeek.trainingProgramName}</span>
-                      <span className="text-muted-foreground">
-                        +{programWeek.weightIncreaseKg} kg • +{programWeek.repIncrease} reps
-                      </span>
-                    </div>
-                  ))}
+                  {Array.from({ length: totalWks }, (_, i) => {
+                    const ws = startWS ? weekStartOffset(startWS, i) : null;
+                    const wsLabel = ws
+                      ? new Date(ws + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })
+                      : null;
+                    return (
+                      <div key={i} className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-primary tabular-nums text-sm shrink-0">Sem. {i + 1}</span>
+                          {wsLabel && <span className="text-xs text-muted-foreground">{wsLabel}</span>}
+                        </div>
+                        <div className="ml-4 space-y-0.5">
+                          {progNames.map((name: string, pi: number) => (
+                            <p key={pi} className="text-xs text-muted-foreground truncate">↳ {name}</p>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ) : null}
+                );
+              })()}
             </div>
 
             <DialogFooter>

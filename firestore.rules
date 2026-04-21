@@ -129,6 +129,21 @@ service cloud.firestore {
           allow create, update, delete: if isOwner(personalTrainerId);
         }
       }
+
+      // Session slots: coach has full control; signed-in students can read and
+      // update slots (to add/remove themselves). Delete is coach-only.
+      match /sessionSlots/{slotId} {
+        allow get, list: if isSignedIn();
+        allow create, update: if isOwner(personalTrainerId) || isSignedIn();
+        allow delete: if isOwner(personalTrainerId);
+      }
+
+      // Weekly program assignments (denormalized coach-level records).
+      // Students only need to read their own workoutPlans subcollection (already permitted above).
+      match /weekProgramAssignments/{assignmentId} {
+        allow get, list: if isOwner(personalTrainerId);
+        allow create, update, delete: if isOwner(personalTrainerId);
+      }
     }
   }
 }

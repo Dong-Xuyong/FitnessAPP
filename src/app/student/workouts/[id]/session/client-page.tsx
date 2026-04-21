@@ -8,25 +8,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { 
-  Dumbbell, 
-  Timer as TimerIcon, 
-  ChevronRight, 
-  ChevronLeft, 
-  CheckCircle2, 
-  Play, 
-  Pause, 
-  RotateCcw,
-  X,
+import {
+  Dumbbell,
+  ChevronRight,
+  ChevronLeft,
+  CheckCircle2,
   Save,
-  Loader2
+  Loader2,
+  X,
+  StickyNote,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
 import { doc, getDoc, collection, addDoc } from "firebase/firestore";
-import type { DayOfWeek } from "@/lib/types";
 
 interface SetLog {
   weight: string;
@@ -40,12 +35,6 @@ interface WorkoutExercise {
   reps: string;
   restTimeSeconds: number;
   targetWeightKg?: number;
-  setDetails?: Array<{
-    setNumber: number;
-    reps: string;
-    targetWeightKg?: number;
-    restTimeSeconds: number;
-  }>;
   notes?: string;
 }
 
@@ -55,78 +44,41 @@ interface WorkoutPlan {
   personalTrainerId: string;
   assignedAt?: string;
   createdAt?: string;
-  scheduledDayOfWeek?: DayOfWeek;
 }
 
-function getTodayDayOfWeek(): DayOfWeek {
-  const days: DayOfWeek[] = [
-    "sunday",
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-  ];
-  return days[new Date().getDay()];
-}
-
-function isSameLocalDate(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-function isWorkoutAvailableToday(workout: WorkoutPlan): boolean {
-  // Check if this workout is scheduled for today's day of week
-  if (workout.scheduledDayOfWeek !== getTodayDayOfWeek()) return false;
-  
-  // Also verify the assigned date is today, not a future occurrence of the same day
-  const assignedRaw = workout.assignedAt || workout.createdAt;
-  if (!assignedRaw) return false;
-  
-  const assignedDate = new Date(assignedRaw);
-  if (Number.isNaN(assignedDate.getTime())) return false;
-  
-  return isSameLocalDate(assignedDate, new Date());
-}
-
-function daysUntilScheduledDay(scheduledDayOfWeek: DayOfWeek | undefined, assignedRaw: string | undefined): number {
-  if (!scheduledDayOfWeek || !assignedRaw) return -1;
-  
-  const assignedDate = new Date(assignedRaw);
-  if (Number.isNaN(assignedDate.getTime())) return -1;
-  
+function daysUntilDate(raw: string | undefined): number {
+  if (!raw) return 0;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return 0;
   const today = new Date();
-  const diffMs = assignedDate.getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  
-  // Return the difference, but minimum of 1 day for future dates
-  return diffDays > 0 ? diffDays : (diffDays === 0 ? 0 : -1);
+  const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const planMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((planMs - todayMs) / 86_400_000);
+}
+
+function isAvailableToday(workout: WorkoutPlan): boolean {
+  const raw = workout.assignedAt || workout.createdAt;
+  if (!raw) return true;
+  return daysUntilDate(raw) === 0;
 }
 
 export default function WorkoutSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = use(params);
   const workoutId = unwrappedParams.id;
-  const router = useRouter();
   const { user } = useUser();
   const db = useFirestore();
   const { t } = useI18n();
-  
+
   const [workout, setWorkout] = useState<WorkoutPlan | null>(null);
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(true);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
-  const [sessionLogs, setSessionLogs] = useState<Record<number, SetLog[]>>({});
-  const [timerSeconds, setTimerSeconds] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  // One SetLog per exercise (not per set)
+  const [logs, setLogs] = useState<Record<number, SetLog>>({});
   const [isFinished, setIsFinished] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAllowedToday, setIsAllowedToday] = useState(false);
   const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
 
-  // Fetch real workout plan from Firestore
   useEffect(() => {
     if (!db || !user?.uid || !workoutId) return;
     let cancelled = false;
@@ -137,8 +89,8 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
         if (!studentDoc.exists()) return;
         const trainerId = studentDoc.data()?.trainerId;
         if (!trainerId) return;
-        // Use rosterDocId if set (handles path mismatch when roster doc ID ≠ Auth UID)
-        const resolvedStudentId = (studentDoc.data()?.rosterDocId as string | undefined) || user!.uid;
+        const resolvedStudentId =
+          (studentDoc.data()?.rosterDocId as string | undefined) || user!.uid;
         if (!cancelled) setEffectiveStudentId(resolvedStudentId);
         const planDoc = await getDoc(
           doc(db!, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans", workoutId)
@@ -146,7 +98,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
         if (planDoc.exists() && !cancelled) {
           const workoutData = { ...planDoc.data(), personalTrainerId: trainerId } as WorkoutPlan;
           setWorkout(workoutData);
-          setIsAllowedToday(isWorkoutAvailableToday(workoutData));
+          setIsAllowedToday(isAvailableToday(workoutData));
         }
       } catch (e) {
         console.error("Error fetching workout:", e);
@@ -163,84 +115,45 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   const totalExercises = exercises.length;
   const progress = totalExercises > 0 ? ((currentExerciseIndex + 1) / totalExercises) * 100 : 0;
 
-  // Initialize logs for current exercise
-  useEffect(() => {
-    if (!currentExercise || sessionLogs[currentExerciseIndex]) return;
-    const templates = currentExercise.setDetails?.length
-      ? currentExercise.setDetails
-      : Array.from({ length: currentExercise.sets }, (_, index) => ({
-          setNumber: index + 1,
-          reps: currentExercise.reps,
-          targetWeightKg: currentExercise.targetWeightKg,
-          restTimeSeconds: currentExercise.restTimeSeconds,
-        }));
-    const initialSets = templates.map((set) => ({
-      weight: set.targetWeightKg != null ? String(set.targetWeightKg) : "",
-      reps: set.reps || "",
-      completed: false,
+  const currentLog = logs[currentExerciseIndex] ?? { weight: "", reps: "", completed: false };
+
+  const updateLog = (field: keyof SetLog, value: string | boolean) =>
+    setLogs((prev) => ({
+      ...prev,
+      [currentExerciseIndex]: { ...currentLog, [field]: value },
     }));
-    setSessionLogs(prev => ({ ...prev, [currentExerciseIndex]: initialSets }));
-  }, [currentExerciseIndex, currentExercise, sessionLogs]);
-
-  // Timer logic
-  useEffect(() => {
-    let interval: any;
-    if (isTimerRunning && timerSeconds > 0) {
-      interval = setInterval(() => {
-        setTimerSeconds(s => s - 1);
-      }, 1000);
-    } else if (timerSeconds === 0) {
-      setIsTimerRunning(false);
-    }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, timerSeconds]);
-
-  const handleUpdateLog = (setIndex: number, field: keyof SetLog, value: any) => {
-    const currentSets = [...(sessionLogs[currentExerciseIndex] || [])];
-    currentSets[setIndex] = { ...currentSets[setIndex], [field]: value };
-    setSessionLogs(prev => ({ ...prev, [currentExerciseIndex]: currentSets }));
-    
-    if (field === 'completed' && value === true && currentExercise) {
-      const nextRest =
-        currentExercise.setDetails?.[setIndex]?.restTimeSeconds ?? currentExercise.restTimeSeconds;
-      setTimerSeconds(nextRest);
-      setIsTimerRunning(true);
-    }
-  };
 
   const handleFinishWorkout = async () => {
-    if (!db || !user || !workout) {
-      setIsFinished(true);
-      return;
-    }
+    if (!db || !user || !workout) { setIsFinished(true); return; }
     setIsSaving(true);
     try {
       const trainerId = workout.personalTrainerId;
       const resolvedStudentId = effectiveStudentId || user.uid;
-      const sessionRef = collection(
-        db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions"
+      await addDoc(
+        collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions"),
+        {
+          workoutPlanId: workoutId,
+          workoutTitle: workout.title,
+          studentId: user.uid,
+          personalTrainerId: trainerId,
+          date: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          exercises: exercises.map((ex, i) => {
+            const log = logs[i] ?? { weight: "", reps: "", completed: false };
+            return {
+              exerciseName: ex.exerciseName,
+              sets: [
+                {
+                  setNumber: 1,
+                  weight: Number(log.weight) || 0,
+                  reps: Number(log.reps) || 0,
+                  completed: log.completed,
+                },
+              ],
+            };
+          }),
+        }
       );
-      const exerciseResults = exercises.map((ex, i) => {
-        const sets = sessionLogs[i] || [];
-        return {
-          exerciseName: ex.exerciseName,
-          sets: sets.map((s, setIdx) => ({
-            setNumber: setIdx + 1,
-            weight: Number(s.weight) || 0,
-            reps: Number(s.reps) || 0,
-            completed: s.completed,
-          })),
-        };
-      });
-      await addDoc(sessionRef, {
-        workoutPlanId: workoutId,
-        workoutTitle: workout.title,
-        studentId: user.uid,
-        personalTrainerId: trainerId,
-        date: new Date().toISOString(),
-        exercises: exerciseResults,
-        completedAt: new Date().toISOString(),
-      });
     } catch (e) {
       console.error("Error saving session:", e);
     } finally {
@@ -251,17 +164,14 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
 
   const handleNext = () => {
     if (currentExerciseIndex < totalExercises - 1) {
-      setCurrentExerciseIndex(prev => prev + 1);
-      setIsTimerRunning(false);
+      setCurrentExerciseIndex((p) => p + 1);
     } else {
       handleFinishWorkout();
     }
   };
 
   const handlePrevious = () => {
-    if (currentExerciseIndex > 0) {
-      setCurrentExerciseIndex(prev => prev - 1);
-    }
+    if (currentExerciseIndex > 0) setCurrentExerciseIndex((p) => p - 1);
   };
 
   if (isLoadingWorkout) {
@@ -287,6 +197,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   }
 
   if (!isAllowedToday) {
+    const days = daysUntilDate(workout.assignedAt || workout.createdAt);
     return (
       <StudentNavigation>
         <div className="max-w-md mx-auto py-12 text-center space-y-6">
@@ -295,7 +206,9 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
           </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold font-headline">{t("workoutNotAvailableToday")}</h1>
-            <p className="text-muted-foreground">{t("availableInDaysMsg").replace("{n}", String(daysUntilScheduledDay(workout?.scheduledDayOfWeek, workout?.assignedAt || workout?.createdAt)))}</p>
+            <p className="text-muted-foreground">
+              {t("availableInDays").replace("{n}", String(days > 0 ? days : 0))}
+            </p>
           </div>
           <Button className="w-full" asChild>
             <Link href="/student/workouts">{t("backToWorkouts")}</Link>
@@ -324,8 +237,8 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
                   <p className="text-xl font-bold">{totalExercises}</p>
                 </div>
                 <div className="text-center p-3 rounded-lg bg-secondary/30">
-                  <p className="text-xs text-muted-foreground uppercase font-bold">{t("totalSets")}</p>
-                  <p className="text-xl font-bold">{exercises.reduce((acc, curr) => acc + curr.sets, 0)}</p>
+                  <p className="text-xs text-muted-foreground uppercase font-bold">{t("setsLabel")}</p>
+                  <p className="text-xl font-bold">{totalExercises}</p>
                 </div>
               </div>
             </CardContent>
@@ -341,126 +254,180 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   return (
     <StudentNavigation>
       <div className="max-w-2xl mx-auto space-y-6">
+        {/* Header */}
         <header className="flex items-center justify-between">
           <div className="space-y-1">
-            <Link href="/student/workouts" className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1">
+            <Link
+              href="/student/workouts"
+              className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1"
+            >
               <X className="h-3 w-3" /> {t("endSession")}
             </Link>
             <h1 className="text-2xl font-bold">{workout.title}</h1>
           </div>
           <div className="text-right">
             <p className="text-xs font-bold text-muted-foreground uppercase">{t("progress")}</p>
-            <p className="text-sm font-medium">{currentExerciseIndex + 1} of {totalExercises}</p>
+            <p className="text-sm font-medium">
+              {currentExerciseIndex + 1} / {totalExercises}
+            </p>
           </div>
         </header>
 
         <Progress value={progress} className="h-2 bg-secondary" />
 
-        {/* Timer UI */}
-        <Card className={cn("border-2 transition-colors", isTimerRunning ? "border-primary shadow-lg" : "border-border")}>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <TimerIcon className={cn("h-6 w-6", isTimerRunning ? "text-primary animate-pulse" : "text-muted-foreground")} />
-              <div>
-                <p className="text-xs font-bold text-muted-foreground uppercase">{t("restTimer")}</p>
-                <p className="text-2xl font-mono font-bold">
-                  {Math.floor(timerSeconds / 60)}:{(timerSeconds % 60).toString().padStart(2, '0')}
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button size="icon" variant="outline" onClick={() => setIsTimerRunning(!isTimerRunning)}>
-                {isTimerRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              </Button>
-              <Button size="icon" variant="outline" onClick={() => { setTimerSeconds(currentExercise.restTimeSeconds); setIsTimerRunning(false); }}>
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Current Exercise */}
+        {/* Current exercise card */}
         <Card>
           <CardHeader>
-            <div className="flex justify-between items-start">
-              <div>
-                <CardTitle className="text-xl">{currentExercise.exerciseName}</CardTitle>
-                <CardDescription>{currentExercise.notes}</CardDescription>
+            <div className="flex justify-between items-start gap-4">
+              <div className="space-y-1">
+                <Badge variant="outline" className="text-xs mb-1">
+                  {t("exercises")} {currentExerciseIndex + 1}/{totalExercises}
+                </Badge>
+                <CardTitle className="text-2xl">{currentExercise.exerciseName}</CardTitle>
               </div>
-              <Badge variant="secondary">{currentExercise.sets} {t("setsLabel")}</Badge>
             </div>
+
+            {/* Coach notes */}
+            {currentExercise.notes && (
+              <div className="flex items-start gap-2 mt-3 p-3 rounded-lg bg-muted/40 border border-muted text-sm text-muted-foreground">
+                <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-primary/70" />
+                <p className="leading-relaxed">{currentExercise.notes}</p>
+              </div>
+            )}
           </CardHeader>
+
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-4 gap-4 text-xs font-bold text-muted-foreground uppercase px-2">
-              <div className="col-span-1">{t("set")}</div>
-              <div className="col-span-1">{t("weightKg")}</div>
-              <div className="col-span-1">{t("reps")}</div>
-              <div className="col-span-1 text-right">{t("done")}</div>
-            </div>
-            
-            {(sessionLogs[currentExerciseIndex] || []).map((set, i) => (
-              <div key={i} className={cn(
-                "grid grid-cols-4 gap-4 items-center p-2 rounded-lg transition-colors",
-                set.completed ? "bg-accent/5" : "bg-muted/30"
-              )}>
-                <div className="text-sm font-bold">#{i + 1}</div>
-                <Input 
-                  placeholder={
-                    currentExercise.setDetails?.[i]?.targetWeightKg != null
-                      ? String(currentExercise.setDetails[i].targetWeightKg)
-                      : currentExercise.targetWeightKg != null
-                        ? String(currentExercise.targetWeightKg)
-                      : "0"
-                  }
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              {t("registerYourSet") || "Regista a tua série"}
+            </p>
+
+            {/* Single set row */}
+            <div
+              className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-colors ${
+                currentLog.completed
+                  ? "border-accent bg-accent/5"
+                  : "border-border bg-muted/20"
+              }`}
+            >
+              {/* Weight */}
+              <div className="flex-1 space-y-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">
+                  {t("weightKg")}
+                </label>
+                <Input
                   type="number"
-                  value={set.weight} 
-                  onChange={(e) => handleUpdateLog(i, 'weight', e.target.value)}
-                  className="h-8"
-                  disabled={set.completed}
+                  placeholder="0"
+                  value={currentLog.weight}
+                  onChange={(e) => updateLog("weight", e.target.value)}
+                  disabled={currentLog.completed}
+                  className="text-lg font-bold h-12 text-center"
                 />
-                <Input 
-                  placeholder={currentExercise.reps} 
-                  type="number"
-                  value={set.reps} 
-                  onChange={(e) => handleUpdateLog(i, 'reps', e.target.value)}
-                  className="h-8"
-                  disabled={set.completed}
-                />
-                <div className="flex justify-end">
-                  <Button 
-                    size="icon" 
-                    variant={set.completed ? "default" : "outline"} 
-                    className={cn("h-8 w-8 rounded-full", set.completed && "bg-accent hover:bg-accent/90")}
-                    onClick={() => handleUpdateLog(i, 'completed', !set.completed)}
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                  </Button>
-                </div>
               </div>
-            ))}
+
+              {/* Reps */}
+              <div className="flex-1 space-y-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">
+                  {t("reps")}
+                </label>
+                <Input
+                  type="number"
+                  placeholder="0"
+                  value={currentLog.reps}
+                  onChange={(e) => updateLog("reps", e.target.value)}
+                  disabled={currentLog.completed}
+                  className="text-lg font-bold h-12 text-center"
+                />
+              </div>
+
+              {/* Done toggle */}
+              <div className="space-y-1 flex flex-col items-center">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">
+                  {t("done")}
+                </label>
+                <Button
+                  size="icon"
+                  variant={currentLog.completed ? "default" : "outline"}
+                  className={`h-12 w-12 rounded-full transition-all ${
+                    currentLog.completed ? "bg-accent hover:bg-accent/90 scale-110" : ""
+                  }`}
+                  onClick={() => updateLog("completed", !currentLog.completed)}
+                >
+                  <CheckCircle2 className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
           </CardContent>
+
           <CardFooter className="flex justify-between border-t pt-6">
-            <Button variant="ghost" onClick={handlePrevious} disabled={currentExerciseIndex === 0}>
+            <Button
+              variant="ghost"
+              onClick={handlePrevious}
+              disabled={currentExerciseIndex === 0}
+            >
               <ChevronLeft className="h-4 w-4 mr-1" /> {t("previous")}
             </Button>
-            <Button 
-              className="gap-2 bg-primary text-primary-foreground" 
+            <Button
+              className="gap-2 bg-primary text-primary-foreground"
               onClick={handleNext}
               disabled={isSaving}
             >
               {currentExerciseIndex === totalExercises - 1 ? (
-                <>{isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {t("finishWorkout")}</>
+                <>
+                  {isSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  {t("finishWorkout")}
+                </>
               ) : (
-                <>{t("nextExercise")} <ChevronRight className="h-4 w-4" /></>
+                <>
+                  {t("nextExercise")} <ChevronRight className="h-4 w-4" />
+                </>
               )}
             </Button>
           </CardFooter>
         </Card>
+
+        {/* Exercise list overview */}
+        <Card className="bg-muted/20">
+          <CardContent className="p-4">
+            <div className="space-y-2">
+              {exercises.map((ex, i) => {
+                const log = logs[i];
+                const isDone = log?.completed;
+                const isCurrent = i === currentExerciseIndex;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setCurrentExerciseIndex(i)}
+                    className={`w-full flex items-center gap-3 p-2 rounded-lg text-left text-sm transition-colors ${
+                      isCurrent
+                        ? "bg-primary/10 text-primary font-semibold"
+                        : isDone
+                        ? "text-muted-foreground line-through"
+                        : "hover:bg-muted/50"
+                    }`}
+                  >
+                    <span
+                      className={`flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold shrink-0 ${
+                        isDone
+                          ? "bg-accent text-accent-foreground"
+                          : isCurrent
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {isDone ? <CheckCircle2 className="h-3 w-3" /> : i + 1}
+                    </span>
+                    {ex.exerciseName}
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </StudentNavigation>
   );
-}
-
-function cn(...inputs: any[]) {
-  return inputs.filter(Boolean).join(" ");
 }
