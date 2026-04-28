@@ -45,15 +45,6 @@ interface WorkoutPlan {
   status?: string;
 }
 
-interface WorkoutSession {
-  id: string;
-  workoutPlanId?: string;
-  workoutTitle?: string;
-  date?: string;
-  completedAt?: string;
-  exercises?: Array<{ exerciseName?: string; sets?: Array<any> }>;
-}
-
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const DAY_KEYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
@@ -192,8 +183,15 @@ export default function StudentWorkoutsPage() {
         setTrainerId(tid);
         setRosterDocId(rid);
 
+        const [rosterDoc, trainerDoc, slotsSnap, plansSnap] = await Promise.all([
+          getDoc(doc(db!, "personalTrainers", tid, "students", rid)),
+          getDoc(doc(db!, "personalTrainers", tid)),
+          getDocs(collection(db!, "personalTrainers", tid, "sessionSlots")),
+          getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutPlans")),
+        ]);
+        if (cancelled) return;
+
         // 2. Roster doc → student name + sessionsPerWeek + sessionDurationMin
-        const rosterDoc = await getDoc(doc(db!, "personalTrainers", tid, "students", rid));
         if (rosterDoc.exists()) {
           const rd = rosterDoc.data();
           setStudentName(`${rd.firstName || ""} ${rd.lastName || ""}`.trim() || "Aluno");
@@ -202,7 +200,6 @@ export default function StudentWorkoutsPage() {
         }
 
         // 3. Trainer doc → availability + slot settings
-        const trainerDoc = await getDoc(doc(db!, "personalTrainers", tid));
         if (trainerDoc.exists()) {
           const td = trainerDoc.data();
           if (td.slotDurationMin)   setSlotDurationMin(td.slotDurationMin);
@@ -224,34 +221,27 @@ export default function StudentWorkoutsPage() {
         }
 
         // 4. All session slots
-        const slotsSnap = await getDocs(collection(db!, "personalTrainers", tid, "sessionSlots"));
-        if (!cancelled) {
-          setSessionSlots(slotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SessionSlot)));
-        }
+        setSessionSlots(slotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SessionSlot)));
 
-        // 5. Workout plans + sessions
-        const [plansSnap, sessionsSnap] = await Promise.all([
-          getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutPlans")),
-          getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutSessions")),
-        ]);
-        if (cancelled) return;
-
+        // 5. Workout plans
         const plans: WorkoutPlan[] = plansSnap.docs.map(d => ({ id: d.id, ...d.data() })) as WorkoutPlan[];
-        const sessions: WorkoutSession[] = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as WorkoutSession[];
 
-        const completedPlanIds = new Set(sessions.filter(s => s.completedAt && s.workoutPlanId).map(s => s.workoutPlanId!));
         const expiredPlans = plans.filter(p => {
           if (p.completedAt || p.status === "completed") return false;
-          if (completedPlanIds.has(p.id)) return false;
           return getPlanDaysUntilExpiry(p) < 0;
         });
-        for (const p of expiredPlans) {
-          try { await updateDoc(doc(db!, "personalTrainers", tid, "students", rid, "workoutPlans", p.id), { status: "expired", expiredAt: new Date().toISOString() }); } catch {}
-        }
+        void Promise.allSettled(
+          expiredPlans.map((p) =>
+            updateDoc(doc(db!, "personalTrainers", tid, "students", rid, "workoutPlans", p.id), {
+              status: "expired",
+              expiredAt: new Date().toISOString(),
+            })
+          )
+        );
 
         const activePlans = plans.filter(p => {
           if (p.completedAt || p.status === "completed") return false;
-          if (completedPlanIds.has(p.id) || expiredPlans.some(e => e.id === p.id)) return false;
+          if (expiredPlans.some(e => e.id === p.id)) return false;
           return getPlanDaysUntilExpiry(p) >= 0;
         });
         activePlans.sort((a,b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || ""));

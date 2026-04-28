@@ -5,43 +5,10 @@ import { useI18n } from "@/lib/i18n";
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { TrendingUp, Award, Calendar, Target, Flame } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Award, Calendar, Target, Flame } from "lucide-react";
 import { useUser, useFirestore } from "@/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
-
-const weightDataFallback = [
-  { date: 'Apr 1', weight: 82.5 },
-  { date: 'Apr 8', weight: 81.8 },
-  { date: 'Apr 15', weight: 81.2 },
-  { date: 'Apr 22', weight: 80.5 },
-  { date: 'May 1', weight: 79.8 },
-  { date: 'May 8', weight: 79.2 },
-];
-
-const strengthDataFallback = [
-  { date: 'Jan', oneRm: 50 },
-  { date: 'Feb', oneRm: 55 },
-  { date: 'Mar', oneRm: 62.5 },
-  { date: 'Apr', oneRm: 70 },
-];
-
-function computeExerciseVolume(exercise: any): number {
-  if (Array.isArray(exercise?.sets)) {
-    return exercise.sets.reduce((sum: number, set: any) => {
-      if (set?.completed === false) return sum;
-      const reps = Number(set?.reps) || 0;
-      const weight = Number(set?.weight) || 0;
-      return sum + reps * weight;
-    }, 0);
-  }
-
-  const sets = Number(exercise?.sets) || 0;
-  const reps = Number(exercise?.reps) || 0;
-  const weight = Number(exercise?.weight) || 0;
-  return sets * reps * weight;
-}
 
 function computeEpleyOneRm(weight: number, reps: number): number {
   if (!Number.isFinite(weight) || !Number.isFinite(reps) || weight <= 0 || reps <= 0) return 0;
@@ -52,15 +19,15 @@ export default function StudentProgressPage() {
   const { t } = useI18n();
   const { user } = useUser();
   const db = useFirestore();
-  const [totalVolumeKg, setTotalVolumeKg] = useState(0);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [goalCompletionPercent, setGoalCompletionPercent] = useState(0);
   const [monthlyPlannedCount, setMonthlyPlannedCount] = useState(0);
   const [monthlyDoneCount, setMonthlyDoneCount] = useState(0);
-  const [weightTrend, setWeightTrend] = useState<Array<{ date: string; weight: number }>>(weightDataFallback);
-  const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
+  const [selectedStrengthExercises, setSelectedStrengthExercises] = useState<string[]>([]);
   const [strengthExerciseOptions, setStrengthExerciseOptions] = useState<string[]>([]);
-  const [strengthTrend, setStrengthTrend] = useState<Array<{ date: string; oneRm: number }>>(strengthDataFallback);
+  const [strengthSeriesByExercise, setStrengthSeriesByExercise] = useState<
+    Record<string, Array<{ timestamp: number; oneRm: number }>>
+  >({});
   const [personalBests, setPersonalBests] = useState<
     Array<{ exerciseName: string; oneRm: number; weight: number; reps: number; date: string }>
   >([]);
@@ -77,25 +44,15 @@ export default function StudentProgressPage() {
         if (!studentSnap.exists()) return;
 
         const trainerId = studentSnap.data()?.trainerId;
+        const resolvedStudentId = (studentSnap.data()?.rosterDocId as string | undefined) || uid;
         if (!trainerId) return;
 
         const [sessionsSnap, workoutPlansSnap] = await Promise.all([
-          getDocs(collection(db, "personalTrainers", trainerId, "students", uid, "workoutSessions")),
-          getDocs(collection(db, "personalTrainers", trainerId, "students", uid, "workoutPlans")),
+          getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")),
+          getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans")),
         ]);
 
         if (cancelled) return;
-
-        const volume = sessionsSnap.docs.reduce((sessionSum, sessionDoc) => {
-          const sessionData: any = sessionDoc.data();
-          const sessionVolume = (sessionData.exercises || []).reduce(
-            (exerciseSum: number, exercise: any) => exerciseSum + computeExerciseVolume(exercise),
-            0
-          );
-          return sessionSum + sessionVolume;
-        }, 0);
-
-        setTotalVolumeKg(volume);
 
         const completedPlanIds = new Set(
           sessionsSnap.docs
@@ -113,7 +70,7 @@ export default function StudentProgressPage() {
             data: planDoc.data() as any,
           }))
           .filter((plan) => {
-            const scheduledRaw = plan.data.assignedAt || plan.data.createdAt || "";
+            const scheduledRaw = plan.data.weekStart || plan.data.assignedAt || plan.data.createdAt || "";
             const scheduledDate = new Date(scheduledRaw);
             if (Number.isNaN(scheduledDate.getTime())) return false;
             return (
@@ -137,7 +94,7 @@ export default function StudentProgressPage() {
             data: planDoc.data() as any,
           }))
           .map((plan) => {
-            const scheduledRaw = plan.data.assignedAt || plan.data.createdAt || "";
+            const scheduledRaw = plan.data.weekStart || plan.data.assignedAt || plan.data.createdAt || "";
             const timestamp = Date.parse(scheduledRaw);
             return {
               id: plan.id,
@@ -158,37 +115,6 @@ export default function StudentProgressPage() {
 
         setCurrentStreak(streak);
 
-        const studentData: any = studentSnap.data();
-        const history = Array.isArray(studentData?.weightHistory) ? studentData.weightHistory : [];
-        const normalizedTrend = history
-          .map((entry: any) => {
-            const dateValue = entry?.date || entry?.checkedAt || "";
-            const weightValue = Number(entry?.weightKg ?? entry?.weight);
-            return {
-              timestamp: Date.parse(dateValue),
-              weight: Number.isFinite(weightValue) ? weightValue : NaN,
-            };
-          })
-          .filter((entry: any) => Number.isFinite(entry.timestamp) && Number.isFinite(entry.weight))
-          .sort((a: any, b: any) => a.timestamp - b.timestamp)
-          .map((entry: any) => ({
-            date: new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-            weight: Number(entry.weight.toFixed(1)),
-          }));
-
-        if (normalizedTrend.length > 0) {
-          setWeightTrend(normalizedTrend);
-        } else if (Number.isFinite(Number(studentData?.weightKg))) {
-          setWeightTrend([
-            {
-              date: new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-              weight: Number(studentData.weightKg),
-            },
-          ]);
-        } else {
-          setWeightTrend(weightDataFallback);
-        }
-
         const oneRmByExercise = new Map<string, Array<{ timestamp: number; oneRm: number }>>();
         const bestByExercise = new Map<string, { oneRm: number; timestamp: number; weight: number; reps: number }>();
         sessionsSnap.docs.forEach((sessionDoc) => {
@@ -205,7 +131,6 @@ export default function StudentProgressPage() {
             let bestReps = 0;
             if (Array.isArray(exercise.sets)) {
               exercise.sets.forEach((set: any) => {
-                if (set?.completed === false) return;
                 const setWeight = Number(set?.weight) || 0;
                 const setReps = Number(set?.reps) || 0;
                 const oneRm = computeEpleyOneRm(setWeight, setReps);
@@ -257,22 +182,12 @@ export default function StudentProgressPage() {
 
         const options = Array.from(oneRmByExercise.keys()).sort((a, b) => a.localeCompare(b));
         setStrengthExerciseOptions(options);
-
-        if (options.length > 0) {
-          const initialSelection = options.includes(selectedStrengthExercise) ? selectedStrengthExercise : options[0];
-          const selectedPoints = (oneRmByExercise.get(initialSelection) || [])
-            .sort((a, b) => a.timestamp - b.timestamp)
-            .map((point) => ({
-              date: new Date(point.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-              oneRm: Number(point.oneRm.toFixed(1)),
-            }));
-
-          setSelectedStrengthExercise(initialSelection);
-          setStrengthTrend(selectedPoints.length > 0 ? selectedPoints : strengthDataFallback);
-        } else {
-          setSelectedStrengthExercise("");
-          setStrengthTrend(strengthDataFallback);
-        }
+        const seriesObj: Record<string, Array<{ timestamp: number; oneRm: number }>> = {};
+        oneRmByExercise.forEach((points, exerciseName) => {
+          seriesObj[exerciseName] = [...points].sort((a, b) => a.timestamp - b.timestamp);
+        });
+        setStrengthSeriesByExercise(seriesObj);
+        setSelectedStrengthExercises((prev) => prev.filter((name) => options.includes(name)).slice(0, 3));
       } catch (error) {
         console.error("Failed to calculate total volume", error);
       }
@@ -285,63 +200,32 @@ export default function StudentProgressPage() {
     };
   }, [db, user?.uid]);
 
-  const formattedTotalVolume = useMemo(() => `${Math.round(totalVolumeKg).toLocaleString()}kg`, [totalVolumeKg]);
-
-  const handleStrengthExerciseChange = async (exerciseName: string) => {
-    if (!db || !user?.uid) return;
-    const uid = user.uid;
-    setSelectedStrengthExercise(exerciseName);
-
-    try {
-      const studentSnap = await getDoc(doc(db, "students", uid));
-      if (!studentSnap.exists()) return;
-      const trainerId = studentSnap.data()?.trainerId;
-      if (!trainerId) return;
-
-      const sessionsSnap = await getDocs(
-        collection(db, "personalTrainers", trainerId, "students", uid, "workoutSessions")
-      );
-
-      const points: Array<{ timestamp: number; oneRm: number }> = [];
-      sessionsSnap.docs.forEach((sessionDoc) => {
-        const sessionData: any = sessionDoc.data();
-        const timestamp = Date.parse(sessionData.completedAt || sessionData.date || "");
-        if (!Number.isFinite(timestamp)) return;
-
-        (sessionData.exercises || []).forEach((exercise: any) => {
-          const name = (exercise.exerciseName || exercise.name || "").trim();
-          if (name !== exerciseName) return;
-
-          let bestOneRm = 0;
-          if (Array.isArray(exercise.sets)) {
-            exercise.sets.forEach((set: any) => {
-              if (set?.completed === false) return;
-              const oneRm = computeEpleyOneRm(Number(set?.weight), Number(set?.reps));
-              if (oneRm > bestOneRm) bestOneRm = oneRm;
-            });
-          } else {
-            const oneRm = computeEpleyOneRm(Number(exercise?.weight), Number(exercise?.reps));
-            if (oneRm > bestOneRm) bestOneRm = oneRm;
-          }
-
-          if (bestOneRm > 0) {
-            points.push({ timestamp, oneRm: bestOneRm });
-          }
-        });
-      });
-
-      const trend = points
-        .sort((a, b) => a.timestamp - b.timestamp)
-        .map((point) => ({
-          date: new Date(point.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-          oneRm: Number(point.oneRm.toFixed(1)),
-        }));
-
-      setStrengthTrend(trend.length > 0 ? trend : strengthDataFallback);
-    } catch (error) {
-      console.error("Failed to update strength trend", error);
-    }
+  const toggleStrengthExercise = (exerciseName: string) => {
+    setSelectedStrengthExercises((prev) => {
+      if (prev.includes(exerciseName)) return prev.filter((name) => name !== exerciseName);
+      if (prev.length >= 3) return prev;
+      return [...prev, exerciseName];
+    });
   };
+
+  const strengthChartData = useMemo(() => {
+    if (selectedStrengthExercises.length === 0) return [];
+    const byTimestamp = new Map<number, Record<string, string | number>>();
+
+    selectedStrengthExercises.forEach((exerciseName) => {
+      const series = strengthSeriesByExercise[exerciseName] || [];
+      series.forEach((point) => {
+        const row = byTimestamp.get(point.timestamp) || {
+          timestamp: point.timestamp,
+          date: new Date(point.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        };
+        row[exerciseName] = Number(point.oneRm.toFixed(1));
+        byTimestamp.set(point.timestamp, row);
+      });
+    });
+
+    return Array.from(byTimestamp.values()).sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  }, [selectedStrengthExercises, strengthSeriesByExercise]);
 
   return (
     <StudentNavigation>
@@ -351,7 +235,7 @@ export default function StudentProgressPage() {
           <p className="text-muted-foreground">{t("visualizeJourney")}</p>
         </header>
 
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-2 gap-6">
           <Card className="bg-primary text-primary-foreground">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -381,87 +265,77 @@ export default function StudentProgressPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-primary" />
-                {t("totalVolume")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{formattedTotalVolume}</div>
-              <p className="text-xs text-muted-foreground mt-1">{t("totalVolumeDesc")}</p>
-            </CardContent>
-          </Card>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("weightTracking")}</CardTitle>
-              <CardDescription>{t("progressTowardsGoal")}</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[300px] pt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={weightTrend}>
-                  <defs>
-                    <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                  <XAxis dataKey="date" />
-                  <YAxis domain={['dataMin - 1', 'dataMax + 1']} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))' }}
-                    itemStyle={{ color: 'hsl(var(--primary))' }}
-                  />
-                  <Area type="monotone" dataKey="weight" stroke="hsl(var(--primary))" fillOpacity={1} fill="url(#colorWeight)" strokeWidth={3} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
+        <div className="grid lg:grid-cols-1 gap-6">
           <Card>
             <CardHeader>
               <CardTitle>{t("strengthProgressionTitle")}</CardTitle>
               <CardDescription>
                 {t("strengthProgressionChartDesc")}
               </CardDescription>
-              {strengthExerciseOptions.length > 0 ? (
-                <div className="pt-2">
-                  <Select value={selectedStrengthExercise} onValueChange={handleStrengthExerciseChange}>
-                    <SelectTrigger className="w-full sm:w-[260px]">
-                      <SelectValue placeholder={t("selectExercise")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {strengthExerciseOptions.map((exercise) => (
-                        <SelectItem key={exercise} value={exercise}>{exercise}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <div className="pt-2 space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Seleciona ate 3 exercicios para comparar.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {strengthExerciseOptions.map((exercise) => {
+                    const active = selectedStrengthExercises.includes(exercise);
+                    const disabled = !active && selectedStrengthExercises.length >= 3;
+                    return (
+                      <button
+                        key={exercise}
+                        type="button"
+                        className={`px-3 py-1.5 rounded-full border text-sm transition-colors ${
+                          active
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-background text-foreground"
+                        } ${disabled ? "opacity-50 cursor-not-allowed" : "hover:border-primary/60"}`}
+                        onClick={() => toggleStrengthExercise(exercise)}
+                        disabled={disabled}
+                      >
+                        {exercise}
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : null}
+              </div>
             </CardHeader>
             <CardContent className="h-[300px] pt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={strengthTrend}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))' }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="oneRm"
-                    stroke="hsl(var(--chart-1))"
-                    strokeWidth={3}
-                    name={selectedStrengthExercise ? `${selectedStrengthExercise} 1RM` : "1RM"}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {selectedStrengthExercises.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-sm text-muted-foreground border-2 border-dashed rounded-lg">
+                  Seleciona 1 a 3 exercicios para ver a progressao.
+                </div>
+              ) : strengthChartData.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-sm text-muted-foreground border-2 border-dashed rounded-lg">
+                  Sem dados de forca para os exercicios selecionados.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={strengthChartData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))' }}
+                    />
+                    {selectedStrengthExercises.map((exercise, index) => {
+                      const colors = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))"];
+                      return (
+                        <Line
+                          key={exercise}
+                          type="monotone"
+                          dataKey={exercise}
+                          stroke={colors[index % colors.length]}
+                          strokeWidth={3}
+                          name={`${exercise} 1RM`}
+                          connectNulls
+                        />
+                      );
+                    })}
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
         </div>

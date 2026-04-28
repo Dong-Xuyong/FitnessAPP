@@ -1136,7 +1136,7 @@ const translations = {
     totalVolumeDesc: "Calculado a partir do histórico de treinos (séries x repetições x peso).",
     progressTowardsGoal: "Progresso em direção ao seu objetivo",
     strengthProgressionTitle: "Progressão de Força",
-    strengthProgressionChartDesc: "Ganhos estimados de 1RM (kg) usando Epley: 1RM = P x (1 + R/30)",
+    strengthProgressionChartDesc: "Ganhos estimados de 1RM (kg) usando Epley",
     personalBests: "Recordes Pessoais",
     personalBestsDesc: "Melhor 1RM estimado por exercício (Epley)",
     estimated1RM: "1RM Estimado: ",
@@ -1271,13 +1271,13 @@ type I18nContextType = {
 };
 
 const I18nContext = createContext<I18nContextType>({
-  locale: "en",
+  locale: "pt",
   setLocale: () => {},
   t: (key) => key,
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>("en");
+  const [locale, setLocaleState] = useState<Locale>("pt");
 
   useEffect(() => {
     const saved = localStorage.getItem("elevateFit-locale") as Locale | null;

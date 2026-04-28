@@ -192,6 +192,7 @@ export default function AssignmentCalendarPage() {
   const [assignWeeklyProgramId, setAssignWeeklyProgramId] = useState("");
   const [isAssigningWeeklyFromCal, setIsAssigningWeeklyFromCal] = useState(false);
   const [isRemovingStudentWeekAssignments, setIsRemovingStudentWeekAssignments] = useState(false);
+  const [isRemovingStudentAllAssignments, setIsRemovingStudentAllAssignments] = useState(false);
 
   // Student filter (0 = no filter, shows all; set = student-centric view)
   const [filterStudentId, setFilterStudentId] = useState("");
@@ -885,6 +886,41 @@ export default function AssignmentCalendarPage() {
       toast({ title: "Erro", description: e?.message, variant: "destructive" });
     } finally {
       setIsRemovingStudentWeekAssignments(false);
+    }
+  };
+
+  const handleRemoveAllAssignmentsForStudent = async () => {
+    if (!db || !user || !filterStudentId) return;
+    const confirmReset = window.confirm("Remover TODOS os programas atribuídos deste aluno?");
+    if (!confirmReset) return;
+
+    setIsRemovingStudentAllAssignments(true);
+    try {
+      const studentAssignmentIds = weekAssignments
+        .filter((a) => a.studentId === filterStudentId)
+        .map((a) => a.id);
+
+      await Promise.all(
+        studentAssignmentIds.map((id) =>
+          deleteDoc(doc(db, "personalTrainers", user.uid, "weekProgramAssignments", id))
+        )
+      );
+
+      const plansSnap = await getDocs(
+        collection(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans")
+      );
+      await Promise.all(
+        plansSnap.docs.map((d) =>
+          deleteDoc(doc(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans", d.id))
+        )
+      );
+
+      setWeekAssignments((prev) => prev.filter((a) => a.studentId !== filterStudentId));
+      toast({ title: "Todos os programas atribuídos ao aluno foram removidos" });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message, variant: "destructive" });
+    } finally {
+      setIsRemovingStudentAllAssignments(false);
     }
   };
 
@@ -1615,20 +1651,36 @@ export default function AssignmentCalendarPage() {
               </Button>
             </div>
             {isFilterActive && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10 w-fit"
-                onClick={handleRemoveAllAssignmentsForStudentInWeek}
-                disabled={isRemovingStudentWeekAssignments}
-              >
-                {isRemovingStudentWeekAssignments ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-                Remover todos do aluno (semana)
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10 w-fit"
+                  onClick={handleRemoveAllAssignmentsForStudentInWeek}
+                  disabled={isRemovingStudentWeekAssignments || isRemovingStudentAllAssignments}
+                >
+                  {isRemovingStudentWeekAssignments ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  Remover todos do aluno (semana)
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10 w-fit"
+                  onClick={handleRemoveAllAssignmentsForStudent}
+                  disabled={isRemovingStudentAllAssignments || isRemovingStudentWeekAssignments}
+                >
+                  {isRemovingStudentAllAssignments ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  Remover todos do aluno (tudo)
+                </Button>
+              </div>
             )}
           </CardHeader>
           <CardContent>
