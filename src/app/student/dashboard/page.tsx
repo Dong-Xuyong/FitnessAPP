@@ -5,12 +5,15 @@ import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MilestonesTab } from "@/components/MilestonesTab";
 import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target, Percent } from "lucide-react";
 import Link from "next/link";
-import { useUser, useFirestore } from "@/firebase";
+import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { useI18n } from "@/lib/i18n";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import type { Milestone } from "@/lib/types";
 
 
 export default function StudentDashboardPage() {
@@ -22,6 +25,28 @@ export default function StudentDashboardPage() {
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [lastSessionDoneAt, setLastSessionDoneAt] = useState<string | null>(null);
+
+  const milestonesRef = useMemoFirebase(() => {
+    if (!db || !user?.uid || !studentData?.trainerId) return null;
+    return query(
+      collection(db, "milestones"),
+      where("trainerId", "==", studentData.trainerId),
+      where("studentId", "==", user.uid)
+    );
+  }, [db, studentData?.trainerId, user?.uid]);
+
+  const { data: allMilestones, isLoading: isMilestonesLoading } = useCollection(milestonesRef);
+  const studentMilestones: Milestone[] = useMemo(
+    () =>
+      ((allMilestones || []) as Milestone[]).sort((a, b) => {
+        const statusOrder: Record<string, number> = { active: 0, paused: 1, missed: 2, completed: 3 };
+        const aStatus = statusOrder[a.status] ?? 999;
+        const bStatus = statusOrder[b.status] ?? 999;
+        if (aStatus !== bStatus) return aStatus - bStatus;
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      }),
+    [allMilestones]
+  );
 
   useEffect(() => {
     if (!db || !user?.uid) {
@@ -134,101 +159,129 @@ export default function StudentDashboardPage() {
 
   return (
     <StudentNavigation>
-      <div className="space-y-6">
-        <header>
-          <h1 className="text-3xl font-bold font-headline">{t("welcomeBack2")}{firstName}!</h1>
-          <p className="text-muted-foreground capitalize">
-            {t("goalPrefix")}{studentData.goalType?.replace("_", " ") || "—"}
-          </p>
-        </header>
+      <Tabs defaultValue="dashboard" className="space-y-6">
+        <TabsList className="bg-card border h-auto w-full grid grid-cols-2">
+          <TabsTrigger value="dashboard">{t("progress")}</TabsTrigger>
+          <TabsTrigger value="milestones">{t("milestones")}</TabsTrigger>
+        </TabsList>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          <Card className="md:col-span-2 bg-primary text-primary-foreground">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>{t("trainingStatus")}</CardTitle>
-                <CardDescription className="text-primary-foreground/80">
-                  {trainingStatusDescription}
-                </CardDescription>
-              </div>
-              <Dumbbell className="h-8 w-8 opacity-20" />
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>{t("currentStreak")}</span>
-                  <span>
-                    {currentStreak}{t("workoutsLabel")}{" "}
-                    <Flame className="inline h-4 w-4" />
-                  </span>
-                </div>
-                <Progress
-                  value={Math.min(currentStreak * 10, 100)}
-                  className="h-2 bg-primary-foreground/20"
-                />
-              </div>
-              <div className="flex items-center justify-between pt-4">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
-                  <span className="text-sm">
-                    {t("lastSession")}{" "}
-                    {lastSessionDoneAt
-                      ? new Date(lastSessionDoneAt).toLocaleDateString()
-                      : t("noHistory")}
-                  </span>
-                </div>
-                {studentData.currentProgramId && (
-                  <Button variant="secondary" asChild>
-                    <Link href={`/student/workouts/${studentData.currentProgramId}/session`}>
-                      <Play className="h-4 w-4 mr-2" /> {t("resume")}
-                    </Link>
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+        <TabsContent value="dashboard" className="space-y-6">
+          <header>
+            <h1 className="text-3xl font-bold font-headline">{t("welcomeBack2")}{firstName}!</h1>
+            <p className="text-muted-foreground capitalize">
+              {t("goalPrefix")}{studentData.goalType?.replace("_", " ") || "—"}
+            </p>
+          </header>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("physicalStats")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-3 p-3 border rounded-lg">
-                <TrendingUp className="h-5 w-5 text-primary" />
+          <div className="grid md:grid-cols-3 gap-6">
+            <Card className="md:col-span-2 bg-primary text-primary-foreground">
+              <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold">{studentData.weightKg} kg</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("weightGoalLabel").replace("{n}", String(studentData.goalWeightKg))}
-                  </p>
+                  <CardTitle>{t("trainingStatus")}</CardTitle>
+                  <CardDescription className="text-primary-foreground/80">
+                    {trainingStatusDescription}
+                  </CardDescription>
                 </div>
-              </div>
-              <div className="flex items-center gap-3 p-3 border rounded-lg">
-                <Target className="h-5 w-5 text-accent" />
-                <div>
-                  <p className="text-sm font-bold">{studentData.heightCm} cm</p>
-                  <p className="text-xs text-muted-foreground">{t("height")}</p>
+                <Dumbbell className="h-8 w-8 opacity-20" />
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span>{t("currentStreak")}</span>
+                    <span>
+                      {currentStreak}{t("workoutsLabel")}{" "}
+                      <Flame className="inline h-4 w-4" />
+                    </span>
+                  </div>
+                  <Progress
+                    value={Math.min(currentStreak * 10, 100)}
+                    className="h-2 bg-primary-foreground/20"
+                  />
                 </div>
-              </div>
-              {studentData.bodyFatPercent > 0 && (
+                <div className="flex items-center justify-between pt-4">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" />
+                    <span className="text-sm">
+                      {t("lastSession")}{" "}
+                      {lastSessionDoneAt
+                        ? new Date(lastSessionDoneAt).toLocaleDateString()
+                        : t("noHistory")}
+                    </span>
+                  </div>
+                  {studentData.currentProgramId && (
+                    <Button variant="secondary" asChild>
+                      <Link href={`/student/workouts/${studentData.currentProgramId}/session`}>
+                        <Play className="h-4 w-4 mr-2" /> {t("resume")}
+                      </Link>
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("physicalStats")}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
                 <div className="flex items-center gap-3 p-3 border rounded-lg">
-                  <Percent className="h-5 w-5 text-orange-500" />
+                  <TrendingUp className="h-5 w-5 text-primary" />
                   <div>
-                    <p className="text-sm font-bold">{studentData.bodyFatPercent}%</p>
-                    <p className="text-xs text-muted-foreground">{t("bodyFat")}</p>
+                    <p className="text-sm font-bold">{studentData.weightKg} kg</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("weightGoalLabel").replace("{n}", String(studentData.goalWeightKg))}
+                    </p>
                   </div>
                 </div>
-              )}
-              <div className="text-xs text-center py-2 bg-muted rounded">
-                {t("statusLabel")}{" "}
-                <span className="font-bold capitalize">
-                  {studentData.subscriptionStatus || "—"}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                <div className="flex items-center gap-3 p-3 border rounded-lg">
+                  <Target className="h-5 w-5 text-accent" />
+                  <div>
+                    <p className="text-sm font-bold">{studentData.heightCm} cm</p>
+                    <p className="text-xs text-muted-foreground">{t("height")}</p>
+                  </div>
+                </div>
+                {studentData.bodyFatPercent > 0 && (
+                  <div className="flex items-center gap-3 p-3 border rounded-lg">
+                    <Percent className="h-5 w-5 text-orange-500" />
+                    <div>
+                      <p className="text-sm font-bold">{studentData.bodyFatPercent}%</p>
+                      <p className="text-xs text-muted-foreground">{t("bodyFat")}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="text-xs text-center py-2 bg-muted rounded">
+                  {t("statusLabel")}{" "}
+                  <span className="font-bold capitalize">
+                    {studentData.subscriptionStatus || "—"}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-      </div>
+        <TabsContent value="milestones" className="space-y-6">
+          {studentData.trainerId ? (
+            <MilestonesTab
+              db={db}
+              user={{ uid: studentData.trainerId }}
+              studentId={user!.uid}
+              milestones={studentMilestones}
+              isLoading={isMilestonesLoading}
+              onMilestonesChange={() => {
+                // Firestore live query will refresh this automatically.
+              }}
+            />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("milestones")}</CardTitle>
+                <CardDescription>{t("noTrainerLinked")}</CardDescription>
+              </CardHeader>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
     </StudentNavigation>
   );
 }

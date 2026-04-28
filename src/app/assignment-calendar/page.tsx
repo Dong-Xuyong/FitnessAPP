@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Calendar as MonthCalendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -197,6 +198,7 @@ export default function AssignmentCalendarPage() {
   // Student filter (0 = no filter, shows all; set = student-centric view)
   const [filterStudentId, setFilterStudentId] = useState("");
   const [filterStudentSessionDuration, setFilterStudentSessionDuration] = useState<number | null>(null);
+  const [filterStudentSessionsPerWeek, setFilterStudentSessionsPerWeek] = useState<number | null>(null);
   const [isLoadingFilterStudent, setIsLoadingFilterStudent] = useState(false);
   const [isTogglingSlot, setIsTogglingSlot] = useState<string | null>(null);
 
@@ -307,6 +309,7 @@ export default function AssignmentCalendarPage() {
   useEffect(() => {
     if (!filterStudentId || !db || !user) {
       setFilterStudentSessionDuration(null);
+      setFilterStudentSessionsPerWeek(null);
       return;
     }
     let cancelled = false;
@@ -316,6 +319,7 @@ export default function AssignmentCalendarPage() {
         const snap = await getDoc(doc(db!, "personalTrainers", user!.uid, "students", filterStudentId));
         if (!cancelled && snap.exists()) {
           setFilterStudentSessionDuration(snap.data()?.sessionDurationMin ?? null);
+          setFilterStudentSessionsPerWeek(snap.data()?.sessionsPerWeek ?? null);
         }
       } catch {} finally {
         if (!cancelled) setIsLoadingFilterStudent(false);
@@ -367,6 +371,17 @@ export default function AssignmentCalendarPage() {
     [weekAssignments, selectedWeekStart, isFilterActive, filterStudentId]
   );
 
+  const weeklyPrograms = useMemo(
+    () =>
+      programs.filter((program: any) => {
+        const hasWeeklyType = program.programType === "weekly";
+        const hasSourcePrograms = Array.isArray(program.sourceProgramIds) && program.sourceProgramIds.length > 0;
+        const hasLegacyWeeklyPlan = Array.isArray(program.weeklyPlan) && program.weeklyPlan.length > 0;
+        return hasWeeklyType || hasSourcePrograms || hasLegacyWeeklyPlan;
+      }),
+    [programs]
+  );
+
   // Calendar modifier: all days belonging to weeks that have program assignments
   const assignedWeekDates = useMemo(() => {
     const weekStarts = [...new Set(weekAssignments.map((a) => a.weekStart))];
@@ -390,12 +405,29 @@ export default function AssignmentCalendarPage() {
   const getWeeklyCount = useCallback(
     (studentId: string, aroundDate: Date) => {
       const weekDates = getWeekDates(aroundDate);
-      return sessionSlots
+      const uniqueSessions = new Set<string>();
+      sessionSlots
         .filter((s) => weekDates.includes(s.date))
-        .reduce((acc, s) => acc + (s.students.some((st) => st.studentId === studentId) ? 1 : 0), 0);
+        .forEach((slot) => {
+          const entry = slot.students.find((st: any) => st.studentId === studentId);
+          if (!entry) return;
+          // A multi-block booking (e.g. 60 min over 2x30 blocks) should count as one session.
+          const sessionStart = (entry as any).sessionStart || slot.startTime;
+          uniqueSessions.add(`${slot.date}__${sessionStart}`);
+        });
+      return uniqueSessions.size;
     },
     [sessionSlots]
   );
+
+  const selectedStudentWeeklyCount = useMemo(
+    () => (isFilterActive ? getWeeklyCount(filterStudentId, selectedDate) : 0),
+    [isFilterActive, getWeeklyCount, filterStudentId, selectedDate]
+  );
+  const selectedStudentWeeklyProgress = useMemo(() => {
+    if (!filterStudentSessionsPerWeek || filterStudentSessionsPerWeek <= 0) return 0;
+    return Math.min(100, (selectedStudentWeeklyCount / filterStudentSessionsPerWeek) * 100);
+  }, [selectedStudentWeeklyCount, filterStudentSessionsPerWeek]);
 
   // ── Availability handlers ──────────────────────────────────────────────────
 
@@ -738,21 +770,55 @@ export default function AssignmentCalendarPage() {
     if (!weeklyProg) return;
     const student = (rosterStudents || []).find((s: any) => s.id === assignWeekStudentId) as any;
     const studentName = `${student?.firstName || ""} ${student?.lastName || ""}`.trim() || "Aluno";
-    const sourceProgramIds: string[] = weeklyProg.sourceProgramIds || [];
-    const durationWeeks: number = weeklyProg.durationWeeks || 1;
+    const sourceProgramIds: string[] = Array.isArray(weeklyProg.sourceProgramIds) ? weeklyProg.sourceProgramIds : [];
+    const legacyPlan: Array<{ week: number; trainingProgramId: string }> = Array.isArray(weeklyProg.weeklyPlan)
+      ? weeklyProg.weeklyPlan
+      : [];
+    const durationWeeks: number = weeklyProg.durationWeeks || Math.max(1, legacyPlan.length || 1);
     const baseProgs = programs.filter((p) => p.programType !== "weekly");
     setIsAssigningWeeklyFromCal(true);
     try {
       const workoutPlansRef = collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans");
-      for (let w = 1; w <= durationWeeks; w++) {
-        const ws = w === 1 ? selectedWeekStart : (() => {
-          const d = new Date(selectedWeekStart + "T12:00:00");
-          d.setDate(d.getDate() + (w - 1) * 7);
-          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-        })();
-        for (const progId of sourceProgramIds) {
-          const srcProg = baseProgs.find((p) => p.id === progId);
+      if (sourceProgramIds.length > 0) {
+        for (let w = 1; w <= durationWeeks; w++) {
+          const ws = w === 1 ? selectedWeekStart : (() => {
+            const d = new Date(selectedWeekStart + "T12:00:00");
+            d.setDate(d.getDate() + (w - 1) * 7);
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+          })();
+          for (const progId of sourceProgramIds) {
+            const srcProg = baseProgs.find((p) => p.id === progId);
+            if (!srcProg) continue;
+            const exs = (srcProg.sessions || []).flatMap((s: any) =>
+              (s.exercises || []).map((e: any) => ({
+                exerciseName: e.exerciseName, sets: e.sets ?? 1, reps: e.reps ?? "",
+                restTimeSeconds: e.restTimeSeconds ?? 0, notes: e.notes,
+              }))
+            );
+            await setDoc(doc(collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans")), {
+              title: srcProg.name, studentId: assignWeekStudentId,
+              personalTrainerId: user.uid, weekStart: ws,
+              weekNumber: w, totalWeeks: durationWeeks,
+              weeklyProgramId: weeklyProg.id, weeklyProgramName: weeklyProg.name,
+              sourceTrainingProgramId: progId, exercises: exs,
+              createdAt: new Date().toISOString(),
+            });
+            const waRef = doc(collection(db, "personalTrainers", user.uid, "weekProgramAssignments"));
+            const wa: WeekAssignment = { id: waRef.id, studentId: assignWeekStudentId, studentName, weekStart: ws, programId: progId, programTitle: srcProg.name };
+            await setDoc(waRef, wa);
+            setWeekAssignments((prev) => [...prev, wa]);
+          }
+        }
+      } else {
+        for (const legacyItem of legacyPlan) {
+          const srcProg = baseProgs.find((p) => p.id === legacyItem.trainingProgramId);
           if (!srcProg) continue;
+          const weekNumber = Math.max(1, Number(legacyItem.week) || 1);
+          const ws = (() => {
+            const d = new Date(selectedWeekStart + "T12:00:00");
+            d.setDate(d.getDate() + (weekNumber - 1) * 7);
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+          })();
           const exs = (srcProg.sessions || []).flatMap((s: any) =>
             (s.exercises || []).map((e: any) => ({
               exerciseName: e.exerciseName, sets: e.sets ?? 1, reps: e.reps ?? "",
@@ -762,14 +828,13 @@ export default function AssignmentCalendarPage() {
           await setDoc(doc(collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans")), {
             title: srcProg.name, studentId: assignWeekStudentId,
             personalTrainerId: user.uid, weekStart: ws,
-            weekNumber: w, totalWeeks: durationWeeks,
+            weekNumber, totalWeeks: durationWeeks,
             weeklyProgramId: weeklyProg.id, weeklyProgramName: weeklyProg.name,
-            sourceTrainingProgramId: progId, exercises: exs,
+            sourceTrainingProgramId: srcProg.id, exercises: exs,
             createdAt: new Date().toISOString(),
           });
-          // Week assignment record for each unique week
           const waRef = doc(collection(db, "personalTrainers", user.uid, "weekProgramAssignments"));
-          const wa: WeekAssignment = { id: waRef.id, studentId: assignWeekStudentId, studentName, weekStart: ws, programId: progId, programTitle: srcProg.name };
+          const wa: WeekAssignment = { id: waRef.id, studentId: assignWeekStudentId, studentName, weekStart: ws, programId: srcProg.id, programTitle: srcProg.name };
           await setDoc(waRef, wa);
           setWeekAssignments((prev) => [...prev, wa]);
         }
@@ -1002,7 +1067,7 @@ export default function AssignmentCalendarPage() {
                       <SelectValue placeholder="Selecionar programa semanal..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {programs.filter((p) => p.programType === "weekly").map((p) => (
+                      {weeklyPrograms.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.name} · {p.durationWeeks || "?"} sem.
                         </SelectItem>
@@ -1377,6 +1442,17 @@ export default function AssignmentCalendarPage() {
                   <p className="text-xs text-muted-foreground italic">
                     Duração de sessão não definida na faturação
                   </p>
+                )}
+                {isFilterActive && (filterStudentSessionsPerWeek ?? 0) > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-muted-foreground">Aulas esta semana</span>
+                      <span className="font-semibold">
+                        {selectedStudentWeeklyCount}/{filterStudentSessionsPerWeek}
+                      </span>
+                    </div>
+                    <Progress value={selectedStudentWeeklyProgress} className="h-2" />
+                  </div>
                 )}
               </div>
 

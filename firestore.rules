@@ -40,6 +40,12 @@ service cloud.firestore {
         get(/databases/$(database)/documents/students/$(request.auth.uid)).data.trainerId == personalTrainerId;
     }
 
+    function isStudentOfTrainer(personalTrainerId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/students/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/students/$(request.auth.uid)).data.trainerId == personalTrainerId;
+    }
+
     // Global Exercises Library
     match /exercises/{exerciseId} {
       allow read: if isSignedIn();
@@ -94,6 +100,16 @@ service cloud.firestore {
         allow get, list: if isOwner(personalTrainerId);
         allow create, update, delete: if isOwner(personalTrainerId);
       }	
+
+      match /sessionSlots/{slotId} {
+        allow get, list: if isOwner(personalTrainerId) || isStudentOfTrainer(personalTrainerId);
+        allow create, update, delete: if isOwner(personalTrainerId) || isStudentOfTrainer(personalTrainerId);
+      }
+
+      match /weekProgramAssignments/{assignmentId} {
+        allow get, list: if isOwner(personalTrainerId) || isStudentOfTrainer(personalTrainerId);
+        allow create, update, delete: if isOwner(personalTrainerId);
+      }
     
       allow get, list: if isSignedIn();
       allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId);

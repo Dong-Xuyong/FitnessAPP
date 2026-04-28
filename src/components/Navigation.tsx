@@ -32,12 +32,12 @@ import { Globe } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const navItemKeys = [
-  { key: "dashboard" as const, href: "/dashboard", icon: LayoutDashboard },
-  { key: "students" as const, href: "/students", icon: Users },
-  { key: "programs" as const, href: "/workouts", icon: Dumbbell },
-  { key: "exercises" as const, href: "/exercises", icon: Search },
   { key: "assignmentCalendar" as const, href: "/assignment-calendar", icon: CalendarDays },
+  { key: "programs" as const, href: "/workouts", icon: Dumbbell },
+  { key: "dashboard" as const, href: "/dashboard", icon: LayoutDashboard },
   { key: "progress" as const, href: "/progress", icon: LineChart },
+  { key: "students" as const, href: "/students", icon: Users },
+  { key: "exercises" as const, href: "/exercises", icon: Search },
   { key: "myProfile" as const, href: "/profile", icon: User },
 ];
 

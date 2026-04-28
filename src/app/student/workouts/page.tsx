@@ -92,6 +92,10 @@ function slotDocId(date: string, time: string): string {
   return `${date}_${time.replace(":","")}`
 }
 
+function getSlotStartDate(dateStr: string, time: string): Date {
+  return new Date(`${dateStr}T${time}:00`);
+}
+
 /** Monday of the week that contains dateStr (YYYY-MM-DD). */
 function getWeekStart(dateStr: string): string {
   const d = new Date(dateStr.substring(0, 10) + "T12:00:00");
@@ -376,6 +380,17 @@ export default function StudentWorkoutsPage() {
 
       } else {
         // ── Register: book slotsNeeded consecutive blocks ──
+        const selectedSlotStart = getSlotStartDate(selectedDateStr, time);
+        const msUntilStart = selectedSlotStart.getTime() - Date.now();
+        const oneHourMs = 60 * 60 * 1000;
+        if (msUntilStart <= oneHourMs) {
+          toast({
+            title: "Inscrição fechada",
+            description: "Só podes inscrever-te até 1 hora antes do início da sessão.",
+            variant: "destructive",
+          });
+          return;
+        }
         if (!canBookMore) {
           toast({ title: `Limite semanal atingido (${sessionsPerWeek}×/semana)`, variant: "destructive" });
           return;
@@ -583,6 +598,8 @@ export default function StudentWorkoutsPage() {
                       return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
                     });
                     const isFull = !isEnrolled && (!hasEnoughBlocks || !allBlocksFree);
+                    const slotStartsAt = getSlotStartDate(selectedDateStr, time);
+                    const isBookingCutoffPassed = !isEnrolled && (slotStartsAt.getTime() - Date.now()) <= 60 * 60 * 1000;
                     const docId = slotDocId(selectedDateStr, time);
                     const isLoading_ = isRegistering === docId ||
                       // also show loading on continuation while session-start is processing
@@ -638,6 +655,8 @@ export default function StudentWorkoutsPage() {
                             </div>
                           ) : !hasEnoughBlocks ? (
                             <span className="text-xs text-muted-foreground">Bloco incompleto</span>
+                          ) : isBookingCutoffPassed ? (
+                            <span className="text-xs text-muted-foreground">Inscrição fecha 1h antes</span>
                           ) : isFull ? (
                             <span className="text-xs text-muted-foreground">Bloco cheio</span>
                           ) : (
@@ -659,7 +678,7 @@ export default function StudentWorkoutsPage() {
                             Sair
                           </Button>
                         ) : isContinuation ? null
-                          : !isFull ? (
+                          : !isFull && !isBookingCutoffPassed ? (
                           <Button size="sm"
                             className="shrink-0 h-8 gap-1.5 text-xs bg-primary/90"
                             onClick={() => handleToggleSlot(time)}
@@ -670,7 +689,9 @@ export default function StudentWorkoutsPage() {
                             Inscrever
                           </Button>
                         ) : (
-                          <Badge variant="secondary" className="shrink-0 text-xs">Cheio</Badge>
+                          <Badge variant="secondary" className="shrink-0 text-xs">
+                            {isBookingCutoffPassed ? "Fechado" : "Cheio"}
+                          </Badge>
                         )}
                       </div>
                     );
