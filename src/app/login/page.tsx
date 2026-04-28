@@ -4,7 +4,8 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Dumbbell, Mail, Lock, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
+import Image from "next/image";
+import { Mail, Lock, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -139,8 +140,15 @@ function LoginContent() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-secondary/50 to-background">
         <Link href="/" className="flex items-center gap-2 mb-8">
-          <Dumbbell className="text-primary h-8 w-8" />
-          <span className="text-2xl font-bold tracking-tight font-headline">ElevateFit</span>
+          <Image
+            src="/sergio-oliveira-logo.png"
+            alt="Sergio Oliveira PT"
+            width={44}
+            height={44}
+            priority
+            className="h-11 w-11 rounded-md object-cover"
+          />
+          <span className="text-2xl font-bold tracking-tight font-headline">Sergio Oliveira PT</span>
         </Link>
         <Card className="w-full max-w-md shadow-xl border-t-4 border-t-primary">
           <CardHeader className="text-center space-y-4">
@@ -181,8 +189,15 @@ function LoginContent() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-secondary/50 to-background">
       <Link href="/" className="flex items-center gap-2 mb-8">
-        <Dumbbell className="text-primary h-8 w-8" />
-        <span className="text-2xl font-bold tracking-tight font-headline">ElevateFit</span>
+        <Image
+          src="/sergio-oliveira-logo.png"
+          alt="Sergio Oliveira PT"
+          width={44}
+          height={44}
+          priority
+          className="h-11 w-11 rounded-md object-cover"
+        />
+        <span className="text-2xl font-bold tracking-tight font-headline">Sergio Oliveira PT</span>
       </Link>
 
       <Card className="w-full max-w-md shadow-xl border-t-4 border-t-primary">

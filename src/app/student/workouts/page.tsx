@@ -7,13 +7,11 @@ import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import { Progress } from "@/components/ui/progress";
 import {
-  Dumbbell, Clock, Play, CheckCircle2, Loader2, AlertTriangle,
+  Dumbbell, Clock, Play, Loader2, AlertTriangle,
   CalendarDays, Users, UserPlus, UserMinus, ChevronDown, ChevronUp, StickyNote,
-  Pencil, Save, X as XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
@@ -40,6 +38,7 @@ interface WorkoutPlan {
   id: string;
   title: string;
   exercises: Array<{ exerciseName: string; sets: number; reps: string; restTimeSeconds: number; notes?: string }>;
+  weekStart?: string;
   createdAt?: string;
   assignedAt?: string;
   completedAt?: string;
@@ -121,6 +120,22 @@ function daysUntilDate(raw: string | undefined): number {
   return Math.round((planMs - todayMs) / 86_400_000);
 }
 
+function getPlanReferenceDate(plan: WorkoutPlan): string | undefined {
+  return plan.weekStart || plan.assignedAt || plan.createdAt;
+}
+
+function getPlanDaysUntilExpiry(plan: WorkoutPlan): number {
+  if (plan.weekStart) {
+    // Weekly plans should remain active until the end of the assigned week.
+    const weekStartDate = new Date(plan.weekStart.substring(0, 10) + "T12:00:00");
+    if (isNaN(weekStartDate.getTime())) return 0;
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekEndDate.getDate() + 6);
+    return daysUntilDate(toDateStr(weekEndDate));
+  }
+  return daysUntilDate(plan.assignedAt || plan.createdAt);
+}
+
 function migrateDaySchedule(raw: any): DaySchedule {
   if (raw && Array.isArray(raw.ranges)) return raw as DaySchedule;
   if (raw && raw.startTime) return { enabled: !!raw.enabled, ranges: [{ startTime: raw.startTime, endTime: raw.endTime || "18:00" }] };
@@ -156,15 +171,7 @@ export default function StudentWorkoutsPage() {
 
   // Workout plans
   const [workouts, setWorkouts]           = useState<WorkoutPlan[]>([]);
-  const [completedWorkouts, setCompletedWorkouts] = useState<WorkoutSession[]>([]);
-  const [expiredCount, setExpiredCount]   = useState(0);
   const [expandedWorkoutId, setExpandedWorkoutId] = useState<string | null>(null);
-
-  // Completed session editing
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editSessionExercises, setEditSessionExercises] = useState<Array<{ exerciseName: string; sets: Array<{ setNumber: number; weight: number; reps: number; completed: boolean }> }>>([]);
-  const [isSavingSession, setIsSavingSession] = useState(false);
 
   // ── Data fetching ────────────────────────────────────────────────────────────
 
@@ -233,29 +240,23 @@ export default function StudentWorkoutsPage() {
         const sessions: WorkoutSession[] = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as WorkoutSession[];
 
         const completedPlanIds = new Set(sessions.filter(s => s.completedAt && s.workoutPlanId).map(s => s.workoutPlanId!));
-        const completedSess = [...sessions].filter(s => s.completedAt)
-          .sort((a,b) => Date.parse(b.completedAt||"") - Date.parse(a.completedAt||""));
-
         const expiredPlans = plans.filter(p => {
-          if (p.completedAt || p.status === "completed" || p.status === "expired") return false;
+          if (p.completedAt || p.status === "completed") return false;
           if (completedPlanIds.has(p.id)) return false;
-          const raw = p.assignedAt || p.createdAt;
-          return raw ? daysUntilDate(raw) < 0 : false;
+          return getPlanDaysUntilExpiry(p) < 0;
         });
         for (const p of expiredPlans) {
           try { await updateDoc(doc(db!, "personalTrainers", tid, "students", rid, "workoutPlans", p.id), { status: "expired", expiredAt: new Date().toISOString() }); } catch {}
         }
-        if (!cancelled && expiredPlans.length > 0) setExpiredCount(expiredPlans.length);
 
         const activePlans = plans.filter(p => {
-          if (p.completedAt || p.status === "completed" || p.status === "expired") return false;
+          if (p.completedAt || p.status === "completed") return false;
           if (completedPlanIds.has(p.id) || expiredPlans.some(e => e.id === p.id)) return false;
-          const raw = p.assignedAt || p.createdAt;
-          return raw ? daysUntilDate(raw) >= 0 : true;
+          return getPlanDaysUntilExpiry(p) >= 0;
         });
-        activePlans.sort((a,b) => Date.parse(a.assignedAt||a.createdAt||"") - Date.parse(b.assignedAt||b.createdAt||""));
+        activePlans.sort((a,b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || ""));
 
-        if (!cancelled) { setWorkouts(activePlans); setCompletedWorkouts(completedSess); }
+        if (!cancelled) { setWorkouts(activePlans); }
       } catch (e) { console.error(e); }
       finally { if (!cancelled) setIsLoading(false); }
     }
@@ -441,44 +442,6 @@ export default function StudentWorkoutsPage() {
     }
   };
 
-  // ── Edit completed session ─────────────────────────────────────────────────
-
-  const startEditSession = (session: WorkoutSession) => {
-    const exercises = (session.exercises || []).map((ex) => ({
-      exerciseName: ex.exerciseName || "",
-      sets: (ex.sets || [{ setNumber: 1, weight: 0, reps: 0, completed: false }]).map((s: any) => ({
-        setNumber: s.setNumber ?? 1,
-        weight: typeof s.weight === "number" ? s.weight : Number(s.weight) || 0,
-        reps: typeof s.reps === "number" ? s.reps : Number(s.reps) || 0,
-        completed: s.completed ?? true,
-      })),
-    }));
-    setEditSessionExercises(exercises);
-    setEditingSessionId(session.id);
-    setExpandedSessionId(session.id);
-  };
-
-  const handleSaveSession = async () => {
-    if (!db || !user || !editingSessionId || !trainerId) return;
-    const resolvedId = rosterDocId || user.uid;
-    setIsSavingSession(true);
-    try {
-      await updateDoc(
-        doc(db, "personalTrainers", trainerId, "students", resolvedId, "workoutSessions", editingSessionId),
-        { exercises: editSessionExercises, updatedAt: new Date().toISOString() }
-      );
-      setCompletedWorkouts((prev) =>
-        prev.map((s) => s.id === editingSessionId ? { ...s, exercises: editSessionExercises } : s)
-      );
-      setEditingSessionId(null);
-      toast({ title: "Sessão atualizada" });
-    } catch (e: any) {
-      toast({ title: "Erro ao guardar", description: e?.message, variant: "destructive" });
-    } finally {
-      setIsSavingSession(false);
-    }
-  };
-
   // ── Render ────────────────────────────────────────────────────────────────────
 
   if (isUserLoading || isLoading) {
@@ -498,14 +461,6 @@ export default function StudentWorkoutsPage() {
           <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
           <p className="text-muted-foreground">Agenda de sessões com o teu treinador</p>
         </header>
-
-        {/* Expired banner */}
-        {expiredCount > 0 && (
-          <div className="flex items-start gap-3 rounded-lg border border-orange-400/40 bg-orange-50 dark:bg-orange-950/20 px-4 py-3 text-sm text-orange-800 dark:text-orange-200">
-            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-orange-500" />
-            <span>{expiredCount} {expiredCount === 1 ? t("workoutExpiredSingular") : t("workoutExpiredPlural")} {t("workoutExpiredCoachNotified")}</span>
-          </div>
-        )}
 
         {/* Main grid */}
         <div className="grid lg:grid-cols-5 gap-6 items-start">
@@ -808,132 +763,6 @@ export default function StudentWorkoutsPage() {
           );
         })()}
 
-        {/* Workout history */}
-        {completedWorkouts.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{t("workoutHistory")}</h2>
-              <Badge variant="secondary">{completedWorkouts.length} {t("completedCount")}</Badge>
-            </div>
-            <div className="space-y-2">
-              {completedWorkouts.map(session => {
-                const completedDate = session.completedAt || session.date;
-                const isExpanded = expandedSessionId === session.id;
-                const isEditing = editingSessionId === session.id;
-                const exList = isEditing ? editSessionExercises : (session.exercises || []);
-
-                return (
-                  <div key={session.id} className="rounded-lg border overflow-hidden bg-card">
-                    {/* Header */}
-                    <div className="flex items-center gap-3 px-3 py-2.5">
-                      <CheckCircle2 className="h-4 w-4 text-accent shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{session.workoutTitle || t("completedWorkout")}</p>
-                        {completedDate && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Clock className="h-3 w-3" /> {new Date(completedDate).toLocaleDateString()}
-                          </p>
-                        )}
-                      </div>
-                      <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0"
-                        onClick={() => {
-                          if (isEditing) { setEditingSessionId(null); return; }
-                          setExpandedSessionId(isExpanded ? null : session.id);
-                        }}>
-                        {isEditing ? <XIcon className="h-4 w-4" /> : isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      </Button>
-                      {!isEditing && (
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0"
-                          onClick={() => startEditSession(session)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </div>
-
-                    {/* Expanded exercises */}
-                    {(isExpanded || isEditing) && (
-                      <div className="border-t divide-y">
-                        {exList.length === 0 ? (
-                          <p className="text-sm text-muted-foreground text-center py-4">Sem exercícios registados.</p>
-                        ) : exList.map((ex: any, exIdx: number) => {
-                          const set = (ex.sets || [])[0] ?? { weight: 0, reps: 0 };
-                          return (
-                            <div key={exIdx} className="px-4 py-3">
-                              <p className="text-sm font-semibold mb-2">{ex.exerciseName}</p>
-                              {isEditing ? (
-                                <div className="flex items-center gap-3">
-                                  <div className="flex-1 space-y-1">
-                                    <label className="text-xs font-semibold text-muted-foreground uppercase">Peso (kg)</label>
-                                    <Input
-                                      type="number"
-                                      value={editSessionExercises[exIdx]?.sets[0]?.weight ?? ""}
-                                      onChange={(e) => {
-                                        setEditSessionExercises((prev) => {
-                                          const next = prev.map((ex2, i) => i !== exIdx ? ex2 : {
-                                            ...ex2,
-                                            sets: ex2.sets.map((s, si) => si === 0 ? { ...s, weight: Number(e.target.value) || 0 } : s),
-                                          });
-                                          return next;
-                                        });
-                                      }}
-                                      className="h-10 text-center font-bold"
-                                      placeholder="0"
-                                    />
-                                  </div>
-                                  <div className="flex-1 space-y-1">
-                                    <label className="text-xs font-semibold text-muted-foreground uppercase">Reps</label>
-                                    <Input
-                                      type="number"
-                                      value={editSessionExercises[exIdx]?.sets[0]?.reps ?? ""}
-                                      onChange={(e) => {
-                                        setEditSessionExercises((prev) => {
-                                          const next = prev.map((ex2, i) => i !== exIdx ? ex2 : {
-                                            ...ex2,
-                                            sets: ex2.sets.map((s, si) => si === 0 ? { ...s, reps: Number(e.target.value) || 0 } : s),
-                                          });
-                                          return next;
-                                        });
-                                      }}
-                                      className="h-10 text-center font-bold"
-                                      placeholder="0"
-                                    />
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex gap-4">
-                                  <span className="text-xs bg-muted rounded px-2 py-1 font-semibold tabular-nums">
-                                    {set.weight ?? 0} kg
-                                  </span>
-                                  <span className="text-xs bg-muted rounded px-2 py-1 font-semibold tabular-nums">
-                                    {set.reps ?? 0} reps
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        {isEditing && (
-                          <div className="px-4 py-3 flex gap-2 bg-muted/10">
-                            <Button size="sm" className="gap-1.5 text-xs"
-                              onClick={handleSaveSession} disabled={isSavingSession}>
-                              {isSavingSession ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                              Guardar
-                            </Button>
-                            <Button size="sm" variant="outline" className="text-xs"
-                              onClick={() => setEditingSessionId(null)}>
-                              Cancelar
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </StudentNavigation>
   );

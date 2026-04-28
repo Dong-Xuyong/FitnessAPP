@@ -191,6 +191,7 @@ export default function AssignmentCalendarPage() {
   const [assignWeekMode, setAssignWeekMode] = useState<"single" | "weekly">("single");
   const [assignWeeklyProgramId, setAssignWeeklyProgramId] = useState("");
   const [isAssigningWeeklyFromCal, setIsAssigningWeeklyFromCal] = useState(false);
+  const [isRemovingStudentWeekAssignments, setIsRemovingStudentWeekAssignments] = useState(false);
 
   // Student filter (0 = no filter, shows all; set = student-centric view)
   const [filterStudentId, setFilterStudentId] = useState("");
@@ -845,6 +846,45 @@ export default function AssignmentCalendarPage() {
       toast({ title: "Atribuição removida" });
     } catch {
       toast({ title: "Erro", variant: "destructive" });
+    }
+  };
+
+  const handleRemoveAllAssignmentsForStudentInWeek = async () => {
+    if (!db || !user || !filterStudentId) return;
+    const assignmentsForStudent = selectedWeekAssignments.filter((a) => a.studentId === filterStudentId);
+    if (assignmentsForStudent.length === 0) {
+      toast({ title: "Sem atribuições para remover" });
+      return;
+    }
+
+    setIsRemovingStudentWeekAssignments(true);
+    try {
+      await Promise.all(
+        assignmentsForStudent.map((a) =>
+          deleteDoc(doc(db, "personalTrainers", user.uid, "weekProgramAssignments", a.id))
+        )
+      );
+
+      const plansSnap = await getDocs(
+        collection(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans")
+      );
+      const weeklyPlans = plansSnap.docs.filter(
+        (d) => (d.data()?.weekStart as string | undefined) === selectedWeekStart
+      );
+      await Promise.all(
+        weeklyPlans.map((d) =>
+          deleteDoc(doc(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans", d.id))
+        )
+      );
+
+      setWeekAssignments((prev) =>
+        prev.filter((a) => !(a.studentId === filterStudentId && a.weekStart === selectedWeekStart))
+      );
+      toast({ title: "Todos os programas do aluno foram removidos" });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message, variant: "destructive" });
+    } finally {
+      setIsRemovingStudentWeekAssignments(false);
     }
   };
 
@@ -1574,6 +1614,22 @@ export default function AssignmentCalendarPage() {
                 <UserPlus className="h-4 w-4" /> Atribuir Programa
               </Button>
             </div>
+            {isFilterActive && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10 w-fit"
+                onClick={handleRemoveAllAssignmentsForStudentInWeek}
+                disabled={isRemovingStudentWeekAssignments}
+              >
+                {isRemovingStudentWeekAssignments ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Remover todos do aluno (semana)
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             {selectedWeekAssignments.length === 0 ? (

@@ -1,7 +1,7 @@
-# ElevateFit Database Schema
+# Sergio Oliveira PT Database Schema
 
 ## Overview
-ElevateFit uses **Firebase Firestore** as its NoSQL database. The structure is organized into collections and subcollections to manage relationships between trainers, students, and their data.
+Sergio Oliveira PT uses **Firebase Firestore** as its NoSQL database. The structure is organized into collections and subcollections to manage relationships between trainers, students, and their data.
 
 ---
 
@@ -409,7 +409,7 @@ notifications/
 
 ---
 
-This database structure supports all core features of ElevateFit including:
+This database structure supports all core features of Sergio Oliveira PT including:
 - ✅ Trainer registration and profile management
 - ✅ Student roster management
 - ✅ Workout program creation and assignment

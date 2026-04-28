@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -61,11 +62,17 @@ function SidebarContent({
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="p-4 flex items-center gap-2">
-        <div className="w-8 h-8 shrink-0 rounded-lg bg-primary flex items-center justify-center">
-          <Dumbbell className="text-primary-foreground h-5 w-5" />
-        </div>
-        <span className="text-xl font-bold font-headline tracking-tight text-primary">ElevateFit</span>
+      <div className="p-4">
+        <Link href="/dashboard" onClick={onNavClick} className="block">
+          <Image
+            src="/sergio-oliveira-logo.png"
+            alt="Sergio Oliveira Personal Trainer"
+            width={130}
+            height={73}
+            priority
+            className="h-auto w-full max-w-[110px] rounded-md"
+          />
+        </Link>
       </div>
 
       {/* Nav Items */}
@@ -180,19 +187,25 @@ export function Navigation({ children }: { children: React.ReactNode }) {
           {/* Logo */}
           <div className={cn("p-4 flex items-center", collapsed ? "justify-center" : "justify-between")}>
             {!collapsed ? (
-              <Link href="/dashboard" className="flex items-center gap-2 overflow-hidden">
-                <div className="w-8 h-8 shrink-0 rounded-lg bg-primary flex items-center justify-center">
-                  <Dumbbell className="text-primary-foreground h-5 w-5" />
-                </div>
-                <span className="text-xl font-bold font-headline tracking-tight text-primary whitespace-nowrap">
-                  ElevateFit
-                </span>
+              <Link href="/dashboard" className="block overflow-hidden">
+                <Image
+                  src="/sergio-oliveira-logo.png"
+                  alt="Sergio Oliveira Personal Trainer"
+                  width={130}
+                  height={73}
+                  priority
+                  className="h-auto w-full max-w-[110px] rounded-md"
+                />
               </Link>
             ) : (
               <Link href="/dashboard">
-                <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                  <Dumbbell className="text-primary-foreground h-5 w-5" />
-                </div>
+                <Image
+                  src="/sergio-oliveira-logo.png"
+                  alt="Sergio Oliveira Personal Trainer"
+                  width={48}
+                  height={48}
+                  className="h-10 w-10 rounded-md object-cover"
+                />
               </Link>
             )}
           </div>

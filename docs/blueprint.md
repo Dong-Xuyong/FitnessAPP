@@ -1,4 +1,4 @@
-# **App Name**: ElevateFit
+# **App Name**: Sergio Oliveira PT
 
 ## Core Features:
 

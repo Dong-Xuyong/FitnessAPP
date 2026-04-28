@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * ElevateFit Security Rules
+     * Sergio Oliveira PT Security Rules
      */
 
     function isSignedIn() {

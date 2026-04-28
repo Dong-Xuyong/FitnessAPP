@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -32,6 +33,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 const navItems = [
   { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
   { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
+  { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
   { key: "exercises" as const, href: "/student/exercises", icon: BookOpen },
   { key: "progress" as const, href: "/student/progress", icon: LineChart },
   { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
@@ -102,11 +104,15 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-background">
       <aside className="w-64 border-r bg-card hidden md:flex flex-col fixed inset-y-0 overflow-hidden">
         <div className="p-6">
-          <Link href="/student/dashboard" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-accent-foreground">
-              <Dumbbell className="h-5 w-5" />
-            </div>
-            <span className="text-xl font-bold font-headline tracking-tight text-accent">ElevateStudent</span>
+          <Link href="/student/dashboard" className="block">
+          <Image
+            src="/sergio-oliveira-logo.png"
+            alt="Sergio Oliveira Personal Trainer"
+            width={130}
+            height={73}
+            priority
+            className="h-auto w-full max-w-[110px] rounded-md"
+          />
           </Link>
         </div>
 
@@ -158,15 +164,17 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
           <div className="p-6 border-b">
             <Link
               href="/student/dashboard"
-              className="flex items-center gap-2"
+              className="block"
               onClick={() => setMobileOpen(false)}
             >
-              <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-accent-foreground">
-                <Dumbbell className="h-5 w-5" />
-              </div>
-              <span className="text-xl font-bold font-headline tracking-tight text-accent">
-                ElevateStudent
-              </span>
+              <Image
+                src="/sergio-oliveira-logo.png"
+                alt="Sergio Oliveira Personal Trainer"
+                width={130}
+                height={73}
+                priority
+                className="h-auto w-full max-w-[110px] rounded-md"
+              />
             </Link>
           </div>
           <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">

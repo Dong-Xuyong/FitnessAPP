@@ -12,7 +12,7 @@ export default function Home() {
       <header className="px-6 h-16 flex items-center border-b bg-card">
         <Link href="/" className="flex items-center gap-2">
           <Dumbbell className="text-primary h-6 w-6" />
-          <span className="text-xl font-bold tracking-tight">ElevateFit</span>
+          <span className="text-xl font-bold tracking-tight">Sergio Oliveira PT</span>
         </Link>
         <div className="ml-auto">
           <Button variant="ghost" asChild>

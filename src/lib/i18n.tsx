@@ -188,7 +188,7 @@ const translations = {
     aiProgramBuilderDesc: "Generate tailored workout plans instantly based on student goals and fitness levels.",
     progressTracking: "Progress Tracking",
     progressTrackingDesc: "Visual charts for weight and strength progress help keep students motivated and on track.",
-    footerText: "© 2024 ElevateFit. Built for champions.",
+    footerText: "© 2026 Sergio Oliveira PT. Built for champions.",
 
     // Login page
     loginFailed: "Login Failed",
@@ -377,7 +377,7 @@ const translations = {
 
     // Coach Profile
     coachProfile: "Coach Profile",
-    coachProfileDesc: "Manage your public identity on the ElevateFit platform.",
+    coachProfileDesc: "Manage your public identity on the Sergio Oliveira PT platform.",
     professionalDetails: "Professional Details",
     professionalDetailsDesc: "This information is visible to your students.",
     profilePhotoUrl: "Profile Photo URL",
@@ -816,7 +816,7 @@ const translations = {
     aiProgramBuilderDesc: "Gere planos de treino personalizados instantaneamente com base nos objetivos e níveis de aptidão dos alunos.",
     progressTracking: "Acompanhamento de Progresso",
     progressTrackingDesc: "Gráficos visuais de peso e força ajudam a manter os alunos motivados e no caminho certo.",
-    footerText: "© 2024 ElevateFit. Feito para campeões.",
+    footerText: "© 2026 Sergio Oliveira PT. Feito para campeões.",
 
     // Login page
     loginFailed: "Falha no Login",
@@ -1005,7 +1005,7 @@ const translations = {
 
     // Coach Profile
     coachProfile: "Perfil do Treinador",
-    coachProfileDesc: "Gerir a sua identidade pública na plataforma ElevateFit.",
+    coachProfileDesc: "Gerir a sua identidade pública na plataforma Sergio Oliveira PT.",
     professionalDetails: "Detalhes Profissionais",
     professionalDetailsDesc: "Esta informação é visível para os seus alunos.",
     profilePhotoUrl: "URL da Foto de Perfil",
