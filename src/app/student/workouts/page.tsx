@@ -49,6 +49,9 @@ interface WorkoutPlan {
 
 const DAY_KEYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
 
+/** Same window as booking: changes within 1 hour of start are not allowed. */
+const SESSION_SIGNUP_CUTOFF_MS = 60 * 60 * 1000;
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function generateSlotTimes(start: string, end: string, dur: number): string[] {
@@ -356,8 +359,17 @@ export default function StudentWorkoutsPage() {
     setIsRegistering(slotDocId(selectedDateStr, time));
     try {
       if (isEnrolled) {
-        // ── Unregister: remove student from ALL consecutive blocks of this session ──
         const sessionStart = myEntry.sessionStart ?? time;
+        const sessionStartsAt = getSlotStartDate(selectedDateStr, sessionStart);
+        if (sessionStartsAt.getTime() - Date.now() <= SESSION_SIGNUP_CUTOFF_MS) {
+          toast({
+            title: t("sessionCancelClosedTitle"),
+            description: t("sessionCancelClosedDesc"),
+            variant: "destructive",
+          });
+          return;
+        }
+        // ── Unregister: remove student from ALL consecutive blocks of this session ──
         const sessionStartIdx = timeSlots.indexOf(sessionStart);
         const blocksToFree = timeSlots.slice(
           Math.max(0, sessionStartIdx),
@@ -377,13 +389,11 @@ export default function StudentWorkoutsPage() {
         }
         setSessionSlots(nextSlots);
         toast({ title: "Inscrição cancelada" });
-
       } else {
         // ── Register: book slotsNeeded consecutive blocks ──
         const selectedSlotStart = getSlotStartDate(selectedDateStr, time);
         const msUntilStart = selectedSlotStart.getTime() - Date.now();
-        const oneHourMs = 60 * 60 * 1000;
-        if (msUntilStart <= oneHourMs) {
+        if (msUntilStart <= SESSION_SIGNUP_CUTOFF_MS) {
           toast({
             title: "Inscrição fechada",
             description: "Só podes inscrever-te até 1 hora antes do início da sessão.",
@@ -599,7 +609,14 @@ export default function StudentWorkoutsPage() {
                     });
                     const isFull = !isEnrolled && (!hasEnoughBlocks || !allBlocksFree);
                     const slotStartsAt = getSlotStartDate(selectedDateStr, time);
-                    const isBookingCutoffPassed = !isEnrolled && (slotStartsAt.getTime() - Date.now()) <= 60 * 60 * 1000;
+                    const isBookingCutoffPassed =
+                      !isEnrolled && slotStartsAt.getTime() - Date.now() <= SESSION_SIGNUP_CUTOFF_MS;
+                    const sessionStartForCancel =
+                      isSessionStart && mySlotEntry ? (mySlotEntry.sessionStart ?? time) : time;
+                    const sessionStartsAtForCancel = getSlotStartDate(selectedDateStr, sessionStartForCancel);
+                    const isCancelCutoffPassed =
+                      isSessionStart &&
+                      sessionStartsAtForCancel.getTime() - Date.now() <= SESSION_SIGNUP_CUTOFF_MS;
                     const docId = slotDocId(selectedDateStr, time);
                     const isLoading_ = isRegistering === docId ||
                       // also show loading on continuation while session-start is processing
@@ -666,17 +683,11 @@ export default function StudentWorkoutsPage() {
                           )}
                         </div>
 
-                        {/* Action: Sair only on session-start; Inscrever only on free slots */}
+                        {/* Action: no self-unregister — trainer manages removals */}
                         {isSessionStart ? (
-                          <Button size="sm" variant="outline"
-                            className="shrink-0 h-8 gap-1.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-                            onClick={() => handleToggleSlot(time)}
-                            disabled={!!isLoading_}>
-                            {isLoading_
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <UserMinus className="h-3.5 w-3.5" />}
-                            Sair
-                          </Button>
+                          <p className="shrink-0 text-[10px] text-muted-foreground max-w-[140px] text-right leading-tight">
+                            {t("sessionBookingCancelViaTrainer")}
+                          </p>
                         ) : isContinuation ? null
                           : !isFull && !isBookingCutoffPassed ? (
                           <Button size="sm"
@@ -702,7 +713,7 @@ export default function StudentWorkoutsPage() {
           </Card>
         </div>
 
-        {/* Assigned workout plans — filtered to selected week */}
+        {/* Assigned workout plans — any active assignment can be started */}
         {workouts.length > 0 && (() => {
           const weekPlans = workouts.filter(w => {
             const planDate = (w.weekStart || w.assignedAt || w.createdAt || "").substring(0, 10);

@@ -44,22 +44,6 @@ interface WorkoutPlan {
   createdAt?: string;
 }
 
-function daysUntilDate(raw: string | undefined): number {
-  if (!raw) return 0;
-  const d = new Date(raw);
-  if (isNaN(d.getTime())) return 0;
-  const today = new Date();
-  const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const planMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  return Math.round((planMs - todayMs) / 86_400_000);
-}
-
-function isAvailableToday(workout: WorkoutPlan): boolean {
-  const raw = workout.assignedAt || workout.createdAt;
-  if (!raw) return true;
-  return daysUntilDate(raw) === 0;
-}
-
 export default function WorkoutSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = use(params);
   const workoutId = unwrappedParams.id;
@@ -73,7 +57,6 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   const [logs, setLogs] = useState<Record<number, SetLog>>({});
   const [isFinished, setIsFinished] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isAllowedToday, setIsAllowedToday] = useState(false);
   const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -95,7 +78,6 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
         if (planDoc.exists() && !cancelled) {
           const workoutData = { ...planDoc.data(), personalTrainerId: trainerId } as WorkoutPlan;
           setWorkout(workoutData);
-          setIsAllowedToday(isAvailableToday(workoutData));
         }
       } catch (e) {
         console.error("Error fetching workout:", e);
@@ -174,28 +156,6 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
           <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
           <h2 className="text-2xl font-bold">{t("workoutNotFound")}</h2>
           <Button asChild><Link href="/student/workouts">{t("backToWorkouts")}</Link></Button>
-        </div>
-      </StudentNavigation>
-    );
-  }
-
-  if (!isAllowedToday) {
-    const days = daysUntilDate(workout.assignedAt || workout.createdAt);
-    return (
-      <StudentNavigation>
-        <div className="max-w-md mx-auto py-12 text-center space-y-6">
-          <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto">
-            <Dumbbell className="h-10 w-10 text-muted-foreground" />
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-2xl font-bold font-headline">{t("workoutNotAvailableToday")}</h1>
-            <p className="text-muted-foreground">
-              {t("availableInDays").replace("{n}", String(days > 0 ? days : 0))}
-            </p>
-          </div>
-          <Button className="w-full" asChild>
-            <Link href="/student/workouts">{t("backToWorkouts")}</Link>
-          </Button>
         </div>
       </StudentNavigation>
     );
