@@ -52,6 +52,18 @@ const DAY_KEYS = ["sunday","monday","tuesday","wednesday","thursday","friday","s
 /** Same window as booking: changes within 1 hour of start are not allowed. */
 const SESSION_SIGNUP_CUTOFF_MS = 60 * 60 * 1000;
 
+/**
+ * Returns true only when every slot in the array is exactly `dur` minutes
+ * after the previous one. Prevents non-adjacent slots (e.g. 09:00 + 12:00)
+ * from being booked / displayed as a single multi-block session.
+ */
+function areConsecutiveBlocks(times: string[], dur: number): boolean {
+  for (let i = 1; i < times.length; i++) {
+    if (addMin(times[i - 1], dur) !== times[i]) return false;
+  }
+  return true;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function generateSlotTimes(start: string, end: string, dur: number): string[] {
@@ -369,11 +381,10 @@ export default function StudentWorkoutsPage() {
           });
           return;
         }
-        // ── Unregister: remove student from ALL consecutive blocks of this session ──
-        const sessionStartIdx = timeSlots.indexOf(sessionStart);
-        const blocksToFree = timeSlots.slice(
-          Math.max(0, sessionStartIdx),
-          Math.max(0, sessionStartIdx) + slotsNeeded
+        // ── Unregister: free exactly the consecutive blocks that were booked ──
+        // Build by time arithmetic so non-adjacent slots (different ranges) are never touched.
+        const blocksToFree = Array.from({ length: slotsNeeded }, (_, i) =>
+          addMin(sessionStart, i * slotDurationMin)
         );
 
         const nextSlots = [...sessionSlots];
@@ -406,8 +417,8 @@ export default function StudentWorkoutsPage() {
           return;
         }
         const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsNeeded);
-        if (blocksToBook.length < slotsNeeded) {
-          toast({ title: `Não há blocos suficientes para uma sessão de ${sessionDurationMin} min neste horário.`, variant: "destructive" });
+        if (blocksToBook.length < slotsNeeded || !areConsecutiveBlocks(blocksToBook, slotDurationMin)) {
+          toast({ title: `Não há blocos consecutivos suficientes para uma sessão de ${sessionDurationMin} min neste horário.`, variant: "destructive" });
           return;
         }
 
@@ -593,16 +604,27 @@ export default function StudentWorkoutsPage() {
                     const mySlotEntry = slot?.students.find(s => s.studentId === myId);
                     const isEnrolled = !!mySlotEntry;
 
-                    // Is this a continuation block (2nd/3rd… of a session started earlier)?
+                    // A slot is a continuation only if it is strictly adjacent to sessionStart
+                    // (i.e. an exact multiple of slotDurationMin away, within the session window).
+                    // Slots in a different time range (e.g. 12:00 when sessionStart is 09:00)
+                    // are independent bookings and must NOT be collapsed into "continuação".
                     const isContinuation = isEnrolled
                       && mySlotEntry.sessionStart !== undefined
-                      && mySlotEntry.sessionStart !== time;
+                      && mySlotEntry.sessionStart !== time
+                      && (() => {
+                        const [sh, sm] = mySlotEntry.sessionStart!.split(":").map(Number);
+                        const [th, tm] = time.split(":").map(Number);
+                        const diff = (th * 60 + tm) - (sh * 60 + sm);
+                        return diff > 0 && diff < slotsNeeded * slotDurationMin && diff % slotDurationMin === 0;
+                      })();
                     const isSessionStart = isEnrolled && !isContinuation;
 
-                    // For non-enrolled: need slotsNeeded consecutive free slots to book
+                    // For non-enrolled: need slotsNeeded truly consecutive free slots to book
                     const startIdx = timeSlots.indexOf(time);
                     const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeeded);
-                    const hasEnoughBlocks = !isEnrolled && blocksForSession.length === slotsNeeded;
+                    const hasEnoughBlocks = !isEnrolled
+                      && blocksForSession.length === slotsNeeded
+                      && areConsecutiveBlocks(blocksForSession, slotDurationMin);
                     const allBlocksFree = hasEnoughBlocks && blocksForSession.every(t2 => {
                       const s2 = slotsByTime.get(t2);
                       return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
@@ -669,6 +691,9 @@ export default function StudentWorkoutsPage() {
                                   <Dumbbell className="h-3 w-3 shrink-0" /> {mySlotEntry.workoutTitle}
                                 </p>
                               )}
+                              {isCancelCutoffPassed && (
+                                <p className="text-xs text-destructive/70">{t("sessionCancelClosedDesc")}</p>
+                              )}
                             </div>
                           ) : !hasEnoughBlocks ? (
                             <span className="text-xs text-muted-foreground">Bloco incompleto</span>
@@ -683,11 +708,28 @@ export default function StudentWorkoutsPage() {
                           )}
                         </div>
 
-                        {/* Action: no self-unregister — trainer manages removals */}
+                        {/* Action: Sair until 1h before start; locked badge afterwards */}
                         {isSessionStart ? (
-                          <p className="shrink-0 text-[10px] text-muted-foreground max-w-[140px] text-right leading-tight">
-                            {t("sessionBookingCancelViaTrainer")}
-                          </p>
+                          isCancelCutoffPassed ? (
+                            <Badge variant="secondary" className="shrink-0 text-xs">
+                              {t("sessionCancelClosedBadge")}
+                            </Badge>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0 h-8 gap-1.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                              onClick={() => handleToggleSlot(time)}
+                              disabled={!!isLoading_}
+                            >
+                              {isLoading_ ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <UserMinus className="h-3.5 w-3.5" />
+                              )}
+                              {t("sessionBookingLeave")}
+                            </Button>
+                          )
                         ) : isContinuation ? null
                           : !isFull && !isBookingCutoffPassed ? (
                           <Button size="sm"
