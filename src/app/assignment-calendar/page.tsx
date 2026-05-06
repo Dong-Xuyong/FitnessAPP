@@ -348,7 +348,14 @@ export default function AssignmentCalendarPage() {
   }, [sessionSlots, selectedDateStr]);
 
   const slotDates = useMemo(
-    () => [...new Set(sessionSlots.map((s) => s.date))].map((s) => new Date(s + "T12:00:00")),
+    () =>
+      [
+        ...new Set(
+          sessionSlots
+            .filter((s) => Array.isArray(s.students) && s.students.length > 0)
+            .map((s) => s.date)
+        ),
+      ].map((s) => new Date(s + "T12:00:00")),
     [sessionSlots]
   );
 

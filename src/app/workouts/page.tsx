@@ -556,9 +556,6 @@ export default function WorkoutsPage() {
                       ))}
                     </CardContent>
                     <CardFooter className="pt-0 flex gap-2 justify-end">
-                      <Button className="gap-2" variant="secondary" onClick={() => openAssignDialog(program)}>
-                        <Send className="h-4 w-4" /> {t("assignToStudent")}
-                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"

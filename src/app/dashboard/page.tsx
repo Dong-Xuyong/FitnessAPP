@@ -58,6 +58,7 @@ function mergePortalAndRoster(
 type Assignment = {
   planId: string;
   studentId: string;
+  storageStudentId: string;
   studentName: string;
   title: string;
   assignedAt: string;
@@ -106,6 +107,17 @@ function DashboardContent() {
     [mergedStudents]
   );
 
+  const portalStudentIdByEmail = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const student of (portalStudents || []) as StudentRow[]) {
+      const email = String((student as any).email || "").trim().toLowerCase();
+      if (email && student.id) {
+        map.set(email, student.id);
+      }
+    }
+    return map;
+  }, [portalStudents]);
+
   // Fetch all workout plans assigned to roster students
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teamVelocityPercent, setTeamVelocityPercent] = useState(0);
@@ -148,26 +160,45 @@ function DashboardContent() {
     
     for (const student of rosterStudents) {
       try {
-        const [plansSnap, sessionsSnap] = await Promise.all([
-          getDocs(collection(db, "personalTrainers", user.uid, "students", student.id, "workoutPlans")),
-          getDocs(collection(db, "personalTrainers", user.uid, "students", student.id, "workoutSessions")),
-        ]);
+        const rosterStudentId = String((student as any).id || "");
+        const userId = String((student as any).userId || "");
+        const email = String((student as any).email || "").trim().toLowerCase();
+        const globalStudentId = email ? (portalStudentIdByEmail.get(email) || "") : "";
+        const candidateIds = Array.from(new Set([rosterStudentId, userId, globalStudentId].filter(Boolean)));
+
+        let plansSnap: any = null;
+        let sessionsSnap: any = null;
+        let storageStudentId = rosterStudentId;
+
+        for (const candidateId of candidateIds) {
+          const [candidatePlans, candidateSessions] = await Promise.all([
+            getDocs(collection(db, "personalTrainers", user.uid, "students", candidateId, "workoutPlans")),
+            getDocs(collection(db, "personalTrainers", user.uid, "students", candidateId, "workoutSessions")),
+          ]);
+          plansSnap = candidatePlans;
+          sessionsSnap = candidateSessions;
+          storageStudentId = candidateId;
+          if (!candidatePlans.empty || !candidateSessions.empty) {
+            break;
+          }
+        }
         
         const completedPlanIds = new Set<string>();
-        sessionsSnap.forEach((sessDoc) => {
+        sessionsSnap.forEach((sessDoc: any) => {
           const data = sessDoc.data();
           if (data.completedAt) {
             completedPlanIds.add(data.workoutPlanId);
           }
         });
         
-        plansSnap.forEach((d) => {
+        plansSnap.forEach((d: any) => {
           const data = d.data();
           const assignedDate = new Date(data.assignedAt || data.createdAt || "");
           
           all.push({
             planId: d.id,
-            studentId: student.id,
+            studentId: rosterStudentId,
+            storageStudentId,
             studentName: `${student.firstName || student.name || ""} ${student.lastName || ""}`.trim(),
             title: data.title || t("untitled"),
             assignedAt: data.assignedAt || data.createdAt || "",
@@ -191,7 +222,7 @@ function DashboardContent() {
 
         const nowTs = Date.now();
         const plannedWorkouts = plansSnap.docs
-          .map((planDoc) => {
+          .map((planDoc: any) => {
             const data = planDoc.data();
             const scheduledRaw = data.assignedAt || data.createdAt || "";
             const ts = Date.parse(scheduledRaw);
@@ -200,8 +231,8 @@ function DashboardContent() {
               timestamp: Number.isFinite(ts) ? ts : 0,
             };
           })
-          .filter((plan) => plan.timestamp > 0 && plan.timestamp <= nowTs)
-          .sort((a, b) => b.timestamp - a.timestamp);
+          .filter((plan: any) => plan.timestamp > 0 && plan.timestamp <= nowTs)
+          .sort((a: any, b: any) => b.timestamp - a.timestamp);
 
         let streak = 0;
         for (const plan of plannedWorkouts) {
@@ -214,7 +245,7 @@ function DashboardContent() {
 
         totalStreakAcrossRoster += streak;
         streakStudentCount += 1;
-        streakMap[student.id] = streak;
+        streakMap[rosterStudentId] = streak;
       } catch {}
     }
     
@@ -223,7 +254,7 @@ function DashboardContent() {
     setTeamVelocityPercent(percentageValue);
     setAvgStreakValue(streakStudentCount > 0 ? Math.round(totalStreakAcrossRoster / streakStudentCount) : 0);
     setStreakByStudentId(streakMap);
-  }, [db, user, rosterStudents]);
+  }, [db, user, rosterStudents, portalStudentIdByEmail, t]);
 
   useEffect(() => {
     fetchAssignments();
@@ -254,7 +285,17 @@ function DashboardContent() {
   const handleDeleteAssignment = async (a: Assignment) => {
     if (!db || !user) return;
     try {
-      await deleteDoc(doc(db, "personalTrainers", user.uid, "students", a.studentId, "workoutPlans", a.planId));
+      await deleteDoc(
+        doc(
+          db,
+          "personalTrainers",
+          user.uid,
+          "students",
+          a.storageStudentId || a.studentId,
+          "workoutPlans",
+          a.planId
+        )
+      );
       toast({ title: t("workoutRemoved") });
       setSelectedAssignment(null);
       fetchAssignments();
@@ -270,7 +311,15 @@ function DashboardContent() {
         ? new Date(`${editDate}T${editTime || "00:00"}`).toISOString()
         : selectedAssignment.assignedAt;
       await updateDoc(
-        doc(db, "personalTrainers", user.uid, "students", selectedAssignment.studentId, "workoutPlans", selectedAssignment.planId),
+        doc(
+          db,
+          "personalTrainers",
+          user.uid,
+          "students",
+          selectedAssignment.storageStudentId || selectedAssignment.studentId,
+          "workoutPlans",
+          selectedAssignment.planId
+        ),
         { title: editTitle, exercises: editExercises, assignedAt: updatedAssignedAt, scheduledTime: editTime }
       );
       toast({ title: t("workoutUpdated") });
@@ -382,65 +431,8 @@ function DashboardContent() {
           ))}
         </div>
 
-        {/* Upcoming Assignments */}
-        {(() => {
-          const now = new Date();
-          const upcoming = assignments
-            .filter((a) => a.assignedAt && new Date(a.assignedAt) >= new Date(now.toDateString()))
-            .sort((a, b) => {
-              const da = new Date(`${a.assignedAt.split("T")[0]}T${a.scheduledTime || "00:00"}`);
-              const db2 = new Date(`${b.assignedAt.split("T")[0]}T${b.scheduledTime || "00:00"}`);
-              return da.getTime() - db2.getTime();
-            })
-            .slice(0, 6);
-          return upcoming.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CalendarIcon className="h-4 w-4 text-primary" /> {t("upcomingAssignments")}
-                </CardTitle>
-                <CardDescription>{t("nextScheduledWorkouts")}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {upcoming.map((a, i) => {
-                    const d = new Date(a.assignedAt);
-                    const isToday = d.toDateString() === now.toDateString();
-                    return (
-                      <button
-                        key={`${a.planId}-${i}`}
-                        onClick={() => openDetail(a)}
-                        className="flex items-start gap-3 p-3 rounded-lg border hover:bg-accent/10 transition-colors text-left"
-                      >
-                        <div className="flex flex-col items-center justify-center min-w-[44px] rounded-md bg-primary/10 px-2 py-1">
-                          <span className="text-[10px] font-bold uppercase text-primary">
-                            {d.toLocaleDateString(undefined, { month: "short" })}
-                          </span>
-                          <span className="text-lg font-bold leading-none">{d.getDate()}</span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold truncate">{a.title}</p>
-                          <p className="text-xs text-muted-foreground truncate">{a.studentName}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            {a.scheduledTime && (
-                              <Badge variant="outline" className="text-[10px] h-4 px-1.5">{a.scheduledTime}</Badge>
-                            )}
-                            {isToday && (
-                              <Badge className="text-[10px] h-4 px-1.5 bg-green-100 text-green-800">{t("today")}</Badge>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null;
-        })()}
-
         <div className="grid lg:grid-cols-3 gap-6">
-          <Card className="lg:col-span-2">
+          <Card className="lg:col-span-3">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>{t("students")}</CardTitle>
@@ -544,50 +536,6 @@ function DashboardContent() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CalendarIcon className="h-4 w-4 text-primary" /> {t("assignmentCalendar")}
-                </CardTitle>
-                <CardDescription>{t("selectDateToSee")}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <input
-                  type="date"
-                  value={calendarDate}
-                  onChange={(e) => setCalendarDate(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
-                <div className="space-y-2">
-                  {calendarDate && (
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {new Date(calendarDate).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
-                    </p>
-                  )}
-                  {selectedDateAssignments.length > 0 ? (
-                    selectedDateAssignments.map((a, i) => (
-                      <button
-                        key={i}
-                        onClick={() => openDetail(a)}
-                        className="flex items-center gap-2 p-2 rounded-lg border hover:bg-accent/10 transition-colors w-full text-left"
-                      >
-                        <Dumbbell className="h-3.5 w-3.5 text-primary shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{a.title}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">
-                            {a.studentName}{a.scheduledTime ? ` · ${a.scheduledTime}` : ""}
-                          </p>
-                        </div>
-                      </button>
-                    ))
-                  ) : calendarDate ? (
-                    <p className="text-xs text-muted-foreground">{t("noAssignmentsOnDate")}</p>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </div>
 
         {/* Workout Detail Dialog */}
