@@ -37,6 +37,8 @@ import {
   Ban,
   ShieldOff,
   Percent,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -73,6 +75,36 @@ function getAssignedWorkoutTimestamp(plan: any): number {
   if (!rawDate) return 0;
   const timestamp = Date.parse(rawDate);
   return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function formatWeekLabelFromPlan(plan: any): string {
+  const weekStartRaw = String(plan?.weekStart || "").trim();
+  if (weekStartRaw) {
+    const weekStartDate = new Date(weekStartRaw + "T12:00:00");
+    if (!Number.isNaN(weekStartDate.getTime())) {
+      return weekStartDate.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+  }
+
+  const assignedAtRaw = String(plan?.assignedAt || plan?.createdAt || "").trim();
+  if (assignedAtRaw) {
+    const assignedDate = new Date(assignedAtRaw);
+    if (!Number.isNaN(assignedDate.getTime())) {
+      return assignedDate.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+  }
+
+  return "—";
 }
 
 function increaseAssignedReps(reps: string, repIncrease: number): string {
@@ -602,6 +634,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     goalType: "",
   });
   const [editingWorkoutPlan, setEditingWorkoutPlan] = useState<any>(null);
+  const [editingAssignedExercises, setEditingAssignedExercises] = useState<any[]>([]);
+  const [expandedAssignedPlanId, setExpandedAssignedPlanId] = useState<string | null>(null);
+  const [editingAssignedExerciseKey, setEditingAssignedExerciseKey] = useState<string | null>(null);
+  const [editingAssignedExerciseNote, setEditingAssignedExerciseNote] = useState("");
+  const [isSavingAssignedExerciseNote, setIsSavingAssignedExerciseNote] = useState(false);
   const [editingWorkoutPlanValues, setEditingWorkoutPlanValues] = useState({
     title: "",
     assignedDate: "",
@@ -884,6 +921,19 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
 
   const openEditWorkoutPlan = (plan: any) => {
     setEditingWorkoutPlan(plan);
+    setEditingAssignedExercises(
+      (plan.exercises || []).map((exercise: any) => ({
+        ...exercise,
+        exerciseName: exercise.exerciseName || exercise.name || "",
+        sets: Number(exercise.sets) || 0,
+        reps: exercise.reps || "",
+        targetWeightKg:
+          exercise.targetWeightKg != null && !Number.isNaN(Number(exercise.targetWeightKg))
+            ? Number(exercise.targetWeightKg)
+            : "",
+        notes: exercise.notes || "",
+      }))
+    );
     setEditingWorkoutPlanValues({
       title: plan.title || "",
       assignedDate: typeof plan.assignedAt === "string" ? plan.assignedAt.split("T")[0] : "",
@@ -896,12 +946,16 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   const handleSaveWorkoutPlan = async () => {
     if (!db || !user || !editingWorkoutPlan) return;
 
-    const nextWeightIncrease = Number(editingWorkoutPlanValues.weightIncreaseKg) || 0;
-    const nextRepIncrease = Math.max(0, Math.round(Number(editingWorkoutPlanValues.repIncrease) || 0));
-    const currentWeightIncrease = typeof editingWorkoutPlan.weightIncreaseKg === "number" ? editingWorkoutPlan.weightIncreaseKg : 0;
-    const currentRepIncrease = typeof editingWorkoutPlan.repIncrease === "number" ? editingWorkoutPlan.repIncrease : 0;
-    const weightDelta = nextWeightIncrease - currentWeightIncrease;
-    const repDelta = nextRepIncrease - currentRepIncrease;
+    const normalizedExercises = editingAssignedExercises.map((exercise: any) => ({
+      ...exercise,
+      exerciseName: String(exercise.exerciseName || "").trim(),
+      sets: Number(exercise.sets) || 0,
+      reps: String(exercise.reps || "").trim(),
+      ...(exercise.targetWeightKg === "" || exercise.targetWeightKg == null
+        ? { targetWeightKg: null }
+        : { targetWeightKg: Number(exercise.targetWeightKg) || 0 }),
+      notes: String(exercise.notes || "").trim(),
+    }));
 
     setIsSavingWorkoutPlan(true);
     try {
@@ -913,9 +967,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             ? new Date(editingWorkoutPlanValues.assignedDate).toISOString()
             : editingWorkoutPlan.assignedAt || new Date().toISOString(),
           scheduledDayOfWeek: editingWorkoutPlanValues.scheduledDayOfWeek,
-          weightIncreaseKg: nextWeightIncrease,
-          repIncrease: nextRepIncrease,
-          exercises: adjustAssignedExercises(editingWorkoutPlan.exercises || [], weightDelta, repDelta),
+          exercises: normalizedExercises,
         }
       );
 
@@ -947,6 +999,41 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       });
     } finally {
       setDeletingWorkoutPlanId(null);
+    }
+  };
+
+  const handleSaveAssignedExerciseNote = async (
+    plan: any,
+    exerciseIndex: number,
+    nextNote: string
+  ) => {
+    if (!db || !user || !plan?.id) return;
+    setIsSavingAssignedExerciseNote(true);
+    try {
+      const updatedExercises = [...(plan.exercises || [])];
+      updatedExercises[exerciseIndex] = {
+        ...updatedExercises[exerciseIndex],
+        notes: nextNote,
+      };
+
+      await updateDoc(
+        doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", plan.id),
+        {
+          exercises: updatedExercises,
+        }
+      );
+
+      setEditingAssignedExerciseKey(null);
+      setEditingAssignedExerciseNote("");
+      toast({ title: t("saveChanges") });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Update failed",
+        description: error?.message || "Could not update exercise note.",
+      });
+    } finally {
+      setIsSavingAssignedExerciseNote(false);
     }
   };
 
@@ -1773,6 +1860,157 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                     </Button>
                   </CardFooter>
                 </Card>
+
+                <Card className="bg-primary/5 border-primary/20">
+                  <CardHeader>
+                    <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
+                    <CardDescription>
+                      {t("assignedWorkouts")}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {sortedWorkoutPlans.length > 0 ? (
+                      sortedWorkoutPlans.map((plan: any) => (
+                        <div key={plan.id} className="border rounded-lg bg-background">
+                          <div className="p-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Dumbbell className="h-4 w-4 text-primary shrink-0" />
+                              <div className="min-w-0">
+                                <span className="text-sm font-medium block truncate">{plan.title || "Untitled"}</span>
+                                <span className="text-xs text-muted-foreground block truncate">
+                                  Week: {formatWeekLabelFromPlan(plan)}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge variant="outline">{t("active")}</Badge>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() =>
+                                  setExpandedAssignedPlanId((current) => (current === plan.id ? null : plan.id))
+                                }
+                                title="Expand details"
+                              >
+                                {expandedAssignedPlanId === plan.id ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() => openEditWorkoutPlan(plan)}
+                                disabled={portalOnly}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => setConfirmDeletePlanId(plan.id)}
+                                disabled={portalOnly || deletingWorkoutPlanId === plan.id}
+                              >
+                                {deletingWorkoutPlanId === plan.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+
+                          {expandedAssignedPlanId === plan.id && (
+                            <div className="px-3 pb-3 border-t bg-muted/10">
+                              <div className="pt-3 space-y-2">
+                                {(plan.exercises || []).length > 0 ? (
+                                  (plan.exercises || []).map((exercise: any, index: number) => (
+                                    <div key={index} className="rounded-md border bg-background p-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm font-medium">
+                                          {exercise.exerciseName || exercise.name || `Exercise ${index + 1}`}
+                                        </p>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-6 w-6 text-muted-foreground hover:text-primary shrink-0"
+                                          onClick={() => {
+                                            const noteKey = `${plan.id}-${index}`;
+                                            setEditingAssignedExerciseKey(noteKey);
+                                            setEditingAssignedExerciseNote(String(exercise.notes || ""));
+                                          }}
+                                        >
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                      {editingAssignedExerciseKey === `${plan.id}-${index}` ? (
+                                        <div className="space-y-2 mt-2">
+                                          <Textarea
+                                            value={editingAssignedExerciseNote}
+                                            onChange={(event) => setEditingAssignedExerciseNote(event.target.value)}
+                                            rows={3}
+                                            className="text-xs"
+                                            placeholder="Exercise notes..."
+                                          />
+                                          <div className="flex gap-2">
+                                            <Button
+                                              size="sm"
+                                              className="h-7 text-xs gap-1.5"
+                                              onClick={() =>
+                                                handleSaveAssignedExerciseNote(
+                                                  plan,
+                                                  index,
+                                                  editingAssignedExerciseNote
+                                                )
+                                              }
+                                              disabled={isSavingAssignedExerciseNote}
+                                            >
+                                              {isSavingAssignedExerciseNote ? (
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                              ) : (
+                                                <Save className="h-3 w-3" />
+                                              )}
+                                              {t("save")}
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="h-7 text-xs"
+                                              onClick={() => {
+                                                setEditingAssignedExerciseKey(null);
+                                                setEditingAssignedExerciseNote("");
+                                              }}
+                                            >
+                                              {t("cancel")}
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
+                                          {exercise.notes || (
+                                            <span className="italic">No notes yet. Click pencil to edit.</span>
+                                          )}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">{t("noExercisesDefined")}</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{t("noWorkoutsAssigned")}</p>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
 
               <div className="space-y-6">
@@ -1837,64 +2075,80 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Assigned date</Label>
-                  <Input
-                    type="date"
-                    value={editingWorkoutPlanValues.assignedDate}
-                    onChange={(event) =>
-                      setEditingWorkoutPlanValues((current) => ({ ...current, assignedDate: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Workout day</Label>
-                  <Select
-                    value={editingWorkoutPlanValues.scheduledDayOfWeek}
-                    onValueChange={(value) =>
-                      setEditingWorkoutPlanValues((current) => ({ ...current, scheduledDayOfWeek: value }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="monday">Monday</SelectItem>
-                      <SelectItem value="tuesday">Tuesday</SelectItem>
-                      <SelectItem value="wednesday">Wednesday</SelectItem>
-                      <SelectItem value="thursday">Thursday</SelectItem>
-                      <SelectItem value="friday">Friday</SelectItem>
-                      <SelectItem value="saturday">Saturday</SelectItem>
-                      <SelectItem value="sunday">Sunday</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Assignment week:{" "}
+                  <span className="font-medium text-foreground">
+                    {formatWeekLabelFromPlan(editingWorkoutPlan)}
+                  </span>
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>kg increase</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={editingWorkoutPlanValues.weightIncreaseKg}
-                    onChange={(event) =>
-                      setEditingWorkoutPlanValues((current) => ({ ...current, weightIncreaseKg: event.target.value }))
-                    }
-                  />
+              <div className="space-y-2">
+                <Label>Assigned exercises and notes</Label>
+                <div className="max-h-64 overflow-y-auto rounded-md border bg-muted/20 p-3 space-y-2">
+                  {editingAssignedExercises.length > 0 ? (
+                    editingAssignedExercises.map((exercise: any, index: number) => (
+                      <div key={index} className="rounded-md border bg-background p-2">
+                        <div className="space-y-2">
+                          <Input
+                            value={exercise.exerciseName || ""}
+                            onChange={(event) =>
+                              setEditingAssignedExercises((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index ? { ...item, exerciseName: event.target.value } : item
+                                )
+                              )
+                            }
+                            placeholder={`Exercise ${index + 1}`}
+                            className="h-8"
+                          />
+                          <Textarea
+                            value={exercise.notes || ""}
+                            onChange={(event) =>
+                              setEditingAssignedExercises((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index ? { ...item, notes: event.target.value } : item
+                                )
+                              )
+                            }
+                            placeholder="Exercise notes"
+                            rows={2}
+                          />
+                          <div className="flex justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive"
+                              onClick={() =>
+                                setEditingAssignedExercises((current) =>
+                                  current.filter((_, itemIndex) => itemIndex !== index)
+                                )
+                              }
+                            >
+                              <Trash2 className="h-4 w-4 mr-1" /> Remove
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No exercises assigned.</p>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <Label>rep increase</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={editingWorkoutPlanValues.repIncrease}
-                    onChange={(event) =>
-                      setEditingWorkoutPlanValues((current) => ({ ...current, repIncrease: event.target.value }))
-                    }
-                  />
-                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setEditingAssignedExercises((current) => [
+                      ...current,
+                      { exerciseName: "", sets: 0, reps: "", targetWeightKg: "", notes: "" },
+                    ])
+                  }
+                >
+                  <Plus className="h-4 w-4 mr-1" /> Add exercise
+                </Button>
               </div>
             </div>
 
