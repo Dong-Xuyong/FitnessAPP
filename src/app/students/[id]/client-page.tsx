@@ -219,7 +219,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       sessionsPerWeek: safeSessions,
       rate30Min: safeRate30,
       rate60Min: safeRate60,
-      monthlyRate: calculatedMonthlyRate || Number(monthlyRate) || 0,
+      monthlyRate: Number(monthlyRate) || calculatedMonthlyRate || 0,
       paymentMethod,
       paymentDetails,
       billingStatus: "active",
@@ -349,8 +349,8 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
               <Input
                 type="number"
                 placeholder={t("autoCalculated")}
-                value={calculatedMonthlyRate > 0 ? String(calculatedMonthlyRate) : monthlyRate}
-                readOnly
+                value={monthlyRate}
+                onChange={(e) => setMonthlyRate(e.target.value)}
               />
             </div>
             <div className="space-y-2">
