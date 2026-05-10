@@ -22,7 +22,19 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { collection, deleteDoc, doc, getDoc, query, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+const COACH_DASH_TABS = ["students", "progress", "milestones"] as const;
+type CoachDashTab = (typeof COACH_DASH_TABS)[number];
+
+function parseCoachDashTab(raw: string | null): CoachDashTab {
+  if (raw && (COACH_DASH_TABS as readonly string[]).includes(raw)) {
+    return raw as CoachDashTab;
+  }
+  return "students";
+}
 
 function computeEpleyOneRm(weight: number, reps: number): number {
   if (!Number.isFinite(weight) || !Number.isFinite(reps) || weight <= 0 || reps <= 0) return 0;
@@ -32,6 +44,11 @@ function computeEpleyOneRm(weight: number, reps: number): number {
 export default function ProgressPage() {
   const { t } = useI18n();
   const { toast } = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeCoachTab = useMemo(() => parseCoachDashTab(tabParam), [tabParam]);
+
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const [pendingDeleteMilestoneId, setPendingDeleteMilestoneId] = useState<string | null>(null);
@@ -308,183 +325,217 @@ export default function ProgressPage() {
   return (
     <Navigation>
       <div className="space-y-8">
-        <div className="grid md:grid-cols-3 gap-6">
-          <Card className="bg-primary text-primary-foreground overflow-hidden relative">
-            <div className="absolute right-0 bottom-0 opacity-10">
-              <Award className="w-32 h-32" />
-            </div>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Award className="h-5 w-5" />
-                {t("teamVelocity")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold mb-2">{leaderboard.length > 0 ? Math.round(leaderboard.reduce((sum, s) => sum + s.score, 0) / leaderboard.length) : 0}%</div>
-              <p className="text-sm opacity-90">{t("avgCompletionRate")}</p>
-            </CardContent>
-          </Card>
-          
-          <Card className="bg-accent text-accent-foreground">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5" />
-                {t("growthMetric")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold mb-2">+{growthMetric}kg</div>
-              <p className="text-sm opacity-90">{t("teamGrowthDesc")}</p>
-            </CardContent>
-          </Card>
+        <Tabs
+          value={activeCoachTab}
+          onValueChange={(v) => {
+            const next = parseCoachDashTab(v);
+            router.replace(`/progress?tab=${next}`, { scroll: false });
+          }}
+          className="space-y-6"
+        >
+          <TabsList className="grid h-auto w-full grid-cols-3 gap-1 p-1 sm:inline-flex sm:w-auto sm:max-w-full sm:flex-wrap sm:justify-start">
+            <TabsTrigger
+              value="students"
+              className="whitespace-normal px-2 py-2 text-center text-[11px] leading-tight sm:px-3 sm:text-sm sm:leading-none"
+            >
+              {t("coachDashboardTabStudents")}
+            </TabsTrigger>
+            <TabsTrigger
+              value="progress"
+              className="whitespace-normal px-2 py-2 text-center text-[11px] leading-tight sm:px-3 sm:text-sm sm:leading-none"
+            >
+              {t("coachDashboardTabProgress")}
+            </TabsTrigger>
+            <TabsTrigger
+              value="milestones"
+              className="whitespace-normal px-2 py-2 text-center text-[11px] leading-tight sm:px-3 sm:text-sm sm:leading-none"
+            >
+              {t("coachDashboardTabMilestones")}
+            </TabsTrigger>
+          </TabsList>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                {t("topPerformer")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center gap-4">
-              {topPerformer ? (
-                <>
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={topPerformer.photoUrl || `https://picsum.photos/seed/${topPerformer.studentId}/100/100`} />
-                    <AvatarFallback>{topPerformer.firstName?.[0]}{topPerformer.lastName?.[0]}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-bold">{topPerformer.name}</p>
-                    <p className="text-xs text-muted-foreground">{(topPerformer.dynamicStreak || 0) + " " + t("sessionsStreak")}</p>
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("noRosterStudentsYet")}</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid lg:grid-cols-2 gap-8">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("completionLeaderboard")}</CardTitle>
-              <CardDescription>{t("completionLeaderboardDesc")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {leaderboard.length > 0 ? (
-                leaderboard.map((item, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="flex justify-between text-sm font-medium">
-                      <span>{item.name}</span>
-                      <span>{item.score}%</span>
-                    </div>
-                    <Progress value={item.score} className="h-2" />
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("noStudentsAssigned")}</p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("upcomingMilestones")}</CardTitle>
-              <CardDescription>{t("nextGoalsToCelebrate")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {activeMilestones.length > 0 ? (
-                activeMilestones.map((milestone: any) => {
-                  const dueDate = new Date(milestone.dueDate);
-                  const today = new Date();
-                  const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                  const dateText = daysLeft < 0 ? t("overdue") : daysLeft === 0 ? t("today") : t("inDays").replace("{n}", String(daysLeft));
-
-                  const sid =
-                    typeof milestone.studentId === "string" ? milestone.studentId.trim() : "";
-                  const resolved = sid ? rosterMilestoneRouting.resolve(sid) : null;
-                  const rosterPathId = resolved?.rosterPathId ?? sid;
-                  const fromDirectory =
-                    (sid ? directoryNamesByStudentDocId[sid] : undefined) ||
-                    (rosterPathId && rosterPathId !== sid
-                      ? directoryNamesByStudentDocId[rosterPathId]
-                      : undefined);
-
-                  const rawDocNameMaybe =
-                    typeof milestone.studentName === "string" ? milestone.studentName.trim() : "";
-                  const storedNameLooksLikeFirestoreId =
-                    rawDocNameMaybe.length >= 22 && /^[a-zA-Z0-9_-]+$/.test(rawDocNameMaybe);
-
-                  const studentPrimaryLine =
-                    (rawDocNameMaybe && !storedNameLooksLikeFirestoreId ? rawDocNameMaybe : null) ??
-                    resolved?.displayName ??
-                    fromDirectory ??
-                    t("student");
-
-                  const studentHref =
-                    milestone.studentId && typeof milestone.studentId === "string"
-                      ? `/students/${rosterPathId}?tab=milestones`
-                      : null;
-
-                  const linkBody = (
-                    <>
-                      <div className="min-w-0 pr-3 text-left">
-                        <p className="text-sm font-bold truncate">{studentPrimaryLine}</p>
-                        <p className="text-xs text-muted-foreground truncate">{milestone.title}</p>
+          <TabsContent value="students" className="mt-0 focus-visible:outline-none">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("completionLeaderboard")}</CardTitle>
+                <CardDescription>{t("completionLeaderboardDesc")}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {leaderboard.length > 0 ? (
+                  leaderboard.map((item, i) => (
+                    <div key={i} className="space-y-2">
+                      <div className="flex justify-between text-sm font-medium">
+                        <span>{item.name}</span>
+                        <span>{item.score}%</span>
                       </div>
-                      <Badge
-                        variant="outline"
-                        className="flex shrink-0 items-center gap-1 pointer-events-none"
-                      >
-                        <Calendar className="h-3 w-3" /> {dateText}
-                      </Badge>
-                    </>
-                  );
-
-                  return (
-                    <div
-                      key={milestone.id}
-                      className="flex rounded-lg border bg-card/50 overflow-hidden focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
-                    >
-                      {studentHref ? (
-                        <Link
-                          href={studentHref}
-                          className="flex flex-1 min-w-0 items-center justify-between p-3 hover:bg-accent/50 transition-colors outline-none focus-visible:bg-accent/50"
-                        >
-                          {linkBody}
-                        </Link>
-                      ) : (
-                        <div className="flex flex-1 items-center justify-between p-3 min-w-0">
-                          {linkBody}
-                        </div>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="shrink-0 rounded-none border-l px-4 h-auto self-stretch text-destructive hover:text-destructive hover:bg-destructive/10"
-                        aria-label={t("delete")}
-                        disabled={Boolean(deletingMilestoneId)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingDeleteMilestoneId(String(milestone.id));
-                        }}
-                      >
-                        {deletingMilestoneId === milestone.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
+                      <Progress value={item.score} className="h-2" />
                     </div>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("noMilestonesYet")}</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t("noStudentsAssigned")}</p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="progress" className="mt-0 focus-visible:outline-none">
+            <div className="grid md:grid-cols-3 gap-6">
+              <Card className="bg-primary text-primary-foreground overflow-hidden relative">
+                <div className="absolute right-0 bottom-0 opacity-10">
+                  <Award className="w-32 h-32" />
+                </div>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Award className="h-5 w-5" />
+                    {t("teamVelocity")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-4xl font-bold mb-2">{leaderboard.length > 0 ? Math.round(leaderboard.reduce((sum, s) => sum + s.score, 0) / leaderboard.length) : 0}%</div>
+                  <p className="text-sm opacity-90">{t("avgCompletionRate")}</p>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-accent text-accent-foreground">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    {t("growthMetric")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-4xl font-bold mb-2">+{growthMetric}kg</div>
+                  <p className="text-sm opacity-90">{t("teamGrowthDesc")}</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    {t("topPerformer")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex items-center gap-4">
+                  {topPerformer ? (
+                    <>
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage src={topPerformer.photoUrl || `https://picsum.photos/seed/${topPerformer.studentId}/100/100`} />
+                        <AvatarFallback>{topPerformer.firstName?.[0]}{topPerformer.lastName?.[0]}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-bold">{topPerformer.name}</p>
+                        <p className="text-xs text-muted-foreground">{(topPerformer.dynamicStreak || 0) + " " + t("sessionsStreak")}</p>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t("noRosterStudentsYet")}</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="milestones" className="mt-0 focus-visible:outline-none">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("upcomingMilestones")}</CardTitle>
+                <CardDescription>{t("nextGoalsToCelebrate")}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {activeMilestones.length > 0 ? (
+                  activeMilestones.map((milestone: any) => {
+                    const dueDate = new Date(milestone.dueDate);
+                    const today = new Date();
+                    const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    const dateText = daysLeft < 0 ? t("overdue") : daysLeft === 0 ? t("today") : t("inDays").replace("{n}", String(daysLeft));
+
+                    const sid =
+                      typeof milestone.studentId === "string" ? milestone.studentId.trim() : "";
+                    const resolved = sid ? rosterMilestoneRouting.resolve(sid) : null;
+                    const rosterPathId = resolved?.rosterPathId ?? sid;
+                    const fromDirectory =
+                      (sid ? directoryNamesByStudentDocId[sid] : undefined) ||
+                      (rosterPathId && rosterPathId !== sid
+                        ? directoryNamesByStudentDocId[rosterPathId]
+                        : undefined);
+
+                    const rawDocNameMaybe =
+                      typeof milestone.studentName === "string" ? milestone.studentName.trim() : "";
+                    const storedNameLooksLikeFirestoreId =
+                      rawDocNameMaybe.length >= 22 && /^[a-zA-Z0-9_-]+$/.test(rawDocNameMaybe);
+
+                    const studentPrimaryLine =
+                      (rawDocNameMaybe && !storedNameLooksLikeFirestoreId ? rawDocNameMaybe : null) ??
+                      resolved?.displayName ??
+                      fromDirectory ??
+                      t("student");
+
+                    const studentHref =
+                      milestone.studentId && typeof milestone.studentId === "string"
+                        ? `/students/${rosterPathId}?tab=milestones`
+                        : null;
+
+                    const linkBody = (
+                      <>
+                        <div className="min-w-0 pr-3 text-left">
+                          <p className="text-sm font-bold truncate">{studentPrimaryLine}</p>
+                          <p className="text-xs text-muted-foreground truncate">{milestone.title}</p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="flex shrink-0 items-center gap-1 pointer-events-none"
+                        >
+                          <Calendar className="h-3 w-3" /> {dateText}
+                        </Badge>
+                      </>
+                    );
+
+                    return (
+                      <div
+                        key={milestone.id}
+                        className="flex rounded-lg border bg-card/50 overflow-hidden focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
+                      >
+                        {studentHref ? (
+                          <Link
+                            href={studentHref}
+                            className="flex flex-1 min-w-0 items-center justify-between p-3 hover:bg-accent/50 transition-colors outline-none focus-visible:bg-accent/50"
+                          >
+                            {linkBody}
+                          </Link>
+                        ) : (
+                          <div className="flex flex-1 items-center justify-between p-3 min-w-0">
+                            {linkBody}
+                          </div>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0 rounded-none border-l px-4 h-auto self-stretch text-destructive hover:text-destructive hover:bg-destructive/10"
+                          aria-label={t("delete")}
+                          disabled={Boolean(deletingMilestoneId)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDeleteMilestoneId(String(milestone.id));
+                          }}
+                        >
+                          {deletingMilestoneId === milestone.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t("noMilestonesYet")}</p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         <AlertDialog
           open={!!pendingDeleteMilestoneId}

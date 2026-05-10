@@ -106,6 +106,14 @@ function getWeekDates(date: Date): string[] {
   });
 }
 
+/** All calendar dates (YYYY-MM-DD) in the month that contains `anchor`. */
+function getMonthDateStrings(anchor: Date): string[] {
+  const y = anchor.getFullYear();
+  const m = anchor.getMonth();
+  const days = new Date(y, m + 1, 0).getDate();
+  return Array.from({ length: days }, (_, i) => toDateStr(new Date(y, m, i + 1)));
+}
+
 function slotDocId(date: string, time: string): string {
   return `${date}_${time.replace(":","")}`
 }
@@ -298,15 +306,22 @@ export default function StudentWorkoutsPage() {
     return map;
   }, [sessionSlots, selectedDateStr]);
 
-  // Weekly booked count — count unique sessions, not blocks.
-  // A session key is (date + sessionStart). Old slots without sessionStart use their own startTime.
-  // This prevents double-counting when a 60-min session occupies 2 × 30-min blocks.
-  const weeklyBookedCount = useMemo(() => {
+  // Derived from roster `sessionsPerWeek`; replace with explicit monthly cap on roster later if needed.
+  const monthlyAllowance =
+    sessionsPerWeek != null
+      ? Math.max(
+          1,
+          Math.round(sessionsPerWeek * (new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate() / 7))
+        )
+      : 0;
+
+  // Monthly booked count — unique sessions in the calendar month of `selectedDate`, not blocks.
+  const monthlyBookedCount = useMemo(() => {
     if (!myId) return 0;
-    const weekDates = getWeekDates(selectedDate);
+    const monthDates = new Set(getMonthDateStrings(selectedDate));
     const seen = new Set<string>();
     for (const slot of sessionSlots) {
-      if (!weekDates.includes(slot.date)) continue;
+      if (!monthDates.has(slot.date)) continue;
       const entry = slot.students.find(s => s.studentId === myId);
       if (!entry) continue;
       const sessionKey = `${slot.date}_${entry.sessionStart ?? slot.startTime}`;
@@ -315,9 +330,8 @@ export default function StudentWorkoutsPage() {
     return seen.size;
   }, [sessionSlots, selectedDate, myId]);
 
-
-  // Limit applies to the week of the currently selected date
-  const canBookMore = sessionsPerWeek == null || weeklyBookedCount < sessionsPerWeek;
+  const canBookMore =
+    sessionsPerWeek == null || monthlyBookedCount < monthlyAllowance;
 
   // Calendar modifiers
   const isUnavailableDay = useCallback((date: Date) => {
@@ -416,7 +430,10 @@ export default function StudentWorkoutsPage() {
           return;
         }
         if (!canBookMore) {
-          toast({ title: `Limite semanal atingido (${sessionsPerWeek}×/semana)`, variant: "destructive" });
+          toast({
+            title: t("studentMonthlyBookingLimitToast").replace("{n}", String(monthlyAllowance)),
+            variant: "destructive",
+          });
           return;
         }
         const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsNeeded);
@@ -495,7 +512,7 @@ export default function StudentWorkoutsPage() {
         {/* Main grid */}
         <div className="grid lg:grid-cols-5 gap-6 items-start">
 
-          {/* Left: Calendar + weekly status */}
+          {/* Left: Calendar + monthly booking limit */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -530,27 +547,28 @@ export default function StudentWorkoutsPage() {
                 </span>
               </div>
 
-              {/* Weekly limit card */}
               {sessionsPerWeek != null && (
                 <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="font-semibold">Sessões esta semana</span>
-                    <span className={`font-bold tabular-nums ${weeklyBookedCount >= sessionsPerWeek ? "text-destructive" : "text-primary"}`}>
-                      {weeklyBookedCount}/{sessionsPerWeek}
+                    <span className="font-semibold">{t("studentSessionBookingsThisMonth")}</span>
+                    <span
+                      className={`font-bold tabular-nums ${monthlyBookedCount >= monthlyAllowance ? "text-destructive" : "text-primary"}`}
+                    >
+                      {monthlyBookedCount}/{monthlyAllowance}
                     </span>
                   </div>
-                  <Progress
-                    value={(weeklyBookedCount / sessionsPerWeek) * 100}
-                    className="h-2"
-                  />
+                  <Progress value={(monthlyBookedCount / monthlyAllowance) * 100} className="h-2" />
                   {!canBookMore && (
                     <p className="text-xs text-destructive flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" /> Limite semanal atingido
+                      <AlertTriangle className="h-3 w-3 shrink-0" /> {t("studentMonthlySessionLimitReached")}
                     </p>
                   )}
-                  {canBookMore && weeklyBookedCount > 0 && (
+                  {canBookMore && monthlyBookedCount > 0 && (
                     <p className="text-xs text-muted-foreground">
-                      {sessionsPerWeek - weeklyBookedCount} sessão(ões) por reservar esta semana
+                      {t("studentSessionsRemainingToBookThisMonth").replace(
+                        "{remaining}",
+                        String(monthlyAllowance - monthlyBookedCount)
+                      )}
                     </p>
                   )}
                 </div>

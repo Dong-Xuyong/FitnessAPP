@@ -4,7 +4,7 @@ import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Banknote, Smartphone, Clock, CheckCircle2, AlertCircle, CalendarDays, Dumbbell } from "lucide-react";
+import { Banknote, Dumbbell } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useDoc, useCollection, useMemoFirebase } from "@/firebase";
 import { doc, collection } from "firebase/firestore";
@@ -48,22 +48,7 @@ export default function StudentBillingPage() {
   const monthlyAmount = billing?.monthlyRate || 0;
   const sessionsPerWeek = billing?.sessionsPerWeek as number | undefined;
   const sessionDurationMin = billing?.sessionDurationMin as number | undefined;
-  const paymentMethod = billing?.paymentMethod || "bank_transfer";
-  const billingStatus = billing?.billingStatus || "inactive";
-
   const hasPlanInfo = sessionsPerWeek || sessionDurationMin;
-
-  const statusIcon = {
-    active: <CheckCircle2 className="h-4 w-4 text-green-500" />,
-    past_due: <AlertCircle className="h-4 w-4 text-red-500" />,
-    inactive: <Clock className="h-4 w-4 text-muted-foreground" />,
-  }[billingStatus] || <Clock className="h-4 w-4 text-muted-foreground" />;
-
-  const statusColor = {
-    active: "bg-green-100 text-green-800",
-    past_due: "bg-red-100 text-red-800",
-    inactive: "bg-gray-100 text-gray-800",
-  }[billingStatus as string] || "bg-gray-100 text-gray-800";
 
   return (
     <StudentNavigation>
@@ -99,32 +84,6 @@ export default function StudentBillingPage() {
             </CardContent>
           </Card>
         )}
-
-        <div className="grid md:grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
-              <Banknote className="h-6 w-6 text-primary" />
-              <p className="text-xs text-muted-foreground uppercase font-bold">{t("monthlyRate")}</p>
-              <p className="text-2xl font-bold">{monthlyAmount > 0 ? `€${monthlyAmount}` : t("notSet")}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
-              <Smartphone className="h-6 w-6 text-primary" />
-              <p className="text-xs text-muted-foreground uppercase font-bold">{t("paymentMethod")}</p>
-              <p className="text-lg font-bold capitalize">
-                {paymentMethod === "mbway" ? "MB WAY" : paymentMethod === "bank_transfer" ? "Bank Transfer" : paymentMethod}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-2">
-              {statusIcon}
-              <p className="text-xs text-muted-foreground uppercase font-bold">{t("status")}</p>
-              <Badge className={statusColor + " capitalize"}>{billingStatus.replace("_", " ")}</Badge>
-            </CardContent>
-          </Card>
-        </div>
 
         {billing?.paymentDetails && (
           <Card>

@@ -4,6 +4,7 @@
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { StudentProgressPanel } from "@/components/StudentProgressPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -70,6 +71,12 @@ export default function StudentDashboardPage() {
         return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
       }),
     [allMilestones]
+  );
+
+  const homeMilestonesPreview = useMemo(
+    () =>
+      studentMilestones.filter((m) => m.status === "active" || m.status === "paused").slice(0, 5),
+    [studentMilestones]
   );
 
   useEffect(() => {
@@ -345,6 +352,81 @@ export default function StudentDashboardPage() {
               </CardContent>
             </Card>
           </div>
+
+          {studentData.trainerId ? (
+            <Card>
+              <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Target className="h-5 w-5 text-primary shrink-0" />
+                    {t("milestones")}
+                  </CardTitle>
+                  <CardDescription>{t("nextGoalsToCelebrate")}</CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 self-stretch sm:self-auto"
+                  onClick={() => onDashboardTabChange("milestones")}
+                >
+                  {t("milestonesViewAll")}
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {isMilestonesLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                ) : homeMilestonesPreview.length > 0 ? (
+                  homeMilestonesPreview.map((milestone) => {
+                    const dueDate = new Date(milestone.dueDate);
+                    const today = new Date();
+                    const daysLeft = Math.ceil(
+                      (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+                    );
+                    const dateText = Number.isNaN(dueDate.getTime())
+                      ? "—"
+                      : daysLeft < 0
+                        ? t("overdue")
+                        : daysLeft === 0
+                          ? t("today")
+                          : t("inDays").replace("{n}", String(daysLeft));
+                    return (
+                      <div
+                        key={milestone.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold truncate">{milestone.title}</p>
+                          {typeof milestone.description === "string" && milestone.description.trim() ? (
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {milestone.description}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                          {milestone.status === "paused" ? (
+                            <Badge variant="secondary" className="text-[10px] uppercase">
+                              {t("paused")}
+                            </Badge>
+                          ) : null}
+                          <Badge
+                            variant="outline"
+                            className="pointer-events-none flex items-center gap-1 normal-case"
+                          >
+                            <Calendar className="h-3 w-3" aria-hidden /> {dateText}
+                          </Badge>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t("noMilestonesYet")}</p>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="progress" className="space-y-6">
