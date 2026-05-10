@@ -158,10 +158,12 @@ const translations = {
 
     // Student Dashboard
     myWorkouts: "My Workouts",
-    studentSessionBookingsThisMonth: "Sessions this month",
-    studentMonthlySessionLimitReached: "Monthly limit reached",
-    studentSessionsRemainingToBookThisMonth: "{remaining} session(s) left to book this month",
-    studentMonthlyBookingLimitToast: "Monthly limit reached ({n} sessions allowed this month).",
+    studentSessionBookingsThisWeek: "Sessions this week",
+    studentWeeklySessionLimitReached: "Weekly limit reached",
+    studentSessionsRemainingToBookThisWeek: "{remaining} session(s) left to book this week",
+    studentWeeklyBookingLimitToast: "Weekly limit reached ({n} sessions allowed per week).",
+    studentAlreadyBookedTodayTitle: "Already booked this day",
+    studentAlreadyBookedTodayDesc: "You can only register one session per calendar day.",
     startWorkout: "Start Workout",
     myProgress: "My Progress",
     myBilling: "My Billing",
@@ -852,10 +854,12 @@ const translations = {
 
     // Student Dashboard
     myWorkouts: "Meus Treinos",
-    studentSessionBookingsThisMonth: "Sessões este mês",
-    studentMonthlySessionLimitReached: "Limite mensal atingido",
-    studentSessionsRemainingToBookThisMonth: "{remaining} sessão(ões) por reservar este mês",
-    studentMonthlyBookingLimitToast: "Limite mensal atingido ({n} sessões permitidas este mês).",
+    studentSessionBookingsThisWeek: "Sessões esta semana",
+    studentWeeklySessionLimitReached: "Limite semanal atingido",
+    studentSessionsRemainingToBookThisWeek: "{remaining} sessão(ões) por reservar esta semana",
+    studentWeeklyBookingLimitToast: "Limite semanal atingido ({n} sessões permitidas por semana).",
+    studentAlreadyBookedTodayTitle: "Já tens sessão neste dia",
+    studentAlreadyBookedTodayDesc: "Só podes inscrever-te numa sessão por dia.",
     startWorkout: "Iniciar Treino",
     myProgress: "Meu Progresso",
     myBilling: "Minha Faturação",

@@ -9,7 +9,6 @@ import { useI18n } from "@/lib/i18n";
 import {
   LayoutDashboard,
   Dumbbell,
-  BookOpen,
   History,
   LogOut,
   Play,
@@ -36,7 +35,6 @@ const navItems = [
   { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
   { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
   { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
-  { key: "exercises" as const, href: "/student/exercises", icon: BookOpen },
   { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
   { key: "billing" as const, href: "/student/billing", icon: CreditCard },
   { key: "profile" as const, href: "/student/profile", icon: User },
