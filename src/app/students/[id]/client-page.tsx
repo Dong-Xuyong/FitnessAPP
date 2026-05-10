@@ -18,11 +18,7 @@ import {
   Dumbbell, 
   History, 
   Award, 
-  Loader2, 
-  User, 
-  Ruler, 
-  Weight, 
-  Target,
+  Loader2,
   Zap,
   Save,
   TrendingDown,
@@ -35,12 +31,12 @@ import {
   AlertTriangle,
   Ban,
   ShieldOff,
-  Percent,
   ChevronDown,
   ChevronUp,
+  Scale,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useUser,
   useFirestore,
@@ -70,6 +66,8 @@ import { useI18n } from "@/lib/i18n";
 import type { Milestone } from "@/lib/types";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
+import { BodyCompositionTrendChart } from "@/components/BodyCompositionTrendChart";
 import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
@@ -621,6 +619,15 @@ function computeEpleyOneRm(weight: number, reps: number): number {
   return weight * (1 + reps / 30);
 }
 
+const STUDENT_DETAIL_TABS = [
+  "progress",
+  "workoutHistory",
+  "milestones",
+  "management",
+  "billing",
+] as const;
+type StudentDetailTab = (typeof STUDENT_DETAIL_TABS)[number];
+
 export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = use(params);
   const { id } = unwrappedParams;
@@ -629,6 +636,14 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   const { toast } = useToast();
   const { t } = useI18n();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [studentDetailTab, setStudentDetailTab] = useState<StudentDetailTab>("progress");
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (!tab || !STUDENT_DETAIL_TABS.includes(tab as StudentDetailTab)) return;
+    setStudentDetailTab(tab as StudentDetailTab);
+  }, [searchParams]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingToRoster, setIsAddingToRoster] = useState(false);
@@ -641,22 +656,13 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   const [coachingNotes, setCoachingNotes] = useState("");
   const [editStats, setEditStats] = useState({
     goalWeightKg: "",
+    goalBodyFatPercent: "",
     goalType: "",
   });
-  const [editingWorkoutPlan, setEditingWorkoutPlan] = useState<any>(null);
-  const [editingAssignedExercises, setEditingAssignedExercises] = useState<any[]>([]);
   const [expandedAssignedPlanId, setExpandedAssignedPlanId] = useState<string | null>(null);
   const [editingAssignedExerciseKey, setEditingAssignedExerciseKey] = useState<string | null>(null);
   const [editingAssignedExerciseNote, setEditingAssignedExerciseNote] = useState("");
   const [isSavingAssignedExerciseNote, setIsSavingAssignedExerciseNote] = useState(false);
-  const [editingWorkoutPlanValues, setEditingWorkoutPlanValues] = useState({
-    title: "",
-    assignedDate: "",
-    scheduledDayOfWeek: "monday",
-    weightIncreaseKg: "0",
-    repIncrease: "0",
-  });
-  const [isSavingWorkoutPlan, setIsSavingWorkoutPlan] = useState(false);
   const [deletingWorkoutPlanId, setDeletingWorkoutPlanId] = useState<string | null>(null);
   const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
 
@@ -786,6 +792,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
 
     return [];
   }, [globalStudent]);
+
+  const bodyCompositionCoachData = useMemo(
+    () => bodyCompositionPointsFromSessions(workoutSessions || []),
+    [workoutSessions]
+  );
 
   const strengthByExercise = useMemo(() => {
     const exerciseMap = new Map<string, Map<string, { timestamp: number; date: string; oneRm: number }>>();
@@ -928,71 +939,6 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     setEditSession(null);
   };
 
-  const openEditWorkoutPlan = (plan: any) => {
-    setEditingWorkoutPlan(plan);
-    setEditingAssignedExercises(
-      (plan.exercises || []).map((exercise: any) => ({
-        ...exercise,
-        exerciseName: exercise.exerciseName || exercise.name || "",
-        sets: Number(exercise.sets) || 0,
-        reps: exercise.reps || "",
-        targetWeightKg:
-          exercise.targetWeightKg != null && !Number.isNaN(Number(exercise.targetWeightKg))
-            ? Number(exercise.targetWeightKg)
-            : "",
-        notes: exercise.notes || "",
-      }))
-    );
-    setEditingWorkoutPlanValues({
-      title: plan.title || "",
-      assignedDate: typeof plan.assignedAt === "string" ? plan.assignedAt.split("T")[0] : "",
-      scheduledDayOfWeek: plan.scheduledDayOfWeek || "monday",
-      weightIncreaseKg: String(typeof plan.weightIncreaseKg === "number" ? plan.weightIncreaseKg : 0),
-      repIncrease: String(typeof plan.repIncrease === "number" ? plan.repIncrease : 0),
-    });
-  };
-
-  const handleSaveWorkoutPlan = async () => {
-    if (!db || !user || !editingWorkoutPlan) return;
-
-    const normalizedExercises = editingAssignedExercises.map((exercise: any) => ({
-      ...exercise,
-      exerciseName: String(exercise.exerciseName || "").trim(),
-      sets: Number(exercise.sets) || 0,
-      reps: String(exercise.reps || "").trim(),
-      ...(exercise.targetWeightKg === "" || exercise.targetWeightKg == null
-        ? { targetWeightKg: null }
-        : { targetWeightKg: Number(exercise.targetWeightKg) || 0 }),
-      notes: String(exercise.notes || "").trim(),
-    }));
-
-    setIsSavingWorkoutPlan(true);
-    try {
-      await updateDoc(
-        doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", editingWorkoutPlan.id),
-        {
-          title: editingWorkoutPlanValues.title.trim() || editingWorkoutPlan.title || "Untitled",
-          assignedAt: editingWorkoutPlanValues.assignedDate
-            ? new Date(editingWorkoutPlanValues.assignedDate).toISOString()
-            : editingWorkoutPlan.assignedAt || new Date().toISOString(),
-          scheduledDayOfWeek: editingWorkoutPlanValues.scheduledDayOfWeek,
-          exercises: normalizedExercises,
-        }
-      );
-
-      toast({ title: t("assignedWorkoutUpdated") });
-      setEditingWorkoutPlan(null);
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Update failed",
-        description: error?.message || "Could not update the assigned workout.",
-      });
-    } finally {
-      setIsSavingWorkoutPlan(false);
-    }
-  };
-
   const handleDeleteWorkoutPlan = async (planId: string) => {
     if (!db || !user) return;
 
@@ -1059,12 +1005,20 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       setCoachingNotes(effectiveRoster.coachingNotes || "");
       setEditStats({
         goalWeightKg: effectiveRoster.goalWeightKg?.toString() || "",
+        goalBodyFatPercent:
+          (effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
+            ? String((effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent)
+            : "",
         goalType: effectiveRoster.goalType || "",
       });
     } else if (globalStudent) {
       setCoachingNotes("");
       setEditStats({
         goalWeightKg: globalStudent.goalWeightKg?.toString() || "",
+        goalBodyFatPercent:
+          (globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
+            ? String((globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent)
+            : "",
         goalType: (globalStudent.goalType as string) || "",
       });
     }
@@ -1095,6 +1049,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           heightCm: Number(g.heightCm) || 0,
           goalType: (g.goalType as string) || "general",
           goalWeightKg: Number(g.goalWeightKg) || 0,
+          goalBodyFatPercent: Number(g.goalBodyFatPercent) || 0,
           activityStatus: (g.activityStatus as string) || "active",
           joinedAt: (g.joinedAt as string) || new Date().toISOString(),
           subscriptionStatus: (g.subscriptionStatus as string) || "pending",
@@ -1131,6 +1086,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         trainerId: user.uid,
         coachingNotes,
         goalWeightKg: Number(editStats.goalWeightKg) || 0,
+        goalBodyFatPercent: Number(editStats.goalBodyFatPercent) || 0,
         goalType: editStats.goalType,
       });
       toast({
@@ -1449,79 +1405,90 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
-              <User className="h-4 w-4 text-primary" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("ageSex")}</p>
-              <p className="text-base font-bold">{student.age || '--'} yrs / <span className="capitalize">{student.sex || '--'}</span></p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
-              <Ruler className="h-4 w-4 text-primary" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("height")}</p>
-              <p className="text-base font-bold">{student.heightCm || '--'} cm</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
-              <Weight className="h-4 w-4 text-primary" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("weight")}</p>
-              <p className="text-base font-bold">{student.weightKg || '--'} kg</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
-              <Percent className="h-4 w-4 text-orange-500" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("bodyFat")}</p>
-              <p className="text-base font-bold">{student.bodyFatPercent || '--'}%</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-1">
-              <Target className="h-4 w-4 text-accent" />
-              <p className="text-[10px] text-muted-foreground uppercase font-bold">{t("goal")}</p>
-              <p className="text-base font-bold">{student.goalWeightKg || '--'} kg</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Tabs defaultValue="progress" className="space-y-6">
-          <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-4">
-            <TabsTrigger value="progress" className="text-xs sm:text-sm">{t("progress")}</TabsTrigger>
-            <TabsTrigger value="milestones" className="text-xs sm:text-sm">{t("milestones")}</TabsTrigger>
-            <TabsTrigger value="management" className="text-xs sm:text-sm">{t("coachingManagement")}</TabsTrigger>
-            <TabsTrigger value="billing" className="text-xs sm:text-sm">{t("billing")}</TabsTrigger>
+        <Tabs
+          value={studentDetailTab}
+          onValueChange={(v) => setStudentDetailTab(v as StudentDetailTab)}
+          className="space-y-6"
+        >
+          <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1">
+            <TabsTrigger value="progress" className="text-xs sm:text-sm">
+              {t("progress")}
+            </TabsTrigger>
+            <TabsTrigger value="workoutHistory" className="text-xs sm:text-sm">
+              {t("workoutHistory")}
+            </TabsTrigger>
+            <TabsTrigger value="milestones" className="text-xs sm:text-sm">
+              {t("milestones")}
+            </TabsTrigger>
+            <TabsTrigger value="management" className="text-xs sm:text-sm">
+              {t("coachingManagement")}
+            </TabsTrigger>
+            <TabsTrigger value="billing" className="text-xs sm:text-sm">
+              {t("billing")}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="progress" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>{t("weightTracking")}</CardTitle>
-                  <CardDescription>Path to {student.goalWeightKg}kg (<span className="capitalize">{student.goalType?.replace('_', ' ')}</span>)</CardDescription>
+                  <CardTitle className="flex items-center gap-2">
+                    <Scale className="h-5 w-5 text-primary shrink-0" />
+                    {t("bodyCompositionChartTitle")}
+                  </CardTitle>
+                  <CardDescription>
+                    {t("bodyCompositionChartDesc")}{" "}
+                    <span className="text-muted-foreground/90">
+                      · {t("goal")} {student.goalWeightKg ?? "—"} kg
+                      {Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent) > 0
+                        ? ` · ${t("bodyFatGoalLabel").replace(
+                            "{n}",
+                            String(
+                              Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent)
+                            )
+                          )}`
+                        : ""}{" "}
+                      (
+                      <span className="capitalize">{student.goalType?.replace("_", " ") || "—"}</span>)
+                    </span>
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
-                  {weightChartData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={weightChartData}>
-                        <defs>
-                          <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                        <XAxis dataKey="date" />
-                        <YAxis domain={['dataMin - 2', 'dataMax + 2']} />
-                        <Tooltip />
-                        <Area type="monotone" dataKey="weight" stroke="hsl(var(--primary))" fillOpacity={1} fill="url(#colorWeight)" strokeWidth={3} />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                <CardContent className="p-6 pt-0">
+                  {bodyCompositionCoachData.length > 0 ? (
+                    <BodyCompositionTrendChart
+                      data={bodyCompositionCoachData}
+                      emptyLabel={t("noBodyCompositionData")}
+                      chartClassName="h-[300px] w-full min-h-[260px]"
+                    />
+                  ) : weightChartData.length > 0 ? (
+                    <div className="h-[300px] w-full min-h-[260px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={weightChartData}>
+                          <defs>
+                            <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                          <XAxis dataKey="date" />
+                          <YAxis domain={["dataMin - 2", "dataMax + 2"]} />
+                          <Tooltip />
+                          <Area
+                            type="monotone"
+                            dataKey="weight"
+                            stroke="hsl(var(--primary))"
+                            fillOpacity={1}
+                            fill="url(#colorWeight)"
+                            strokeWidth={3}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                      {t("noWeightRecords")}
+                    <div className="h-[300px] flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground border-2 border-dashed rounded-lg px-4">
+                      <p>{t("noBodyCompositionData")}</p>
+                      <p className="text-xs">{t("noWeightRecords")}</p>
                     </div>
                   )}
                 </CardContent>
@@ -1577,209 +1544,6 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               </Card>
             </div>
 
-            <div className="grid lg:grid-cols-[minmax(0,1.8fr)_minmax(0,0.9fr)] gap-6 items-start">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Dumbbell className="h-5 w-5 text-primary" />
-                    {t("workoutHistory")}
-                  </CardTitle>
-                  <CardDescription>{sortedSessions.length} {sortedSessions.length !== 1 ? t("sessionsCompleted") : t("sessionCompleted")}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {sortedSessions.length > 0 ? (
-                    <div className="space-y-3">
-                      {sortedSessions.map((session: any) => (
-                        <div key={session.id} className="border rounded-lg p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-semibold">{session.workoutTitle || "Untitled Workout"}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {session.completedAt
-                                  ? new Date(session.completedAt).toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric" })
-                                  : session.startedAt
-                                    ? new Date(session.startedAt).toLocaleDateString()
-                                    : "—"}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditSession(session)}>
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setConfirmDeleteSessionId(session.id)}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                              <Badge variant="outline" className="bg-green-100 text-green-800">
-                                {session.status === "completed" ? t("completed") : session.status || "Done"}
-                              </Badge>
-                            </div>
-                          </div>
-                          {session.exercises && session.exercises.length > 0 && (
-                            <div className="space-y-2">
-                              {session.exercises.map((ex: any, idx: number) => (
-                                <div key={idx} className="bg-muted/50 rounded p-2">
-                                  <p className="text-sm font-medium">{ex.exerciseName || ex.name}</p>
-                                  {ex.sets && Array.isArray(ex.sets) ? (
-                                    <div className="flex flex-wrap gap-2 mt-1">
-                                      {ex.sets.map((s: any, si: number) => (
-                                        <span key={si} className="text-xs bg-background border rounded px-2 py-0.5">
-                                          Set {si + 1}: {s.weight ?? "—"}kg × {s.reps ?? "—"}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <p className="text-xs text-muted-foreground">
-                                      {ex.sets || "—"} sets · {ex.reps || "—"} reps{ex.weight ? ` · ${ex.weight}kg` : ""}
-                                    </p>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Dumbbell className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                      <p className="text-sm">{t("noWorkoutSessions")}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Assigned Workouts card removed — managed via Assignment Calendar */}
-              {false && (
-                <Card className="bg-primary/5 border-primary/20">
-                <CardHeader>
-                  <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {sortedWorkoutPlans.length > 0 ? (
-                    sortedWorkoutPlans.map((plan: any) => (
-                      <div key={plan.id} className="p-3 border rounded-lg bg-background flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Dumbbell className="h-4 w-4 text-primary shrink-0" />
-                          <div className="min-w-0">
-                            <span className="text-sm font-medium block truncate">{plan.title || 'Untitled'}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Badge variant="outline">{t("active")}</Badge>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => openEditWorkoutPlan(plan)}
-                            disabled={portalOnly}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => setConfirmDeletePlanId(plan.id)}
-                            disabled={portalOnly || deletingWorkoutPlanId === plan.id}
-                          >
-                            {deletingWorkoutPlanId === plan.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">{t("noWorkoutsAssigned")}</p>
-                  )}
-                </CardContent>
-              </Card>
-              )}
-            </div>
-
-            {/* Edit Session Dialog */}
-            <Dialog open={!!editSession} onOpenChange={(open) => !open && setEditSession(null)}>
-              <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>{t("editSession")} — {editSession?.workoutTitle || "Workout"}</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4">
-                  {editExercises.map((ex, ei) => (
-                    <div key={ei} className="border rounded-lg p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Input
-                          className="font-medium text-sm h-8"
-                          value={ex.name}
-                          onChange={(e) => {
-                            const copy = [...editExercises];
-                            copy[ei] = { ...copy[ei], name: e.target.value };
-                            setEditExercises(copy);
-                          }}
-                        />
-                        <Button size="icon" variant="ghost" className="h-7 w-7 ml-2 text-destructive shrink-0" onClick={() => setEditExercises(editExercises.filter((_, i) => i !== ei))}>
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                      <div className="space-y-1">
-                        {ex.sets.map((s: any, si: number) => (
-                          <div key={si} className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-12 shrink-0">Set {si + 1}</span>
-                            <Input
-                              type="number"
-                              className="h-7 text-xs"
-                              placeholder="kg"
-                              value={s.weight}
-                              onChange={(e) => {
-                                const copy = [...editExercises];
-                                const sets = [...copy[ei].sets];
-                                sets[si] = { ...sets[si], weight: Number(e.target.value) || 0 };
-                                copy[ei] = { ...copy[ei], sets };
-                                setEditExercises(copy);
-                              }}
-                            />
-                            <span className="text-xs">kg ×</span>
-                            <Input
-                              type="number"
-                              className="h-7 text-xs"
-                              placeholder="reps"
-                              value={s.reps}
-                              onChange={(e) => {
-                                const copy = [...editExercises];
-                                const sets = [...copy[ei].sets];
-                                sets[si] = { ...sets[si], reps: Number(e.target.value) || 0 };
-                                copy[ei] = { ...copy[ei], sets };
-                                setEditExercises(copy);
-                              }}
-                            />
-                            <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => {
-                              const copy = [...editExercises];
-                              copy[ei] = { ...copy[ei], sets: copy[ei].sets.filter((_: any, i: number) => i !== si) };
-                              setEditExercises(copy);
-                            }}>
-                              <X className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        ))}
-                        <Button size="sm" variant="outline" className="h-6 text-xs mt-1" onClick={() => {
-                          const copy = [...editExercises];
-                          copy[ei] = { ...copy[ei], sets: [...copy[ei].sets, { weight: 0, reps: 0 }] };
-                          setEditExercises(copy);
-                        }}>
-                          + Add Set
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="flex gap-2 pt-2">
-                    <Button className="flex-1" onClick={handleSaveSession}>{t("saveChanges")}</Button>
-                    <Button variant="destructive" onClick={() => editSession && setConfirmDeleteSessionId(editSession.id)}>{t("deleteSession")}</Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-
             <div className="grid sm:grid-cols-2 gap-6">
               <Card className="bg-accent/5">
                 <CardHeader className="pb-2">
@@ -1814,6 +1578,175 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </TabsContent>
 
+          <TabsContent value="workoutHistory" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Dumbbell className="h-5 w-5 text-primary" />
+                  {t("workoutHistory")}
+                </CardTitle>
+                <CardDescription>
+                  {sortedSessions.length}{" "}
+                  {sortedSessions.length !== 1 ? t("sessionsCompleted") : t("sessionCompleted")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sortedSessions.length > 0 ? (
+                  <div className="space-y-3">
+                    {sortedSessions.map((session: any) => (
+                      <div key={session.id} className="border rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold">{session.workoutTitle || "Untitled Workout"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {session.completedAt
+                                ? new Date(session.completedAt).toLocaleDateString(undefined, {
+                                    weekday: "short",
+                                    year: "numeric",
+                                    month: "short",
+                                    day: "numeric",
+                                  })
+                                : session.startedAt
+                                  ? new Date(session.startedAt).toLocaleDateString()
+                                  : "—"}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={() => openEditSession(session)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive"
+                              onClick={() => setConfirmDeleteSessionId(session.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Badge variant="outline" className="bg-green-100 text-green-800">
+                              {session.status === "completed" ? t("completed") : session.status || "Done"}
+                            </Badge>
+                          </div>
+                        </div>
+                        {(session.sessionDifficultyRating != null ||
+                          session.sessionMoodRating != null ||
+                          session.difficultyNotes ||
+                          session.moodNotes ||
+                          (session.bodyWeightKg != null &&
+                            Number.isFinite(Number(session.bodyWeightKg)) &&
+                            Number(session.bodyWeightKg) > 0) ||
+                          (session.sessionBodyFatPercent != null &&
+                            Number.isFinite(Number(session.sessionBodyFatPercent)) &&
+                            Number(session.sessionBodyFatPercent) > 0)) && (
+                          <div className="text-xs rounded-md bg-muted/40 border border-border/60 p-3 space-y-2">
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 items-center font-medium">
+                              {(() => {
+                                const dr = Number(session.sessionDifficultyRating);
+                                const faces = ["😌", "🙂", "😐", "😰", "😵"];
+                                if (!Number.isFinite(dr) || dr < 1 || dr > 5) return null;
+                                return (
+                                  <span className="text-muted-foreground">
+                                    {t("sessionDifficultyCoach")}: <span aria-hidden>{faces[dr - 1]}</span> ({dr}/5)
+                                  </span>
+                                );
+                              })()}
+                              {(() => {
+                                const mr = Number(session.sessionMoodRating);
+                                const faces = ["😢", "😕", "😐", "😊", "🤩"];
+                                if (!Number.isFinite(mr) || mr < 1 || mr > 5) return null;
+                                return (
+                                  <span className="text-muted-foreground">
+                                    {t("sessionMoodCoach")}: <span aria-hidden>{faces[mr - 1]}</span> ({mr}/5)
+                                  </span>
+                                );
+                              })()}
+                              {(() => {
+                                const bw = Number(session.bodyWeightKg);
+                                if (!Number.isFinite(bw) || bw <= 0) return null;
+                                return (
+                                  <span className="text-muted-foreground tabular-nums">
+                                    {t("sessionBodyWeightCoach")}:{" "}
+                                    <span className="font-semibold text-foreground/90">{bw} kg</span>
+                                  </span>
+                                );
+                              })()}
+                              {(() => {
+                                const bf = Number(session.sessionBodyFatPercent);
+                                if (!Number.isFinite(bf) || bf <= 0) return null;
+                                return (
+                                  <span className="text-muted-foreground tabular-nums">
+                                    {t("sessionBodyFatCoach")}:{" "}
+                                    <span className="font-semibold text-foreground/90">{bf}%</span>
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                            {(session.difficultyNotes || session.moodNotes) && (
+                              <div className="space-y-1 text-muted-foreground">
+                                {session.difficultyNotes ? (
+                                  <p>
+                                    <span className="font-semibold text-foreground/80">
+                                      {t("sessionDifficultyCoach")}:{" "}
+                                    </span>
+                                    {session.difficultyNotes}
+                                  </p>
+                                ) : null}
+                                {session.moodNotes ? (
+                                  <p>
+                                    <span className="font-semibold text-foreground/80">
+                                      {t("sessionMoodCoach")}:{" "}
+                                    </span>
+                                    {session.moodNotes}
+                                  </p>
+                                ) : null}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {session.exercises && session.exercises.length > 0 && (
+                          <div className="space-y-2">
+                            {session.exercises.map((ex: any, idx: number) => (
+                              <div key={idx} className="bg-muted/50 rounded p-2">
+                                <p className="text-sm font-medium">{ex.exerciseName || ex.name}</p>
+                                {ex.sets && Array.isArray(ex.sets) ? (
+                                  <div className="flex flex-wrap gap-2 mt-1">
+                                    {ex.sets.map((s: any, si: number) => (
+                                      <span
+                                        key={si}
+                                        className="text-xs bg-background border rounded px-2 py-0.5"
+                                      >
+                                        Set {si + 1}: {s.weight ?? "—"}kg × {s.reps ?? "—"}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">
+                                    {ex.sets || "—"} sets · {ex.reps || "—"} reps
+                                    {ex.weight ? ` · ${ex.weight}kg` : ""}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Dumbbell className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                    <p className="text-sm">{t("noWorkoutSessions")}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="milestones" className="space-y-6">
             <MilestonesTab
               db={db}
@@ -1841,7 +1774,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                   </CardHeader>
                   <CardContent>
                     <Textarea 
-                      placeholder="Enter coaching cues, technical faults, or recovery notes..."
+                      placeholder={t("placeholderCoachingNotes")}
                       className="min-h-[250px] text-base leading-relaxed"
                       value={coachingNotes}
                       onChange={(e) => setCoachingNotes(e.target.value)}
@@ -1901,15 +1834,6 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                className="h-8 w-8"
-                                onClick={() => openEditWorkoutPlan(plan)}
-                                disabled={portalOnly}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
                                 className="h-8 w-8 text-destructive hover:text-destructive"
                                 onClick={() => setConfirmDeletePlanId(plan.id)}
                                 disabled={portalOnly || deletingWorkoutPlanId === plan.id}
@@ -1953,7 +1877,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                                             onChange={(event) => setEditingAssignedExerciseNote(event.target.value)}
                                             rows={3}
                                             className="text-xs"
-                                            placeholder="Exercise notes..."
+                                            placeholder={t("placeholderAssignedExerciseNote")}
                                           />
                                           <div className="flex gap-2">
                                             <Button
@@ -2028,6 +1952,19 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                       />
                     </div>
                     <div className="space-y-2">
+                      <Label>{t("goalBodyFatPercent")}</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min={0}
+                        max={100}
+                        value={editStats.goalBodyFatPercent}
+                        onChange={(e) =>
+                          setEditStats({ ...editStats, goalBodyFatPercent: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
                       <Label>{t("goalType")}</Label>
                       <Input 
                         placeholder="e.g. Muscle Gain"
@@ -2054,112 +1991,110 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           </TabsContent>
         </Tabs>
 
-        <Dialog open={Boolean(editingWorkoutPlan)} onOpenChange={(open) => !open && setEditingWorkoutPlan(null)}>
-          <DialogContent>
+        <Dialog open={!!editSession} onOpenChange={(open) => !open && setEditSession(null)}>
+          <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Edit Assigned Workout</DialogTitle>
-              <DialogDescription>
-                Update the assigned workout details for this student.
-              </DialogDescription>
+              <DialogTitle>
+                {t("editSession")} — {editSession?.workoutTitle || "Workout"}
+              </DialogTitle>
             </DialogHeader>
-
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Workout title</Label>
-                <Input
-                  value={editingWorkoutPlanValues.title}
-                  onChange={(event) =>
-                    setEditingWorkoutPlanValues((current) => ({ ...current, title: event.target.value }))
-                  }
-                />
-              </div>
-
-              <div className="rounded-md border bg-muted/20 p-3">
-                <p className="text-xs text-muted-foreground">
-                  Assignment week:{" "}
-                  <span className="font-medium text-foreground">
-                    {formatWeekLabelFromPlan(editingWorkoutPlan)}
-                  </span>
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Assigned exercises and notes</Label>
-                <div className="max-h-64 overflow-y-auto rounded-md border bg-muted/20 p-3 space-y-2">
-                  {editingAssignedExercises.length > 0 ? (
-                    editingAssignedExercises.map((exercise: any, index: number) => (
-                      <div key={index} className="rounded-md border bg-background p-2">
-                        <div className="space-y-2">
-                          <Input
-                            value={exercise.exerciseName || ""}
-                            onChange={(event) =>
-                              setEditingAssignedExercises((current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index ? { ...item, exerciseName: event.target.value } : item
-                                )
-                              )
-                            }
-                            placeholder={`Exercise ${index + 1}`}
-                            className="h-8"
-                          />
-                          <Textarea
-                            value={exercise.notes || ""}
-                            onChange={(event) =>
-                              setEditingAssignedExercises((current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index ? { ...item, notes: event.target.value } : item
-                                )
-                              )
-                            }
-                            placeholder="Exercise notes"
-                            rows={2}
-                          />
-                          <div className="flex justify-end">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-destructive"
-                              onClick={() =>
-                                setEditingAssignedExercises((current) =>
-                                  current.filter((_, itemIndex) => itemIndex !== index)
-                                )
-                              }
-                            >
-                              <Trash2 className="h-4 w-4 mr-1" /> Remove
-                            </Button>
-                          </div>
-                        </div>
+              {editExercises.map((ex, ei) => (
+                <div key={ei} className="border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Input
+                      className="font-medium text-sm h-8"
+                      value={ex.name}
+                      onChange={(e) => {
+                        const copy = [...editExercises];
+                        copy[ei] = { ...copy[ei], name: e.target.value };
+                        setEditExercises(copy);
+                      }}
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 ml-2 text-destructive shrink-0"
+                      onClick={() => setEditExercises(editExercises.filter((_, i) => i !== ei))}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  <div className="space-y-1">
+                    {ex.sets.map((s: any, si: number) => (
+                      <div key={si} className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-12 shrink-0">Set {si + 1}</span>
+                        <Input
+                          type="number"
+                          className="h-7 text-xs"
+                          placeholder="kg"
+                          value={s.weight}
+                          onChange={(e) => {
+                            const copy = [...editExercises];
+                            const sets = [...copy[ei].sets];
+                            sets[si] = { ...sets[si], weight: Number(e.target.value) || 0 };
+                            copy[ei] = { ...copy[ei], sets };
+                            setEditExercises(copy);
+                          }}
+                        />
+                        <span className="text-xs">kg ×</span>
+                        <Input
+                          type="number"
+                          className="h-7 text-xs"
+                          placeholder="reps"
+                          value={s.reps}
+                          onChange={(e) => {
+                            const copy = [...editExercises];
+                            const sets = [...copy[ei].sets];
+                            sets[si] = { ...sets[si], reps: Number(e.target.value) || 0 };
+                            copy[ei] = { ...copy[ei], sets };
+                            setEditExercises(copy);
+                          }}
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 text-destructive"
+                          onClick={() => {
+                            const copy = [...editExercises];
+                            copy[ei] = {
+                              ...copy[ei],
+                              sets: copy[ei].sets.filter((_: any, i: number) => i !== si),
+                            };
+                            setEditExercises(copy);
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No exercises assigned.</p>
-                  )}
+                    ))}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-xs mt-1"
+                      onClick={() => {
+                        const copy = [...editExercises];
+                        copy[ei] = { ...copy[ei], sets: [...copy[ei].sets, { weight: 0, reps: 0 }] };
+                        setEditExercises(copy);
+                      }}
+                    >
+                      + Add Set
+                    </Button>
+                  </div>
                 </div>
+              ))}
+              <div className="flex gap-2 pt-2">
+                <Button className="flex-1" onClick={handleSaveSession}>
+                  {t("saveChanges")}
+                </Button>
                 <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setEditingAssignedExercises((current) => [
-                      ...current,
-                      { exerciseName: "", sets: 0, reps: "", targetWeightKg: "", notes: "" },
-                    ])
-                  }
+                  variant="destructive"
+                  onClick={() => editSession && setConfirmDeleteSessionId(editSession.id)}
                 >
-                  <Plus className="h-4 w-4 mr-1" /> Add exercise
+                  {t("deleteSession")}
                 </Button>
               </div>
             </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditingWorkoutPlan(null)} disabled={isSavingWorkoutPlan}>
-                {t("cancel")}
-              </Button>
-              <Button onClick={handleSaveWorkoutPlan} disabled={isSavingWorkoutPlan}>
-                {isSavingWorkoutPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {t("saveChanges")}
-              </Button>
-            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
