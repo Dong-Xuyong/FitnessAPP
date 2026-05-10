@@ -21,7 +21,10 @@ import {
   initializeDefaultPrograms,
   ensureDefaultWeeklyStrengthCycle,
 } from "@/lib/firestore/training-programs";
-import { DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE } from "@/lib/default-programs";
+import {
+  DEFAULT_WEEKLY_STRENGTH_CYCLES,
+  DEFAULT_WEEKLY_STRENGTH_LEGACY_TITLE,
+} from "@/lib/default-programs";
 import type { TrainingProgramDocument, WeeklyProgramItem } from "@/lib/types";
 import { buildWorkoutPlanExercises } from "@/lib/training-program-assignment";
 import { useToast } from "@/hooks/use-toast";
@@ -125,11 +128,13 @@ export default function WorkoutsPage() {
     [programs]
   );
 
-  /** Any library doc with the canonical title counts (covers weekly meta even if programType was omitted). */
-  const hasCanonicalDefaultWeekly = useMemo(
-    () => (programs || []).some((p) => p.name === DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE),
-    [programs]
-  );
+  /** Legacy 6-source cycle or all three PU/Dip/Squat weekly metas — disables duplicate seed. */
+  const hasCanonicalDefaultWeekly = useMemo(() => {
+    const list = programs || [];
+    if (list.some((p) => p.name === DEFAULT_WEEKLY_STRENGTH_LEGACY_TITLE)) return true;
+    const titles = new Set(list.map((p) => p.name).filter(Boolean));
+    return DEFAULT_WEEKLY_STRENGTH_CYCLES.every((c) => titles.has(c.title));
+  }, [programs]);
 
   const selectedProgramsForWeekly = useMemo(
     () => selectedProgramIds
@@ -358,10 +363,13 @@ export default function WorkoutsPage() {
     try {
       const result = await ensureDefaultWeeklyStrengthCycle(db, user.uid);
       if (result.success) {
-        if (result.created) {
+        if (result.createdCount > 0) {
           toast({
             title: t("weeklyStrengthCycleAdded"),
-            description: t("weeklyStrengthCycleAddedDesc"),
+            description:
+              result.addedTitles.length > 0
+                ? `${t("weeklyStrengthCycleAddedPrefix")} ${result.addedTitles.join(", ")}.`
+                : t("weeklyStrengthCycleAddedDesc"),
           });
         } else {
           toast({

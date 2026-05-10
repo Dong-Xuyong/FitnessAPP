@@ -15,7 +15,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, getDocs, deleteDoc, setDoc, getDoc, doc } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, updateDoc } from "firebase/firestore";
 import {
   CalendarDays, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
   Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp, Pencil, Save,
@@ -63,6 +63,20 @@ type WeekAssignment = {
   programId: string;
   programTitle: string;
 };
+
+/** Match denormalized student workout plan to a week-program assignment (source of truth for assigned exercises). */
+function matchWorkoutPlanForAssignment(assignment: WeekAssignment, plans: any[] | undefined): any | undefined {
+  if (!plans?.length) return undefined;
+  const { weekStart, programId, programTitle } = assignment;
+  const title = String(programTitle || "").trim();
+  return plans.find((p: any) => {
+    if (p.weekStart !== weekStart) return false;
+    if (p.programId === programId || p.sourceTrainingProgramId === programId) return true;
+    const noProgRef = p.programId == null && p.sourceTrainingProgramId == null;
+    if (noProgRef && String(p.title || "").trim() === title) return true;
+    return false;
+  });
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -216,9 +230,11 @@ export default function AssignmentCalendarPage() {
 
   // Expandable week-assignment programs + inline note editing
   const [expandedAssignmentId, setExpandedAssignmentId] = useState<string | null>(null);
-  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null); // "programId-sessionIdx-exIdx"
+  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null); // library: "lib:programId-si-ei" | plan: "plan:studentId-planId-ei"
   const [editingNoteValue, setEditingNoteValue] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
+  /** workoutPlans for students that have assignments in the selected calendar week (exercises may differ from library template). */
+  const [weekWorkoutPlansByStudent, setWeekWorkoutPlansByStudent] = useState<Record<string, any[]>>({});
 
   // Manage slot dialog
   const [managingSlot, setManagingSlot] = useState<{
@@ -389,6 +405,43 @@ export default function AssignmentCalendarPage() {
     ),
     [weekAssignments, selectedWeekStart, isFilterActive, filterStudentId]
   );
+
+  const studentIdsForSelectedWeek = useMemo(
+    () => [...new Set(selectedWeekAssignments.map((a) => a.studentId))],
+    [selectedWeekAssignments]
+  );
+
+  useEffect(() => {
+    if (!db || !user) return;
+    if (studentIdsForSelectedWeek.length === 0) {
+      setWeekWorkoutPlansByStudent({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const entries = await Promise.all(
+          studentIdsForSelectedWeek.map(async (sid) => {
+            const snap = await getDocs(
+              collection(db!, "personalTrainers", user!.uid, "students", sid, "workoutPlans")
+            );
+            const forWeek = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() }))
+              .filter((p: any) => p.weekStart === selectedWeekStart);
+            return [sid, forWeek] as const;
+          })
+        );
+        if (!cancelled) {
+          setWeekWorkoutPlansByStudent(Object.fromEntries(entries));
+        }
+      } catch {
+        if (!cancelled) setWeekWorkoutPlansByStudent({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user, selectedWeekStart, studentIdsForSelectedWeek]);
 
   const weeklyPrograms = useMemo(
     () =>
@@ -814,9 +867,45 @@ export default function AssignmentCalendarPage() {
 
   // ── Inline note editing for week-assignment programs ───────────────────────
 
-  const handleSaveNote = async (programId: string, sessionIdx: number, exIdx: number, newNote: string) => {
+  const handleSaveNote = async (
+    programId: string,
+    sessionIdx: number,
+    exIdx: number,
+    newNote: string,
+    opts?: { studentId?: string; workoutPlanId?: string }
+  ) => {
+    if (!db || !user) return;
+    const { studentId, workoutPlanId } = opts || {};
+    if (workoutPlanId && studentId) {
+      setIsSavingNote(true);
+      try {
+        const plans = weekWorkoutPlansByStudent[studentId] || [];
+        const plan = plans.find((p: any) => p.id === workoutPlanId);
+        const list = [...(plan?.exercises || [])];
+        if (exIdx < 0 || exIdx >= list.length) return;
+        list[exIdx] = { ...list[exIdx], notes: newNote };
+        await updateDoc(
+          doc(db, "personalTrainers", user.uid, "students", studentId, "workoutPlans", workoutPlanId),
+          { exercises: list }
+        );
+        setWeekWorkoutPlansByStudent((prev) => ({
+          ...prev,
+          [studentId]: (prev[studentId] || []).map((p: any) =>
+            p.id === workoutPlanId ? { ...p, exercises: list } : p
+          ),
+        }));
+        setEditingNoteKey(null);
+        toast({ title: "Nota guardada" });
+      } catch (e: any) {
+        toast({ title: "Erro", description: e?.message, variant: "destructive" });
+      } finally {
+        setIsSavingNote(false);
+      }
+      return;
+    }
+
     const program = programs.find((p) => p.id === programId);
-    if (!program || !db || !user) return;
+    if (!program) return;
     setIsSavingNote(true);
     try {
       const updatedSessions = (program.sessions || []).map((s: any, si: number) => {
@@ -1921,9 +2010,21 @@ export default function AssignmentCalendarPage() {
               <div className="space-y-2">
                 {selectedWeekAssignments.map((a) => {
                   const prog = programs.find((p) => p.id === a.programId);
-                  const exercises = (prog?.sessions || []).flatMap((s: any, si: number) =>
+                  const matchedPlan = matchWorkoutPlanForAssignment(a, weekWorkoutPlansByStudent[a.studentId]);
+                  const libExercises = (prog?.sessions || []).flatMap((s: any, si: number) =>
                     (s.exercises || []).map((e: any, ei: number) => ({ ...e, sessionIdx: si, exIdx: ei }))
                   );
+                  const planExercises =
+                    matchedPlan && Array.isArray(matchedPlan.exercises) && matchedPlan.exercises.length > 0
+                      ? matchedPlan.exercises.map((e: any, ei: number) => ({
+                          ...e,
+                          sessionIdx: -1,
+                          exIdx: ei,
+                          workoutPlanId: matchedPlan.id,
+                          planStudentId: a.studentId,
+                        }))
+                      : [];
+                  const exercises = planExercises.length > 0 ? planExercises : libExercises;
                   const isExpanded = expandedAssignmentId === a.id;
 
                   return (
@@ -1957,7 +2058,9 @@ export default function AssignmentCalendarPage() {
                               Sem exercícios neste programa.
                             </p>
                           ) : exercises.map((ex: any, flatIdx: number) => {
-                            const noteKey = `${a.programId}-${ex.sessionIdx}-${ex.exIdx}`;
+                            const noteKey = ex.workoutPlanId
+                              ? `plan:${ex.planStudentId}-${ex.workoutPlanId}-${ex.exIdx}`
+                              : `lib:${a.programId}-${ex.sessionIdx}-${ex.exIdx}`;
                             const isEditing = editingNoteKey === noteKey;
                             return (
                               <div key={flatIdx} className="px-4 py-3 space-y-1.5">
@@ -1983,7 +2086,12 @@ export default function AssignmentCalendarPage() {
                                     />
                                     <div className="flex gap-2">
                                       <Button size="sm" className="h-7 text-xs gap-1.5"
-                                        onClick={() => handleSaveNote(a.programId, ex.sessionIdx, ex.exIdx, editingNoteValue)}
+                                        onClick={() =>
+                                          handleSaveNote(a.programId, ex.sessionIdx, ex.exIdx, editingNoteValue,
+                                            ex.workoutPlanId
+                                              ? { studentId: ex.planStudentId, workoutPlanId: ex.workoutPlanId }
+                                              : undefined
+                                          )}
                                         disabled={isSavingNote}>
                                         {isSavingNote ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                                         Guardar

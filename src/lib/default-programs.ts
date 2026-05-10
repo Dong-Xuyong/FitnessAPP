@@ -1,17 +1,40 @@
 import type { TrainingProgramSession } from "@/lib/types";
 
-/** Canonical Firestore `name` for the seeded default weekly strength meta-program. */
-export const DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE = "Ciclo força — 6 treinos / 5 semanas";
+/** Legacy single weekly meta-program (6 sources). Recognized so existing libraries keep one-click behavior. */
+export const DEFAULT_WEEKLY_STRENGTH_LEGACY_TITLE = "Ciclo força — 6 treinos / 5 semanas";
 
-/** Ordered names for the default weekly strength cycle seed (must match `name` on each program). */
-export const DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES = [
-  "Main pu",
-  "Volume pu",
-  "Main Dip",
-  "Volume Dip",
-  "Main Squat",
-  "Volume Front Squat",
+export type DefaultWeeklyStrengthCycleConfig = {
+  title: string;
+  description: string;
+  /** Must match `name` on existing base templates in the library. */
+  sourceNames: readonly [string, string];
+};
+
+/** Three weekly meta-programs (PU, Dip, Squat), each with two source templates and 5-week progression. */
+export const DEFAULT_WEEKLY_STRENGTH_CYCLES: readonly DefaultWeeklyStrengthCycleConfig[] = [
+  {
+    title: "Ciclo força — PU (2 treinos / 5 semanas)",
+    description:
+      "Dois micro-programas (main + volume) para pull-up, 5 semanas com progressão de +2,5 kg/semana nas notas.",
+    sourceNames: ["Main pu", "Volume pu"],
+  },
+  {
+    title: "Ciclo força — Dip (2 treinos / 5 semanas)",
+    description:
+      "Dois micro-programas (main + volume) para dip, 5 semanas com progressão de +2,5 kg/semana nas notas.",
+    sourceNames: ["Main Dip", "Volume Dip"],
+  },
+  {
+    title: "Ciclo força — Agachamento (2 treinos / 5 semanas)",
+    description:
+      "Dois micro-programas (agachamento + front squat volume), 5 semanas com progressão de +2,5 kg/semana nas notas.",
+    sourceNames: ["Main Squat", "Volume Front Squat"],
+  },
 ] as const;
+
+/** All base template names required before seeding weekly meta-programs (order: PU, Dip, Squat pairs). */
+export const DEFAULT_WEEKLY_STRENGTH_ALL_SOURCE_NAMES: readonly string[] =
+  DEFAULT_WEEKLY_STRENGTH_CYCLES.flatMap((c) => [...c.sourceNames]);
 
 export interface DefaultTrainingProgram {
   name: string;

@@ -306,12 +306,13 @@ const translations = {
     noProgramsYetDesc: "Build a routine in the program builder, or load default programs to get started.",
     loadDefaultPrograms: "Load Default Programs",
     addDefaultWeeklyStrengthCycle: "Add default strength weekly cycle",
-    weeklyStrengthCycleAdded: "Weekly cycle added",
+    weeklyStrengthCycleAdded: "Weekly cycles added",
     weeklyStrengthCycleAddedDesc:
-      'The program "Ciclo força — 6 treinos / 5 semanas" is now under Saved Weekly Programs.',
+      "The default PU, Dip, and squat weekly strength programs are now under Saved Weekly Programs.",
+    weeklyStrengthCycleAddedPrefix: "Saved weekly programs:",
     weeklyStrengthCycleAlreadyExists: "Already saved",
     weeklyStrengthCycleAlreadyExistsDesc:
-      "The default strength weekly cycle is already in your library.",
+      "The default strength weekly programs are already in your library (or you still have the legacy 6-session cycle).",
     weeklyCycleMissingIntro: "Add these training programs to your library first:",
     weeklyStrengthCycleFailed: "Could not add weekly cycle",
     savedWeeklyPrograms: "Saved Weekly Programs",
@@ -1011,12 +1012,13 @@ const translations = {
     noProgramsYetDesc: "Crie uma rotina no criador de programas ou carregue programas padrão para começar.",
     loadDefaultPrograms: "Carregar Programas Padrão",
     addDefaultWeeklyStrengthCycle: "Adicionar ciclo semanal de força predefinido",
-    weeklyStrengthCycleAdded: "Ciclo semanal adicionado",
+    weeklyStrengthCycleAdded: "Ciclos semanais adicionados",
     weeklyStrengthCycleAddedDesc:
-      'O programa "Ciclo força — 6 treinos / 5 semanas" está agora em Programas Semanais Guardados.',
+      "Os programas semanais de força predefinidos (PU, Dip e agachamento) estão agora em Programas Semanais Guardados.",
+    weeklyStrengthCycleAddedPrefix: "Programas semanais guardados:",
     weeklyStrengthCycleAlreadyExists: "Já guardado",
     weeklyStrengthCycleAlreadyExistsDesc:
-      "O ciclo semanal de força predefinido já está na biblioteca.",
+      "Os ciclos semanais de força predefinidos já estão na biblioteca (ou ainda tens o ciclo antigo de 6 treinos).",
     weeklyCycleMissingIntro: "Adicione primeiro estes programas à biblioteca:",
     weeklyStrengthCycleFailed: "Não foi possível adicionar o ciclo semanal",
     savedWeeklyPrograms: "Programas Semanais Guardados",
