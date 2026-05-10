@@ -107,6 +107,8 @@ const translations = {
     lastActive: "Last Active",
     noRecentActivity: "No recent activity",
     loggedSession: "Logged session",
+    progressCardSessionsTitle: "Sessions",
+    progressCardSessionsHint: "Last workout session",
     coachingManagement: "Coaching & Management",
     trainerNotes: "Trainer Observations & Notes",
     privateNotes: "Private notes only visible to you.",
@@ -490,6 +492,13 @@ const translations = {
     paymentsRecordedByCoach: "Payments recorded by your coach",
     datePaid: "Date Paid",
     noPaymentRecords: "No payment records yet.",
+    paymentReminderSoonTitle: "Payment due soon",
+    paymentReminderSoonDesc:
+      "Your membership payment for this period is due by {date}. Please complete it or contact your coach if you already paid.",
+    paymentReminderOverdueTitle: "Payment overdue",
+    paymentReminderOverdueDesc:
+      "Your monthly payment for this period was due by {date}. Please pay or contact your coach.",
+    paymentReminderCta: "Open billing",
 
     // Student Profile
     signInRequired: "Sign in required",
@@ -747,6 +756,8 @@ const translations = {
     lastActive: "Última Atividade",
     noRecentActivity: "Sem atividade recente",
     loggedSession: "Sessão registada",
+    progressCardSessionsTitle: "Sessões",
+    progressCardSessionsHint: "Última sessão de treino",
     coachingManagement: "Treino e Gestão",
     trainerNotes: "Observações e Notas do Treinador",
     privateNotes: "Notas privadas visíveis apenas para si.",
@@ -1130,6 +1141,13 @@ const translations = {
     paymentsRecordedByCoach: "Pagamentos registados pelo seu treinador",
     datePaid: "Data de Pagamento",
     noPaymentRecords: "Ainda sem registos de pagamento.",
+    paymentReminderSoonTitle: "Pagamento a aproximar-se",
+    paymentReminderSoonDesc:
+      "O pagamento deste período deve ser feito até {date}. Conclui o pagamento ou fala com o teu treinador se já pagaste.",
+    paymentReminderOverdueTitle: "Pagamento em atraso",
+    paymentReminderOverdueDesc:
+      "O pagamento mensal deste período devia estar pago até {date}. Paga ou contacta o teu treinador.",
+    paymentReminderCta: "Ver faturação",
 
     // Student Profile
     signInRequired: "Login necessário",

@@ -19,8 +19,10 @@ import {
   Menu,
   Globe,
   ShieldBan,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -29,6 +31,7 @@ import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useStudentPaymentReminder } from "@/hooks/use-student-payment-reminder";
 
 const navItems = [
   { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
@@ -55,6 +58,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const db = useFirestore();
   const { user } = useUser();
   const { t, locale, setLocale } = useI18n();
+  const { reminder } = useStudentPaymentReminder(db, user?.uid);
   const [profile, setProfile] = useState<{ firstName?: string; fullName?: string; photoUrl?: string } | null>(null);
   const [isBlocked, setIsBlocked] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -254,6 +258,41 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
+          {reminder.show && !isBlocked ? (
+            <Alert
+              variant={reminder.variant === "overdue" ? "destructive" : "default"}
+              className={
+                reminder.variant === "soon"
+                  ? "mb-4 border-amber-500/50 bg-amber-500/5 text-foreground [&>svg]:text-amber-600"
+                  : "mb-4"
+              }
+            >
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <div>
+                <AlertTitle className="pr-8">
+                  {reminder.variant === "overdue"
+                    ? t("paymentReminderOverdueTitle")
+                    : t("paymentReminderSoonTitle")}
+                </AlertTitle>
+                <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mt-2">
+                  <p className="text-sm opacity-95">
+                    {(reminder.variant === "overdue"
+                      ? t("paymentReminderOverdueDesc")
+                      : t("paymentReminderSoonDesc")
+                    ).replace(
+                      "{date}",
+                      reminder.dueDate.toLocaleDateString(locale === "pt" ? "pt-PT" : undefined, {
+                        dateStyle: "long",
+                      })
+                    )}
+                  </p>
+                  <Button size="sm" variant="secondary" className="shrink-0 w-fit" asChild>
+                    <Link href="/student/billing">{t("paymentReminderCta")}</Link>
+                  </Button>
+                </AlertDescription>
+              </div>
+            </Alert>
+          ) : null}
           {isBlocked && pathname !== "/student/billing" ? (
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4">
               <div className="rounded-full bg-destructive/10 p-6">
