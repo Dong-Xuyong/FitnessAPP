@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   images: {
+    // Firebase App Hosting: avoid /_next/image unless explicitly wired (see Firebase image-loading docs).
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https',
