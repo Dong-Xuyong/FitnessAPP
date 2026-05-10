@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { collection, deleteDoc, doc, getDoc, query, where } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -41,7 +41,7 @@ function computeEpleyOneRm(weight: number, reps: number): number {
   return weight * (1 + reps / 30);
 }
 
-export default function ProgressPage() {
+function ProgressPageContent() {
   const { t } = useI18n();
   const { toast } = useToast();
   const router = useRouter();
@@ -563,5 +563,23 @@ export default function ProgressPage() {
         </AlertDialog>
       </div>
     </Navigation>
+  );
+}
+
+function ProgressPageFallback() {
+  return (
+    <Navigation>
+      <div className="flex items-center justify-center h-[60vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    </Navigation>
+  );
+}
+
+export default function ProgressPage() {
+  return (
+    <Suspense fallback={<ProgressPageFallback />}>
+      <ProgressPageContent />
+    </Suspense>
   );
 }
