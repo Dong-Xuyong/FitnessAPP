@@ -1,5 +1,18 @@
 import type { TrainingProgramSession } from "@/lib/types";
 
+/** Canonical Firestore `name` for the seeded default weekly strength meta-program. */
+export const DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE = "Ciclo força — 6 treinos / 5 semanas";
+
+/** Ordered names for the default weekly strength cycle seed (must match `name` on each program). */
+export const DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES = [
+  "Main pu",
+  "Volume pu",
+  "Main Dip",
+  "Volume Dip",
+  "Main Squat",
+  "Volume Front Squat",
+] as const;
+
 export interface DefaultTrainingProgram {
   name: string;
   description: string;
@@ -75,6 +88,102 @@ export const DEFAULT_TRAINING_PROGRAMS: DefaultTrainingProgram[] = [
           { exerciseName: "Femoral",                  sets: 1, reps: "", restTimeSeconds: 0, notes: "3 séries × 12 reps | Descanso: 60 seg | Amplitude completa, contração no final de cada repetição." },
         ],
       },
+    ],
+  },
+
+  {
+    name: "Main pu",
+    description:
+      "Bloco principal da progressão (main lift 3×4). Sobrecarga linear semanal 35 kg – 45 kg (+2,5 kg/semana). Corpo + lastro. Cinco sessões = semanas 1–5 na atribuição semanal.",
+    category: "Strength",
+    level: "intermediate",
+    durationWeeks: 5,
+    sessions: [
+      { order: 0, name: "Semana 1", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Main lift | 3×4 @ 35 kg adicional." }] },
+      { order: 1, name: "Semana 2", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Main lift | 3×4 @ 37,5 kg adicional." }] },
+      { order: 2, name: "Semana 3", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Main lift | 3×4 @ 40 kg adicional." }] },
+      { order: 3, name: "Semana 4", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Main lift | 3×4 @ 42,5 kg adicional." }] },
+      { order: 4, name: "Semana 5", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Main lift | 3×4 @ 45 kg adicional." }] },
+    ],
+  },
+
+  {
+    name: "Volume pu",
+    description:
+      "Bloco de volume ponderado (5×5) 25 kg – 35 kg (+2,5 kg/semana). Cinco sessões = semanas 1–5 na atribuição semanal.",
+    category: "Strength",
+    level: "intermediate",
+    durationWeeks: 5,
+    sessions: [
+      { order: 0, name: "Semana 1", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 5×5 @ 25 kg." }] },
+      { order: 1, name: "Semana 2", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 5×5 @ 27,5 kg." }] },
+      { order: 2, name: "Semana 3", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 5×5 @ 30 kg." }] },
+      { order: 3, name: "Semana 4", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 5×5 @ 32,5 kg." }] },
+      { order: 4, name: "Semana 5", exercises: [{ exerciseName: "Pull-Up", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 5×5 @ 35 kg." }] },
+    ],
+  },
+
+  {
+    name: "Main Dip",
+    description:
+      "Bloco de intensidade (3×10) 20 kg – 30 kg (+2,5 kg/semana). Cinco sessões = semanas 1–5 na atribuição semanal.",
+    category: "Strength",
+    level: "intermediate",
+    durationWeeks: 5,
+    sessions: [
+      { order: 0, name: "Semana 1", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted intensity | 3×10 @ 20 kg." }] },
+      { order: 1, name: "Semana 2", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted intensity | 3×10 @ 22,5 kg." }] },
+      { order: 2, name: "Semana 3", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted intensity | 3×10 @ 25 kg." }] },
+      { order: 3, name: "Semana 4", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted intensity | 3×10 @ 27,5 kg." }] },
+      { order: 4, name: "Semana 5", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted intensity | 3×10 @ 30 kg." }] },
+    ],
+  },
+
+  {
+    name: "Volume Dip",
+    description:
+      "Bloco de volume (4×8) 20 kg – 30 kg (+2,5 kg/semana). Cinco sessões = semanas 1–5 na atribuição semanal.",
+    category: "Strength",
+    level: "intermediate",
+    durationWeeks: 5,
+    sessions: [
+      { order: 0, name: "Semana 1", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 4×8 @ 20 kg." }] },
+      { order: 1, name: "Semana 2", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 4×8 @ 22,5 kg." }] },
+      { order: 2, name: "Semana 3", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 4×8 @ 25 kg." }] },
+      { order: 3, name: "Semana 4", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 4×8 @ 27,5 kg." }] },
+      { order: 4, name: "Semana 5", exercises: [{ exerciseName: "Dip", sets: 1, reps: "", restTimeSeconds: 0, notes: "Weighted volume | 4×8 @ 30 kg." }] },
+    ],
+  },
+
+  {
+    name: "Main Squat",
+    description:
+      "Bloco de intensidade (3×10) 70 kg – 80 kg (+2,5 kg/semana). Cinco sessões = semanas 1–5 na atribuição semanal.",
+    category: "Strength",
+    level: "beginner",
+    durationWeeks: 5,
+    sessions: [
+      { order: 0, name: "Semana 1", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Intensity | 3×10 @ 70 kg." }] },
+      { order: 1, name: "Semana 2", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Intensity | 3×10 @ 72,5 kg." }] },
+      { order: 2, name: "Semana 3", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Intensity | 3×10 @ 75 kg." }] },
+      { order: 3, name: "Semana 4", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Intensity | 3×10 @ 77,5 kg." }] },
+      { order: 4, name: "Semana 5", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Intensity | 3×10 @ 80 kg." }] },
+    ],
+  },
+
+  {
+    name: "Volume Front Squat",
+    description:
+      "Bloco de volume (5×5) 50 kg – 60 kg (+2,5 kg/semana). Técnica/volume; Cinco sessões = semanas 1–5 na atribuição semanal.",
+    category: "Strength",
+    level: "beginner",
+    durationWeeks: 5,
+    sessions: [
+      { order: 0, name: "Semana 1", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Volume Technique | 5×5 @ 50 kg." }] },
+      { order: 1, name: "Semana 2", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Volume Technique | 5×5 @ 52,5 kg." }] },
+      { order: 2, name: "Semana 3", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Volume Technique | 5×5 @ 55 kg." }] },
+      { order: 3, name: "Semana 4", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Volume Technique | 5×5 @ 57,5 kg." }] },
+      { order: 4, name: "Semana 5", exercises: [{ exerciseName: "Barbell Squat", sets: 1, reps: "", restTimeSeconds: 0, notes: "Volume Technique | 5×5 @ 60 kg." }] },
     ],
   },
 ];

@@ -24,4 +24,9 @@ export const DEFAULT_EXERCISES = [
   { name: "Tríceps Testa", category: "Arms", description: "Lying tricep extension (skull crusher)", difficulty: "intermediate", equipment: "EZ Bar or Barbell" },
   { name: "Bíceps Martelo", category: "Arms", description: "Hammer curl for biceps and brachialis", difficulty: "beginner", equipment: "Dumbbells" },
   { name: "Femoral", category: "Legs", description: "Leg curl for hamstring isolation", difficulty: "beginner", equipment: "Leg Curl Machine" },
+
+  // Strength primitives (templates / progression blocks)
+  { name: "Pull-Up", category: "Back", description: "Vertical pull with optional added weight (belt or dumbbell between feet)", difficulty: "intermediate", equipment: "Pull-up bar, dip belt or weight vest" },
+  { name: "Dip", category: "Chest", description: "Parallel bar or ring dip — chest and triceps emphasis", difficulty: "intermediate", equipment: "Parallel bars or rings, optional dip belt" },
+  { name: "Barbell Squat", category: "Legs", description: "High-bar or low-bar back squat — distinct from generic bodyweight or machine squat", difficulty: "intermediate", equipment: "Barbell, squat rack" },
 ];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,11 @@ import {
   trainingProgramsRef,
   totalExercisesInProgram,
   initializeDefaultPrograms,
+  ensureDefaultWeeklyStrengthCycle,
 } from "@/lib/firestore/training-programs";
+import { DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE } from "@/lib/default-programs";
 import type { TrainingProgramDocument, WeeklyProgramItem } from "@/lib/types";
+import { buildWorkoutPlanExercises } from "@/lib/training-program-assignment";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 
@@ -75,6 +78,7 @@ export default function WorkoutsPage() {
   const { toast } = useToast();
   const { t } = useI18n();
   const [isInitializing, setIsInitializing] = useState(false);
+  const [isAddingWeeklyDefault, setIsAddingWeeklyDefault] = useState(false);
   const [isSavingWeekly, setIsSavingWeekly] = useState(false);
   const [isAssigningWeekly, setIsAssigningWeekly] = useState(false);
   const [weeklyProgramName, setWeeklyProgramName] = useState("");
@@ -118,6 +122,12 @@ export default function WorkoutsPage() {
 
   const weeklyPrograms = useMemo(
     () => (programs || []).filter((program) => program.programType === "weekly"),
+    [programs]
+  );
+
+  /** Any library doc with the canonical title counts (covers weekly meta even if programType was omitted). */
+  const hasCanonicalDefaultWeekly = useMemo(
+    () => (programs || []).some((p) => p.name === DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE),
     [programs]
   );
 
@@ -206,6 +216,8 @@ export default function WorkoutsPage() {
         ...(program.durationWeeks != null ? { durationWeeks: program.durationWeeks } : {}),
         sessions: program.sessions || [],
         ...(program.programType != null ? { programType: program.programType } : {}),
+        ...(program.sourceProgramIds?.length ? { sourceProgramIds: program.sourceProgramIds } : {}),
+        ...(program.sourceProgramNames?.length ? { sourceProgramNames: program.sourceProgramNames } : {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -295,7 +307,7 @@ export default function WorkoutsPage() {
               weeklyProgramId: selectedWeeklyProgram.id,
               weeklyProgramName: selectedWeeklyProgram.name,
               sourceTrainingProgramId: sourceProgram.id,
-              exercises: extractExercises(sourceProgram),
+              exercises: buildWorkoutPlanExercises(sourceProgram, w),
               createdAt: new Date().toISOString(),
             });
           }
@@ -340,20 +352,86 @@ export default function WorkoutsPage() {
     }
   };
 
+  const handleEnsureDefaultWeeklyStrengthCycle = useCallback(async () => {
+    if (!db || !user) return;
+    setIsAddingWeeklyDefault(true);
+    try {
+      const result = await ensureDefaultWeeklyStrengthCycle(db, user.uid);
+      if (result.success) {
+        if (result.created) {
+          toast({
+            title: t("weeklyStrengthCycleAdded"),
+            description: t("weeklyStrengthCycleAddedDesc"),
+          });
+        } else {
+          toast({
+            title: t("weeklyStrengthCycleAlreadyExists"),
+            description: t("weeklyStrengthCycleAlreadyExistsDesc"),
+          });
+        }
+      } else if ("missingNames" in result) {
+        toast({
+          variant: "destructive",
+          title: t("selectProgramsRequired"),
+          description: `${t("weeklyCycleMissingIntro")} ${result.missingNames.join(", ")}`,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: t("weeklyStrengthCycleFailed"),
+          description: result.message,
+        });
+      }
+    } catch {
+      toast({
+        variant: "destructive",
+        title: t("weeklyStrengthCycleFailed"),
+        description: t("couldNotCreateWeekly"),
+      });
+    } finally {
+      setIsAddingWeeklyDefault(false);
+    }
+  }, [db, user, toast, t]);
+
   return (
     <Navigation>
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
           <div>
             <h2 className="text-2xl font-bold font-headline">{t("trainingPrograms")}</h2>
             <p className="text-muted-foreground">{t("manageAndAssign")}</p>
           </div>
-          <Button className="gap-2" asChild>
-            <Link href="/workouts/builder">
-              <Plus className="h-4 w-4" />
-              {t("createProgram")}
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              disabled={
+                isLoading ||
+                isAddingWeeklyDefault ||
+                hasCanonicalDefaultWeekly ||
+                !db ||
+                !user
+              }
+              title={
+                hasCanonicalDefaultWeekly ? t("weeklyStrengthCycleAlreadyExistsDesc") : undefined
+              }
+              onClick={handleEnsureDefaultWeeklyStrengthCycle}
+            >
+              {isAddingWeeklyDefault ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CalendarRange className="h-4 w-4" />
+              )}
+              {t("addDefaultWeeklyStrengthCycle")}
+            </Button>
+            <Button className="gap-2" asChild>
+              <Link href="/workouts/builder">
+                <Plus className="h-4 w-4" />
+                {t("createProgram")}
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {!isLoading && basePrograms.length > 0 && (

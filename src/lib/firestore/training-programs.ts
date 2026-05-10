@@ -1,7 +1,11 @@
 import type { CollectionReference, Firestore } from "firebase/firestore";
 import { collection, getDocs } from "firebase/firestore";
 import type { TrainingProgramSession } from "@/lib/types";
-import { DEFAULT_TRAINING_PROGRAMS } from "@/lib/default-programs";
+import {
+  DEFAULT_TRAINING_PROGRAMS,
+  DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES,
+  DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE,
+} from "@/lib/default-programs";
 import { addDocumentNonBlocking } from "@/firebase";
 
 /** Subcollection under each trainer: personalTrainers/{trainerId}/personalTrainingPrograms */
@@ -80,6 +84,68 @@ export function totalExercisesInProgram(
   return sessions.reduce((n, s) => n + (s.exercises?.length ?? 0), 0);
 }
 
+export type EnsureWeeklyStrengthCycleResult =
+  | { success: true; created: boolean }
+  | { success: false; missingNames: string[] }
+  | { success: false; message: string };
+
+/**
+ * Adds the canonical default weekly strength meta-program when all six source templates
+ * exist by name. Idempotent: no-op if {@link DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE} already exists.
+ */
+export async function ensureDefaultWeeklyStrengthCycle(
+  db: Firestore,
+  trainerId: string
+): Promise<EnsureWeeklyStrengthCycleResult> {
+  try {
+    const programsCol = trainerTrainingProgramsCollection(db, trainerId);
+    const snap = await getDocs(programsCol);
+    const idByName = new Map<string, string>();
+    for (const d of snap.docs) {
+      const name = d.data().name as string | undefined;
+      if (name && !idByName.has(name)) idByName.set(name, d.id);
+    }
+
+    const missingNames = DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES.filter((n) => !idByName.get(n));
+    if (missingNames.length > 0) {
+      return { success: false, missingNames };
+    }
+
+    for (const d of snap.docs) {
+      const data = d.data();
+      if (data.name === DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE) {
+        return { success: true, created: false };
+      }
+    }
+
+    const now = new Date().toISOString();
+    const orderedIds = DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES.map((n) => idByName.get(n)!);
+    await addDocumentNonBlocking(programsCol, {
+      trainerId,
+      name: DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE,
+      description:
+        "Seis micro-programas por semana (pull-up, dip, agachamento), durante 5 semanas com progressão de +2,5 kg/semana nas cargas indicadas nas notas.",
+      category: "Weekly cycle",
+      level: "all",
+      durationWeeks: 5,
+      sessions: [],
+      programType: "weekly",
+      sourceProgramIds: orderedIds,
+      sourceProgramNames: [...DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { success: true, created: true };
+  } catch (error: any) {
+    console.error("ensureDefaultWeeklyStrengthCycle:", error);
+    return {
+      success: false,
+      message: error?.message || "Failed to add weekly cycle.",
+    };
+  }
+}
+
 export async function initializeDefaultPrograms(
   db: Firestore,
   trainerId: string
@@ -116,6 +182,38 @@ export async function initializeDefaultPrograms(
       } catch (error) {
         console.error(`Failed to add program: ${program.name}`, error);
       }
+    }
+
+    try {
+      const snap = await getDocs(programsCol);
+      const idByName = new Map<string, string>();
+      for (const d of snap.docs) {
+        const name = d.data().name as string | undefined;
+        if (name && !idByName.has(name)) idByName.set(name, d.id);
+      }
+      const orderedIds = DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES.map((n) => idByName.get(n)).filter(
+        (id): id is string => Boolean(id)
+      );
+      if (orderedIds.length === DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES.length) {
+        await addDocumentNonBlocking(programsCol, {
+          trainerId,
+          name: DEFAULT_WEEKLY_STRENGTH_CYCLE_TITLE,
+          description:
+            "Seis micro-programas por semana (pull-up, dip, agachamento), durante 5 semanas com progressão de +2,5 kg/semana nas cargas indicadas nas notas.",
+          category: "Weekly cycle",
+          level: "all",
+          durationWeeks: 5,
+          sessions: [],
+          programType: "weekly",
+          sourceProgramIds: orderedIds,
+          sourceProgramNames: [...DEFAULT_WEEKLY_STRENGTH_CYCLE_NAMES],
+          createdAt: now,
+          updatedAt: now,
+        });
+        added++;
+      }
+    } catch (error) {
+      console.error("Failed to add default weekly cycle program:", error);
     }
 
     return {

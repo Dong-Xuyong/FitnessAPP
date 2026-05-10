@@ -305,6 +305,15 @@ const translations = {
     noProgramsYet: "No programs yet",
     noProgramsYetDesc: "Build a routine in the program builder, or load default programs to get started.",
     loadDefaultPrograms: "Load Default Programs",
+    addDefaultWeeklyStrengthCycle: "Add default strength weekly cycle",
+    weeklyStrengthCycleAdded: "Weekly cycle added",
+    weeklyStrengthCycleAddedDesc:
+      'The program "Ciclo força — 6 treinos / 5 semanas" is now under Saved Weekly Programs.',
+    weeklyStrengthCycleAlreadyExists: "Already saved",
+    weeklyStrengthCycleAlreadyExistsDesc:
+      "The default strength weekly cycle is already in your library.",
+    weeklyCycleMissingIntro: "Add these training programs to your library first:",
+    weeklyStrengthCycleFailed: "Could not add weekly cycle",
     savedWeeklyPrograms: "Saved Weekly Programs",
     weeklyCycle: "Weekly cycle",
     assignToStudent: "Assign to student",
@@ -1001,6 +1010,15 @@ const translations = {
     noProgramsYet: "Ainda sem programas",
     noProgramsYetDesc: "Crie uma rotina no criador de programas ou carregue programas padrão para começar.",
     loadDefaultPrograms: "Carregar Programas Padrão",
+    addDefaultWeeklyStrengthCycle: "Adicionar ciclo semanal de força predefinido",
+    weeklyStrengthCycleAdded: "Ciclo semanal adicionado",
+    weeklyStrengthCycleAddedDesc:
+      'O programa "Ciclo força — 6 treinos / 5 semanas" está agora em Programas Semanais Guardados.',
+    weeklyStrengthCycleAlreadyExists: "Já guardado",
+    weeklyStrengthCycleAlreadyExistsDesc:
+      "O ciclo semanal de força predefinido já está na biblioteca.",
+    weeklyCycleMissingIntro: "Adicione primeiro estes programas à biblioteca:",
+    weeklyStrengthCycleFailed: "Não foi possível adicionar o ciclo semanal",
     savedWeeklyPrograms: "Programas Semanais Guardados",
     weeklyCycle: "Ciclo semanal",
     assignToStudent: "Atribuir a aluno",

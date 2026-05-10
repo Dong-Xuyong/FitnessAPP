@@ -28,6 +28,7 @@ import {
   normalizeAttendance,
   type SessionAttendanceStatus,
 } from "@/lib/session-attendance-streak";
+import { buildWorkoutPlanExercises } from "@/lib/training-program-assignment";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -867,12 +868,7 @@ export default function AssignmentCalendarPage() {
           for (const progId of sourceProgramIds) {
             const srcProg = baseProgs.find((p) => p.id === progId);
             if (!srcProg) continue;
-            const exs = (srcProg.sessions || []).flatMap((s: any) =>
-              (s.exercises || []).map((e: any) => ({
-                exerciseName: e.exerciseName, sets: e.sets ?? 1, reps: e.reps ?? "",
-                restTimeSeconds: e.restTimeSeconds ?? 0, notes: e.notes,
-              }))
-            );
+            const exs = buildWorkoutPlanExercises(srcProg, w);
             await setDoc(doc(collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans")), {
               title: srcProg.name, studentId: assignWeekStudentId,
               personalTrainerId: user.uid, weekStart: ws,

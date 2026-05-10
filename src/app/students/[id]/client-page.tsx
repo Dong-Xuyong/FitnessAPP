@@ -69,6 +69,10 @@ import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-strea
 import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
 import { BodyCompositionTrendChart } from "@/components/BodyCompositionTrendChart";
 import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
+import {
+  currentBillingPeriod,
+  ensurePendingPaymentForCurrentPeriod,
+} from "@/lib/roster-payment-status";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -206,6 +210,14 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       setMonthlyRate(String(calculatedMonthlyRate));
     }
   }, [calculatedMonthlyRate]);
+
+  useEffect(() => {
+    if (!db || !user || !studentId || !rosterData) return;
+    if (String((rosterData as Record<string, unknown>).billingStatus ?? "").trim().toLowerCase() !== "active") {
+      return;
+    }
+    void ensurePendingPaymentForCurrentPeriod(db, user.uid, studentId);
+  }, [db, user, studentId, rosterData]);
 
   const handleSaveBillingConfig = () => {
     if (!db || !user) return;
@@ -392,10 +404,13 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
             </div>
             <Button size="sm" className="gap-1" onClick={() => {
               if (!showAddPayment) {
-                const now = new Date();
-                const currentPeriod = now.toLocaleString("default", { month: "long", year: "numeric" });
                 const billingAmount = monthlyRate || "";
-                setNewPayment({ period: currentPeriod, amount: billingAmount, method: paymentMethod, status: "paid" });
+                setNewPayment({
+                  period: currentBillingPeriod(),
+                  amount: billingAmount,
+                  method: paymentMethod,
+                  status: "paid",
+                });
               }
               setShowAddPayment(!showAddPayment);
             }}>
@@ -411,7 +426,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                 <div className="space-y-1">
                   <Label className="text-xs">{t("period")}</Label>
                   <Input
-                    placeholder="e.g. March 2026"
+                    placeholder="YYYY-MM (ex: 2026-05)"
                     value={newPayment.period}
                     onChange={(e) => setNewPayment({ ...newPayment, period: e.target.value })}
                   />

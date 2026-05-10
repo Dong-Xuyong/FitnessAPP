@@ -91,6 +91,8 @@ export interface TrainingProgramDocument {
   sessions: TrainingProgramSession[];
   programType?: 'single' | 'weekly';
   sourceProgramIds?: string[];
+  /** Display names parallel to sourceProgramIds (weekly meta-programs). */
+  sourceProgramNames?: string[];
   weeklyPlan?: WeeklyProgramItem[];
   createdAt: string;
   updatedAt: string;

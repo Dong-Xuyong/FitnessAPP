@@ -24,7 +24,10 @@ import { useI18n } from "@/lib/i18n";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
-import { fetchRosterPaymentStatusMap } from "@/lib/roster-payment-status";
+import {
+  fetchRosterPaymentStatusMap,
+  ensureRosterPendingPaymentsForCurrentMonth,
+} from "@/lib/roster-payment-status";
 
 type StudentRow = Record<string, unknown> & { id: string; _onRoster?: boolean };
 
@@ -133,6 +136,7 @@ function DashboardContent() {
       return;
     }
     const ids = rosterStudents.map((s: StudentRow & { id: string }) => s.id).filter(Boolean);
+    await ensureRosterPendingPaymentsForCurrentMonth(db, user.uid, ids);
     const map = await fetchRosterPaymentStatusMap(db, user.uid, ids);
     setDashboardPaymentStatusMap(map);
   }, [db, user, rosterStudents]);
