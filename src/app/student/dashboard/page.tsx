@@ -42,6 +42,13 @@ export default function StudentDashboardPage() {
   const [monthlyDoneCount, setMonthlyDoneCount] = useState(0);
   const [monthlyPlannedCount, setMonthlyPlannedCount] = useState(0);
 
+  /** Same rule as profile fetch: roster doc wins when coach keyed data under a different id. */
+  const milestoneStudentDocId = useMemo(() => {
+    const roster = studentData?.rosterDocId;
+    if (typeof roster === "string" && roster.trim().length > 0) return roster;
+    return user?.uid ?? "";
+  }, [studentData?.rosterDocId, user?.uid]);
+
   /** Coach may key milestones by roster doc id; Firebase auth uid stays the same student. */
   const milestoneStudentIds = useMemo(() => {
     const ids = new Set<string>();
@@ -80,7 +87,16 @@ export default function StudentDashboardPage() {
   );
 
   useEffect(() => {
-    if (!db || !user?.uid) {
+    if (!user?.uid) {
+      setIsLoadingProfile(false);
+      setStudentData(null);
+      setCurrentStreak(0);
+      setLastSessionDoneAt(null);
+      setMonthlyDoneCount(0);
+      setMonthlyPlannedCount(0);
+      return;
+    }
+    if (!db) {
       setIsLoadingProfile(false);
       return;
     }
@@ -435,17 +451,26 @@ export default function StudentDashboardPage() {
 
         <TabsContent value="milestones" className="space-y-6">
           {studentData.trainerId ? (
-            <MilestonesTab
-              db={db}
-              user={{ uid: studentData.trainerId }}
-              studentId={user!.uid}
-              milestones={studentMilestones}
-              isLoading={isMilestonesLoading}
-              studentView
-              onMilestonesChange={() => {
-                // Firestore live query will refresh this automatically.
-              }}
-            />
+            milestoneStudentDocId ? (
+              <MilestonesTab
+                db={db}
+                user={{ uid: studentData.trainerId }}
+                studentId={milestoneStudentDocId}
+                milestones={studentMilestones}
+                isLoading={isMilestonesLoading}
+                studentView
+                onMilestonesChange={() => {
+                  // Firestore live query will refresh this automatically.
+                }}
+              />
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t("milestones")}</CardTitle>
+                  <CardDescription>{t("signInRequired")}</CardDescription>
+                </CardHeader>
+              </Card>
+            )
           ) : (
             <Card>
               <CardHeader>
