@@ -1,7 +1,8 @@
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /* App Hosting runs Next on Cloud Run; standalone output matches the container entry layout. */
+  output: 'standalone',
   typescript: {
     ignoreBuildErrors: true,
   },
