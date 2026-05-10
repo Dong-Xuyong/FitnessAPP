@@ -1,7 +1,7 @@
 
 "use client";
 
-import { use, useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -628,9 +628,7 @@ const STUDENT_DETAIL_TABS = [
 ] as const;
 type StudentDetailTab = (typeof STUDENT_DETAIL_TABS)[number];
 
-export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const unwrappedParams = use(params);
-  const { id } = unwrappedParams;
+export default function StudentDetailPage({ id }: { id: string }) {
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
@@ -858,21 +856,20 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     [strengthByExercise]
   );
 
-  const selectedStrengthData = useMemo(
-    () => (selectedStrengthExercise ? strengthByExercise[selectedStrengthExercise] || [] : []),
-    [selectedStrengthExercise, strengthByExercise]
-  );
-
-  useEffect(() => {
-    if (strengthExerciseOptions.length === 0) {
-      setSelectedStrengthExercise("");
-      return;
+  /** Must stay in sync with options on every render — Radix Select throws if value is not a SelectItem (e.g. "" before useEffect runs). */
+  const resolvedStrengthExercise = useMemo(() => {
+    if (strengthExerciseOptions.length === 0) return "";
+    if (selectedStrengthExercise && strengthExerciseOptions.includes(selectedStrengthExercise)) {
+      return selectedStrengthExercise;
     }
-
-    if (!strengthExerciseOptions.includes(selectedStrengthExercise)) {
-      setSelectedStrengthExercise(strengthExerciseOptions[0]);
-    }
+    return strengthExerciseOptions[0];
   }, [strengthExerciseOptions, selectedStrengthExercise]);
+
+  const selectedStrengthData = useMemo(
+    () =>
+      resolvedStrengthExercise ? strengthByExercise[resolvedStrengthExercise] || [] : [],
+    [resolvedStrengthExercise, strengthByExercise]
+  );
 
   const lastSessionAt = useMemo(() => {
     let latest = 0;
@@ -1503,7 +1500,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                   {strengthExerciseOptions.length > 0 ? (
                     <div className="h-full flex flex-col gap-3">
                       <div className="w-full sm:w-[260px]">
-                        <Select value={selectedStrengthExercise} onValueChange={setSelectedStrengthExercise}>
+                        <Select value={resolvedStrengthExercise} onValueChange={setSelectedStrengthExercise}>
                           <SelectTrigger>
                             <SelectValue placeholder={t("selectExercise")} />
                           </SelectTrigger>
@@ -1529,7 +1526,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                               dataKey="oneRm"
                               stroke="hsl(var(--chart-1))"
                               strokeWidth={3}
-                              name={`${selectedStrengthExercise} 1RM`}
+                              name={`${resolvedStrengthExercise} 1RM`}
                             />
                           </LineChart>
                         </ResponsiveContainer>
