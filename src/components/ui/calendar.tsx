@@ -61,6 +61,7 @@ function Calendar({
           return <Icon className={cn("h-4 w-4", chevClassName)} {...chevProps} />
         },
       }}
+      weekStartsOn={1}
       {...props}
     />
   )

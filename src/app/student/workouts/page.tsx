@@ -648,6 +648,9 @@ export default function StudentWorkoutsPage() {
                       // also show loading on continuation while session-start is processing
                       (isContinuation && isRegistering === slotDocId(selectedDateStr, mySlotEntry?.sessionStart ?? time));
 
+                    // Cannot start a session here (tail of day / range shorter than slotsNeeded × slot length)
+                    if (!isEnrolled && !isContinuation && !hasEnoughBlocks) return null;
+
                     return (
                       <div
                         key={time}
@@ -699,8 +702,6 @@ export default function StudentWorkoutsPage() {
                                 <p className="text-xs text-destructive/70">{t("sessionCancelClosedDesc")}</p>
                               )}
                             </div>
-                          ) : !hasEnoughBlocks ? (
-                            <span className="text-xs text-muted-foreground">Bloco incompleto</span>
                           ) : isBookingCutoffPassed ? (
                             <span className="text-xs text-muted-foreground">Inscrição fecha 1h antes</span>
                           ) : isFull ? (
