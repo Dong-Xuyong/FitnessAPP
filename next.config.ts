@@ -1,6 +1,8 @@
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
+  /* App Hosting deploys via .next/standalone — confirmed from Cloud Run log paths. */
+  output: 'standalone',
   typescript: {
     ignoreBuildErrors: true,
   },
