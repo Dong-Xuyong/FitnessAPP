@@ -101,6 +101,8 @@ service cloud.firestore {
         allow create, update, delete: if isOwner(personalTrainerId);
       }	
 
+      // Students may update slots to book/unbook; ideally `sessionAttendance` / `sessionAttendanceAt`
+      // would be trainer-only (requires tighter validation or Cloud Functions). Client sets booking only.
       match /sessionSlots/{slotId} {
         allow get, list: if isOwner(personalTrainerId) || isStudentOfTrainer(personalTrainerId);
         allow create, update, delete: if isOwner(personalTrainerId) || isStudentOfTrainer(personalTrainerId);

@@ -14,7 +14,8 @@ import { useI18n } from "@/lib/i18n";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import type { Milestone } from "@/lib/types";
-
+import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
+import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 
 export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
@@ -67,37 +68,28 @@ export default function StudentDashboardPage() {
           if (profileData?.trainerId) {
             // Use rosterDocId if set (handles cases where data is stored under a different doc ID)
             const effectiveStudentId = (profileData.rosterDocId as string | undefined) || user!.uid;
-            const [sessionsSnap, workoutPlansSnap] = await Promise.all([
-              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", effectiveStudentId, "workoutSessions")),
-              getDocs(collection(db, "personalTrainers", profileData.trainerId, "students", effectiveStudentId, "workoutPlans")),
+            const trainerId = profileData.trainerId as string;
+            const [sessionsSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
+              getDocs(collection(db, "personalTrainers", trainerId, "students", effectiveStudentId, "workoutSessions")),
+              getDoc(doc(db, "personalTrainers", trainerId)),
+              getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots")),
             ]);
 
-            const completedPlanIds = new Set(
-              sessionsSnap.docs
-                .map((sessionDoc) => sessionDoc.data()?.workoutPlanId)
-                .filter((planId): planId is string => typeof planId === "string" && planId.length > 0)
+            const slotDm = Number(trainerSnap.data()?.slotDurationMin) || 30;
+            const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
+              const data = d.data() as SessionSlotAttendance;
+              return {
+                ...data,
+                id: d.id,
+                date: String(data.date ?? ""),
+                startTime: String(data.startTime ?? ""),
+                students: Array.isArray(data.students) ? data.students : [],
+              };
+            });
+            const candidateIds = Array.from(new Set([effectiveStudentId, user!.uid].filter(Boolean)));
+            setCurrentStreak(
+              maxAttendanceStreakForCandidates(sessionSlotsList, candidateIds, Date.now(), slotDm)
             );
-
-            const now = Date.now();
-            const plannedWorkouts = workoutPlansSnap.docs
-              .map((planDoc) => ({ id: planDoc.id, data: planDoc.data() as any }))
-              .map((plan) => {
-                const scheduledRaw = plan.data.assignedAt || plan.data.createdAt || "";
-                const timestamp = Date.parse(scheduledRaw);
-                return { id: plan.id, timestamp: Number.isFinite(timestamp) ? timestamp : 0 };
-              })
-              .filter((plan) => plan.timestamp > 0 && plan.timestamp <= now)
-              .sort((a, b) => b.timestamp - a.timestamp);
-
-            let computedStreak = 0;
-            for (const plan of plannedWorkouts) {
-              if (completedPlanIds.has(plan.id)) {
-                computedStreak += 1;
-                continue;
-              }
-              break;
-            }
-            setCurrentStreak(computedStreak);
 
             const latestSessionTimestamp = sessionsSnap.docs.reduce((latest, sessionDoc) => {
               const data: any = sessionDoc.data();
@@ -187,9 +179,9 @@ export default function StudentDashboardPage() {
               <CardContent className="space-y-6">
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span>{t("currentStreak")}</span>
+                    <span>{t("sessionAttendanceStreakTitle")}</span>
                     <span>
-                      {currentStreak}{t("workoutsLabel")}{" "}
+                      {currentStreak} {t("sessionsStreakCompact")}{" "}
                       <Flame className="inline h-4 w-4" />
                     </span>
                   </div>
@@ -197,6 +189,7 @@ export default function StudentDashboardPage() {
                     value={Math.min(currentStreak * 10, 100)}
                     className="h-2 bg-primary-foreground/20"
                   />
+                  <p className="text-xs text-primary-foreground/70">{t("sessionAttendanceStreakHint")}</p>
                 </div>
                 <div className="flex items-center justify-between pt-4">
                   <div className="flex items-center gap-2">
