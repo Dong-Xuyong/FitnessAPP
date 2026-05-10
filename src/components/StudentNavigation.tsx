@@ -10,7 +10,6 @@ import {
   LayoutDashboard,
   Dumbbell,
   BookOpen,
-  LineChart,
   History,
   LogOut,
   Play,
@@ -38,7 +37,6 @@ const navItems = [
   { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
   { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
   { key: "exercises" as const, href: "/student/exercises", icon: BookOpen },
-  { key: "progress" as const, href: "/student/progress", icon: LineChart },
   { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
   { key: "billing" as const, href: "/student/billing", icon: CreditCard },
   { key: "profile" as const, href: "/student/profile", icon: User },
@@ -97,6 +95,8 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
     fetchStudentProfile();
   }, [db, user?.uid, pathname]);
 
+  const navLinkActive = (item: (typeof navItems)[number]) => pathname === item.href;
+
   const handleSignOut = () => {
     if (!auth) return;
     initiateSignOut(auth).then(() => {
@@ -127,7 +127,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
               href={item.href}
               className={cn(
                 "flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors",
-                pathname === item.href
+                navLinkActive(item)
                   ? "bg-accent/10 text-accent"
                   : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
               )}
@@ -189,7 +189,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
                 onClick={() => setMobileOpen(false)}
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors",
-                  pathname === item.href
+                  navLinkActive(item)
                     ? "bg-accent/10 text-accent"
                     : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
                 )}

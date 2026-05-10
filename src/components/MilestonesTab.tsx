@@ -48,6 +48,7 @@ import {
 import type { Firestore } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
+import { formatMilestoneCompletedLong, formatMilestoneDueLong } from "@/lib/milestone-calendar-date";
 
 type MilestoneCategory = "weight" | "strength" | "endurance" | "flexibility" | "milestone" | "other";
 type MilestoneStatus = "active" | "completed" | "missed" | "paused";
@@ -59,6 +60,8 @@ interface MilestonesTabProps {
   milestones: Milestone[] | undefined;
   isLoading: boolean;
   onMilestonesChange?: () => void;
+  /** When true (student app), dialog copy speaks to the athlete, not the coach. */
+  studentView?: boolean;
 }
 
 export function MilestonesTab({
@@ -68,9 +71,10 @@ export function MilestonesTab({
   milestones = [],
   isLoading,
   onMilestonesChange,
+  studentView = false,
 }: MilestonesTabProps) {
   const { toast } = useToast();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -109,7 +113,7 @@ export function MilestonesTab({
     paused: {
       color: "bg-yellow-100 text-yellow-800",
       icon: <AlertCircle className="h-4 w-4" />,
-      label: "Paused",
+      label: t("paused"),
     },
   };
 
@@ -163,7 +167,7 @@ export function MilestonesTab({
           targetValue: Number(formData.targetValue),
           targetUnit: formData.targetUnit,
           currentValue: Number(formData.currentValue),
-          dueDate: new Date(formData.dueDate).toISOString(),
+          dueDate: new Date(`${formData.dueDate}T12:00:00`).toISOString(),
         });
         toast({
           title: t("milestoneUpdated"),
@@ -178,7 +182,7 @@ export function MilestonesTab({
           targetValue: Number(formData.targetValue),
           targetUnit: formData.targetUnit,
           currentValue: Number(formData.currentValue),
-          dueDate: new Date(formData.dueDate).toISOString(),
+          dueDate: new Date(`${formData.dueDate}T12:00:00`).toISOString(),
           status: "active",
         });
         toast({
@@ -191,7 +195,7 @@ export function MilestonesTab({
       onMilestonesChange?.();
     } catch (error: any) {
       toast({
-        title: "Error",
+        title: t("error"),
         description: error.message,
         variant: "destructive",
       });
@@ -214,7 +218,7 @@ export function MilestonesTab({
       onMilestonesChange?.();
     } catch (error: any) {
       toast({
-        title: "Error",
+        title: t("error"),
         description: error.message,
         variant: "destructive",
       });
@@ -234,7 +238,7 @@ export function MilestonesTab({
       onMilestonesChange?.();
     } catch (error: any) {
       toast({
-        title: "Error",
+        title: t("error"),
         description: error.message,
         variant: "destructive",
       });
@@ -263,14 +267,18 @@ export function MilestonesTab({
           <DialogHeader>
             <DialogTitle>{editingMilestone ? t("editMilestone") : t("createNewMilestone")}</DialogTitle>
             <DialogDescription>
-              {editingMilestone ? t("updateMilestoneDetails") : t("setNewGoal")}
+              {editingMilestone
+                ? t("updateMilestoneDetails")
+                : studentView
+                  ? t("setNewGoalStudent")
+                  : t("setNewGoal")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>{t("titleRequired")}</Label>
               <Input
-                placeholder="e.g., Reach 75kg"
+                placeholder={t("placeholderMilestoneTitle")}
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               />
@@ -278,7 +286,7 @@ export function MilestonesTab({
             <div className="space-y-2">
               <Label>{t("descriptionLabel")}</Label>
               <Textarea
-                placeholder="Optional details about this milestone..."
+                placeholder={t("placeholderMilestoneDesc")}
                 rows={2}
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -422,7 +430,8 @@ export function MilestonesTab({
                     {/* Due Date and Status */}
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-muted-foreground">
-                        {t("due")}{new Date(milestone.dueDate).toLocaleDateString()}
+                        {t("due")}
+                        {formatMilestoneDueLong(milestone.dueDate, locale)}
                         {isOverdue && <span className="text-red-600 ml-2 font-semibold">{t("overdueLabel")}</span>}
                       </div>
                       <Badge className="capitalize">{milestone.category}</Badge>
@@ -480,9 +489,7 @@ export function MilestonesTab({
                       {milestone.currentValue}
                       {milestone.targetUnit} / {milestone.targetValue}
                       {milestone.targetUnit} · {t("completedOn")}
-                      {milestone.completedAt
-                        ? new Date(milestone.completedAt).toLocaleDateString()
-                        : "—"}
+                      {formatMilestoneCompletedLong(milestone.completedAt, locale)}
                     </p>
                   </div>
                   <Button
@@ -505,7 +512,9 @@ export function MilestonesTab({
         <Card className="bg-muted/50 border-dashed">
           <CardContent className="pt-6 text-center">
             <Target className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-muted-foreground">No milestones yet. Create one to get started!</p>
+            <p className="text-muted-foreground">
+              {t("noMilestonesYet")}. {t("noMilestonesCreateHint")}
+            </p>
           </CardContent>
         </Card>
       )}
@@ -514,13 +523,11 @@ export function MilestonesTab({
       <AlertDialog open={!!deletingId} onOpenChange={(open) => !open && setDeletingId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Milestone</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this milestone? This action cannot be undone.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t("deleteMilestoneConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteMilestoneConfirmDesc")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteMilestone}
               disabled={isDeleting}
@@ -529,10 +536,10 @@ export function MilestonesTab({
               {isDeleting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Deleting...
+                  {t("deleting")}
                 </>
               ) : (
-                "Delete"
+                t("delete")
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

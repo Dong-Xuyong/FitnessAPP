@@ -35,14 +35,14 @@ const navItemKeys = [
   { key: "assignmentCalendar" as const, href: "/assignment-calendar", icon: CalendarDays },
   { key: "programs" as const, href: "/workouts", icon: Dumbbell },
   { key: "dashboard" as const, href: "/dashboard", icon: LayoutDashboard },
-  { key: "progress" as const, href: "/progress", icon: LineChart },
+  { key: "coachProgressNav" as const, href: "/progress", icon: LineChart },
   { key: "students" as const, href: "/students", icon: Users },
   { key: "exercises" as const, href: "/exercises", icon: Search },
   { key: "myProfile" as const, href: "/profile", icon: User },
 ];
 
 /* ─── Shared sidebar nav content ─── */
-type SidebarTranslate = (key: "dashboard" | "students" | "programs" | "exercises" | "assignmentCalendar" | "progress" | "myProfile" | "logout") => string;
+type SidebarTranslate = (key: "dashboard" | "students" | "programs" | "exercises" | "assignmentCalendar" | "coachProgressNav" | "myProfile" | "logout") => string;
 
 function SidebarContent({
   pathname,
@@ -168,7 +168,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
     workouts: t("programs"),
     exercises: t("exercises"),
     "assignment-calendar": t("assignmentCalendar"),
-    progress: t("progress"),
+    progress: t("coachProgressNav"),
     profile: t("myProfile"),
   };
   const currentPathKey = pathname.split("/")[1] || "dashboard";

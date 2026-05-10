@@ -2,39 +2,62 @@
 "use client";
 
 import { StudentNavigation } from "@/components/StudentNavigation";
+import { StudentProgressPanel } from "@/components/StudentProgressPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MilestonesTab } from "@/components/MilestonesTab";
-import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target, Percent } from "lucide-react";
+import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target, Percent, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { useI18n } from "@/lib/i18n";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Milestone } from "@/lib/types";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import { countMonthlyWorkoutPlanCompletions } from "@/lib/student-monthly-workout-completion";
+
+type DashTab = "home" | "progress" | "milestones";
+
+function notifyDashboardTabUrlChange() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  window.dispatchEvent(new CustomEvent("student-dashboard-tabchange"));
+}
 
 export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const { t } = useI18n();
 
+  const [activeTab, setActiveTab] = useState<DashTab>("home");
+
   const [studentData, setStudentData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [lastSessionDoneAt, setLastSessionDoneAt] = useState<string | null>(null);
+  const [monthlyDoneCount, setMonthlyDoneCount] = useState(0);
+  const [monthlyPlannedCount, setMonthlyPlannedCount] = useState(0);
+
+  /** Coach may key milestones by roster doc id; Firebase auth uid stays the same student. */
+  const milestoneStudentIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (user?.uid) ids.add(user.uid);
+    const roster = studentData?.rosterDocId;
+    if (typeof roster === "string" && roster.length > 0) ids.add(roster);
+    return Array.from(ids);
+  }, [user?.uid, studentData?.rosterDocId]);
 
   const milestonesRef = useMemoFirebase(() => {
-    if (!db || !user?.uid || !studentData?.trainerId) return null;
+    if (!db || !studentData?.trainerId || milestoneStudentIds.length === 0) return null;
     return query(
       collection(db, "milestones"),
       where("trainerId", "==", studentData.trainerId),
-      where("studentId", "==", user.uid)
+      where("studentId", "in", milestoneStudentIds)
     );
-  }, [db, studentData?.trainerId, user?.uid]);
+  }, [db, studentData?.trainerId, milestoneStudentIds]);
 
   const { data: allMilestones, isLoading: isMilestonesLoading } = useCollection(milestonesRef);
   const studentMilestones: Milestone[] = useMemo(
@@ -69,11 +92,29 @@ export default function StudentDashboardPage() {
             // Use rosterDocId if set (handles cases where data is stored under a different doc ID)
             const effectiveStudentId = (profileData.rosterDocId as string | undefined) || user!.uid;
             const trainerId = profileData.trainerId as string;
-            const [sessionsSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
-              getDocs(collection(db, "personalTrainers", trainerId, "students", effectiveStudentId, "workoutSessions")),
+            const [sessionsSnap, plansSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
+              getDocs(
+                collection(db, "personalTrainers", trainerId, "students", effectiveStudentId, "workoutSessions")
+              ),
+              getDocs(collection(db, "personalTrainers", trainerId, "students", effectiveStudentId, "workoutPlans")),
               getDoc(doc(db, "personalTrainers", trainerId)),
               getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots")),
             ]);
+
+            const planRows = plansSnap.docs.map((planDoc) => ({
+              id: planDoc.id,
+              data: planDoc.data() as Record<string, unknown>,
+            }));
+            const sessionRows = sessionsSnap.docs.map((d) => ({
+              data: d.data() as Record<string, unknown>,
+            }));
+            const { done: doneMonth, planned: plannedMonth } = countMonthlyWorkoutPlanCompletions(
+              planRows,
+              sessionRows,
+              new Date()
+            );
+            setMonthlyDoneCount(doneMonth);
+            setMonthlyPlannedCount(plannedMonth);
 
             const slotDm = Number(trainerSnap.data()?.slotDurationMin) || 30;
             const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
@@ -101,6 +142,8 @@ export default function StudentDashboardPage() {
           } else {
             setCurrentStreak(0);
             setLastSessionDoneAt(null);
+            setMonthlyDoneCount(0);
+            setMonthlyPlannedCount(0);
           }
         }
       } catch (e) {
@@ -112,6 +155,34 @@ export default function StudentDashboardPage() {
 
     findStudentProfile();
   }, [db, user?.uid]);
+
+  useEffect(() => {
+    const parseHash = () => {
+      const h = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
+      if (h === "progress") setActiveTab("progress");
+      else if (h === "milestones") setActiveTab("milestones");
+      else setActiveTab("home");
+    };
+    parseHash();
+    window.addEventListener("hashchange", parseHash);
+    window.addEventListener("student-dashboard-tabchange", parseHash);
+    return () => {
+      window.removeEventListener("hashchange", parseHash);
+      window.removeEventListener("student-dashboard-tabchange", parseHash);
+    };
+  }, []);
+
+  const onDashboardTabChange = useCallback((value: string) => {
+    const v = value as DashTab;
+    setActiveTab(v);
+    if (typeof window === "undefined") return;
+    if (v === "home") {
+      window.history.replaceState(null, "", "/student/dashboard");
+    } else {
+      window.history.replaceState(null, "", `/student/dashboard#${v}`);
+    }
+    notifyDashboardTabUrlChange();
+  }, []);
 
   if (isUserLoading || isLoadingProfile) {
     return (
@@ -151,13 +222,14 @@ export default function StudentDashboardPage() {
 
   return (
     <StudentNavigation>
-      <Tabs defaultValue="dashboard" className="space-y-6">
-        <TabsList className="bg-card border h-auto w-full grid grid-cols-2">
-          <TabsTrigger value="dashboard">{t("progress")}</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={onDashboardTabChange} className="space-y-6">
+        <TabsList className="bg-card border h-auto w-full grid grid-cols-3">
+          <TabsTrigger value="home">{t("myDashboard")}</TabsTrigger>
+          <TabsTrigger value="progress">{t("progress")}</TabsTrigger>
           <TabsTrigger value="milestones">{t("milestones")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="dashboard" className="space-y-6">
+        <TabsContent value="home" className="space-y-6">
           <header>
             <h1 className="text-3xl font-bold font-headline">{t("welcomeBack2")}{firstName}!</h1>
             <p className="text-muted-foreground capitalize">
@@ -191,6 +263,20 @@ export default function StudentDashboardPage() {
                   />
                   <p className="text-xs text-primary-foreground/70">{t("sessionAttendanceStreakHint")}</p>
                 </div>
+                {studentData.trainerId && (
+                  <div className="space-y-2 pt-4 border-t border-primary-foreground/15">
+                    <div className="flex justify-between text-sm gap-4">
+                      <span className="flex items-center gap-2 shrink-0">
+                        <ClipboardCheck className="h-4 w-4" aria-hidden />
+                        {t("goalCompletion")}
+                      </span>
+                      <span className="font-semibold tabular-nums">
+                        {monthlyDoneCount} / {monthlyPlannedCount}
+                      </span>
+                    </div>
+                    <p className="text-xs text-primary-foreground/70">{t("workoutsCompletedThisMonth")}</p>
+                  </div>
+                )}
                 <div className="flex items-center justify-between pt-4">
                   <div className="flex items-center gap-2">
                     <Calendar className="h-4 w-4" />
@@ -233,12 +319,20 @@ export default function StudentDashboardPage() {
                     <p className="text-xs text-muted-foreground">{t("height")}</p>
                   </div>
                 </div>
-                {studentData.bodyFatPercent > 0 && (
+                {(Number(studentData.bodyFatPercent) > 0 || Number(studentData.goalBodyFatPercent) > 0) && (
                   <div className="flex items-center gap-3 p-3 border rounded-lg">
                     <Percent className="h-5 w-5 text-orange-500" />
                     <div>
-                      <p className="text-sm font-bold">{studentData.bodyFatPercent}%</p>
-                      <p className="text-xs text-muted-foreground">{t("bodyFat")}</p>
+                      <p className="text-sm font-bold">
+                        {studentData.bodyFatPercent != null && Number(studentData.bodyFatPercent) > 0
+                          ? `${studentData.bodyFatPercent}%`
+                          : "—"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {Number(studentData.goalBodyFatPercent) > 0
+                          ? t("bodyFatGoalLabel").replace("{n}", String(studentData.goalBodyFatPercent))
+                          : t("bodyFat")}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -253,6 +347,10 @@ export default function StudentDashboardPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="progress" className="space-y-6">
+          <StudentProgressPanel />
+        </TabsContent>
+
         <TabsContent value="milestones" className="space-y-6">
           {studentData.trainerId ? (
             <MilestonesTab
@@ -261,6 +359,7 @@ export default function StudentDashboardPage() {
               studentId={user!.uid}
               milestones={studentMilestones}
               isLoading={isMilestonesLoading}
+              studentView
               onMilestonesChange={() => {
                 // Firestore live query will refresh this automatically.
               }}

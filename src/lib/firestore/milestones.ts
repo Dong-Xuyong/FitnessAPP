@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import type { Milestone, MilestoneStatus } from "@/lib/types";
+import { isPastMilestoneDueDateLocal } from "@/lib/milestone-calendar-date";
 
 const MILESTONES_COLLECTION = "milestones";
 
@@ -212,6 +213,5 @@ export function formatMilestone(milestone: Milestone): string {
  */
 export function isMilestoneOverdue(milestone: Milestone): boolean {
   if (milestone.status !== "active") return false;
-  const dueDate = new Date(milestone.dueDate);
-  return dueDate < new Date();
+  return isPastMilestoneDueDateLocal(milestone.dueDate);
 }

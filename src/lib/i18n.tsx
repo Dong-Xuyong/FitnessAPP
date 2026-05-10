@@ -11,6 +11,7 @@ const translations = {
     students: "Students",
     programs: "Programs",
     exercises: "Exercises",
+    coachProgressNav: "Dashboard",
     progress: "Progress",
     myProfile: "My Profile",
     logout: "Logout",
@@ -112,6 +113,9 @@ const translations = {
     coachingManagement: "Coaching & Management",
     trainerNotes: "Trainer Observations & Notes",
     privateNotes: "Private notes only visible to you.",
+    placeholderCoachingNotes:
+      "Coaching cues, technical corrections, faults, or recovery notes (private to you)...",
+    placeholderAssignedExerciseNote: "Notes for this exercise (visible when expanded)...",
     saveCoachingNotes: "Save Coaching Notes",
     adjustGoals: "Adjust Goals",
     updateTargetMetrics: "Update target metrics for this student.",
@@ -418,6 +422,7 @@ const translations = {
     overdue: "Overdue",
     inDays: "In {n} days",
     noMilestonesYet: "No milestones yet",
+    noMilestonesCreateHint: "Create one to get started!",
 
     // Assignment Calendar extra
     trackAssignedByDate: "Track assigned workouts by date.",
@@ -443,6 +448,8 @@ const translations = {
     resume: "Resume",
     physicalStats: "Physical Stats",
     weightGoalLabel: "Weight (Goal: {n} kg)",
+    bodyFatGoalLabel: "Body fat (Goal: {n}%)",
+    goalBodyFatPercent: "Goal body fat (%)",
     heightLabel: "Height",
     statusLabel: "Status: ",
     weeklyWeightCheckin: "Weekly Weight Check-in",
@@ -487,6 +494,26 @@ const translations = {
     previous: "Previous",
     finishWorkout: "Finish Workout",
     nextExercise: "Next Exercise",
+    registerYourSet: "Log your set",
+    sessionFeedbackTitle: "How did it go?",
+    sessionFeedbackHint: "Optional — your coach can see this after you save.",
+    sessionDifficultyLabel: "How hard was this workout?",
+    sessionMoodLabel: "How do you feel?",
+    sessionDifficultyPlaceholder: "Anything about effort, pain, or pacing…",
+    sessionMoodPlaceholder: "Energy, stress, sleep, motivation…",
+    sessionBodyWeightHint: "Optional — your body weight for today; your coach sees it with this session.",
+    sessionBodyFatHint: "Optional — your body fat today; your coach sees it with this session.",
+    sessionBodyWeightCoach: "Body weight",
+    sessionBodyFatCoach: "Body fat",
+    lastSessionPerformance: "Last time: {weight} kg × {reps} reps",
+    lastSessionPerformanceBodyweight: "Last time: bodyweight × {reps} reps",
+    sessionDifficultyCoach: "Difficulty",
+    sessionMoodCoach: "Mood",
+    deleteWorkoutConfirmTitle: "Delete this workout?",
+    deleteWorkoutConfirmDesc:
+      "This removes the logged session permanently. Your coach will no longer see it in history.",
+    workoutSessionDeleted: "Session removed",
+    deleteSessionFailed: "Could not delete session",
 
     // Student Billing
     viewPaymentStatus: "View your payment status and history.",
@@ -537,6 +564,9 @@ const translations = {
     personalBestsDesc: "Best estimated 1RM per exercise (Epley)",
     estimated1RM: "Estimated 1RM: ",
     noPersonalBests: "No personal bests yet. Complete workouts with logged weight and reps to populate this section.",
+    bodyCompositionChartTitle: "Weight & body fat",
+    bodyCompositionChartDesc: "Points from completed workouts when you log weight or body fat.",
+    noBodyCompositionData: "No body metrics in your sessions yet. Log them when you finish a workout.",
 
     // Student Exercises
     exerciseLibraryShared: "Exercise library shared by your coach.",
@@ -559,6 +589,7 @@ const translations = {
     createNewMilestone: "Create New Milestone",
     updateMilestoneDetails: "Update milestone details.",
     setNewGoal: "Set a new goal for the student.",
+    setNewGoalStudent: "Set a new personal milestone.",
     titleRequired: "Title *",
     descriptionLabel: "Description",
     unitRequired: "Unit *",
@@ -593,6 +624,9 @@ const translations = {
     milestoneCreatedDesc: "The milestone has been successfully created.",
     milestoneDeletedTitle: "Milestone Deleted",
     milestoneDeletedDesc: "The milestone has been removed.",
+    deleteMilestoneConfirmTitle: "Delete milestone",
+    deleteMilestoneConfirmDesc:
+      "Are you sure you want to delete this milestone? This action cannot be undone.",
     progressUpdated: "Progress Updated",
     progressUpdatedDesc: "Milestone progress has been updated.",
 
@@ -663,6 +697,7 @@ const translations = {
     students: "Alunos",
     programs: "Programas",
     exercises: "Exercícios",
+    coachProgressNav: "Dashboard",
     progress: "Progresso",
     myProfile: "Meu Perfil",
     logout: "Sair",
@@ -764,6 +799,9 @@ const translations = {
     coachingManagement: "Treino e Gestão",
     trainerNotes: "Observações e Notas do Treinador",
     privateNotes: "Notas privadas visíveis apenas para si.",
+    placeholderCoachingNotes:
+      "Indicações do treinador, correções técnicas, falhas de execução ou notas de recuperação (privadas)...",
+    placeholderAssignedExerciseNote: "Notas sobre este exercício (visíveis ao expandir)...",
     saveCoachingNotes: "Guardar Notas",
     adjustGoals: "Ajustar Objetivos",
     updateTargetMetrics: "Atualizar métricas-alvo para este aluno.",
@@ -1070,6 +1108,7 @@ const translations = {
     overdue: "Atrasado",
     inDays: "Em {n} dias",
     noMilestonesYet: "Ainda sem marcos",
+    noMilestonesCreateHint: "Crie um para começar.",
 
     // Assignment Calendar extra
     trackAssignedByDate: "Acompanhe treinos atribuídos por data.",
@@ -1095,6 +1134,8 @@ const translations = {
     resume: "Retomar",
     physicalStats: "Estatísticas Físicas",
     weightGoalLabel: "Peso (Objetivo: {n} kg)",
+    bodyFatGoalLabel: "Gordura corporal (Objetivo: {n}%)",
+    goalBodyFatPercent: "Objetivo — gordura corporal (%)",
     heightLabel: "Altura",
     statusLabel: "Estado: ",
     weeklyWeightCheckin: "Check-in Semanal de Peso",
@@ -1139,6 +1180,28 @@ const translations = {
     previous: "Anterior",
     finishWorkout: "Terminar Treino",
     nextExercise: "Próximo Exercício",
+    registerYourSet: "Regista a tua série",
+    sessionFeedbackTitle: "Como foi o treino?",
+    sessionFeedbackHint: "Opcional — o treinador vê isto depois de guardares.",
+    sessionDifficultyLabel: "Quão difícil foi o treino?",
+    sessionMoodLabel: "Como te sentes?",
+    sessionDifficultyPlaceholder: "Esforço, desconforto, ritmo…",
+    sessionMoodPlaceholder: "Energia, stress, sono, motivação…",
+    sessionBodyWeightHint:
+      "Opcional — o teu peso corporal neste momento; o treinador vê esta informação nesta sessão.",
+    sessionBodyFatHint:
+      "Opcional — a tua percentagem de gordura neste momento; o treinador vê esta informação nesta sessão.",
+    sessionBodyWeightCoach: "Peso corporal",
+    sessionBodyFatCoach: "Gordura corporal",
+    lastSessionPerformance: "Última vez: {weight} kg × {reps} reps",
+    lastSessionPerformanceBodyweight: "Última vez: peso corporal × {reps} reps",
+    sessionDifficultyCoach: "Dificuldade",
+    sessionMoodCoach: "Humor",
+    deleteWorkoutConfirmTitle: "Eliminar este treino?",
+    deleteWorkoutConfirmDesc:
+      "Remove permanentemente esta sessão registada. O treinador deixa de a vê-la no histórico.",
+    workoutSessionDeleted: "Sessão eliminada",
+    deleteSessionFailed: "Não foi possível eliminar a sessão",
 
     // Student Billing
     viewPaymentStatus: "Veja o estado dos seus pagamentos e histórico.",
@@ -1189,6 +1252,9 @@ const translations = {
     personalBestsDesc: "Melhor 1RM estimado por exercício (Epley)",
     estimated1RM: "1RM Estimado: ",
     noPersonalBests: "Ainda sem recordes pessoais. Complete treinos com peso e repetições registados para preencher esta secção.",
+    bodyCompositionChartTitle: "Peso e gordura corporal",
+    bodyCompositionChartDesc: "Pontos de treinos concluídos quando registas peso ou gordura corporal.",
+    noBodyCompositionData: "Ainda sem métricas corporais nas sessões. Regista-as ao terminar um treino.",
 
     // Student Exercises
     exerciseLibraryShared: "Biblioteca de exercícios partilhada pelo seu treinador.",
@@ -1211,6 +1277,7 @@ const translations = {
     createNewMilestone: "Criar Novo Marco",
     updateMilestoneDetails: "Atualizar detalhes do marco.",
     setNewGoal: "Definir um novo objetivo para o aluno.",
+    setNewGoalStudent: "Defina um novo marco pessoal.",
     titleRequired: "Título *",
     descriptionLabel: "Descrição",
     unitRequired: "Unidade *",
@@ -1245,6 +1312,9 @@ const translations = {
     milestoneCreatedDesc: "O marco foi criado com sucesso.",
     milestoneDeletedTitle: "Marco Eliminado",
     milestoneDeletedDesc: "O marco foi removido.",
+    deleteMilestoneConfirmTitle: "Eliminar marco",
+    deleteMilestoneConfirmDesc:
+      "Tem a certeza de que pretende eliminar este marco? Esta ação não pode ser desfeita.",
     progressUpdated: "Progresso Atualizado",
     progressUpdatedDesc: "O progresso do marco foi atualizado.",
 

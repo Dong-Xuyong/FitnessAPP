@@ -38,7 +38,8 @@ export default function StudentProfilePage() {
     heightCm: "",
     bodyFatPercent: "",
     goalType: "muscle_gain",
-    goalWeightKg: ""
+    goalWeightKg: "",
+    goalBodyFatPercent: "",
   });
 
   const splitName = (rawName: string): { firstName: string; lastName: string } => {
@@ -87,6 +88,7 @@ export default function StudentProfilePage() {
             bodyFatPercent: data.bodyFatPercent?.toString() || "",
             goalType,
             goalWeightKg: data.goalWeightKg?.toString() || "",
+            goalBodyFatPercent: data.goalBodyFatPercent?.toString() || "",
           });
         } else {
           setTrainerId(null);
@@ -131,6 +133,7 @@ export default function StudentProfilePage() {
       bodyFatPercent: Number(formData.bodyFatPercent) || 0,
       goalType: formData.goalType,
       goalWeightKg: Number(formData.goalWeightKg) || 0,
+      goalBodyFatPercent: Number(formData.goalBodyFatPercent) || 0,
       email: user.email,
     };
 
@@ -305,6 +308,18 @@ export default function StudentProfilePage() {
                     max="100"
                     value={formData.bodyFatPercent} 
                     onChange={(e) => setFormData({...formData, bodyFatPercent: e.target.value})} 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="goalBodyFatPercent">{t("goalBodyFatPercent")}</Label>
+                  <Input 
+                    id="goalBodyFatPercent" 
+                    type="number" 
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={formData.goalBodyFatPercent} 
+                    onChange={(e) => setFormData({...formData, goalBodyFatPercent: e.target.value})} 
                   />
                 </div>
               </div>
