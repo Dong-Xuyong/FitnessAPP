@@ -1,6 +1,6 @@
 import { currentBillingPeriod } from "@/lib/roster-payment-status";
 
-const REMINDER_LEAD_MS = 7 * 24 * 60 * 60 * 1000;
+const REMINDER_LEAD_MS = 3 * 24 * 60 * 60 * 1000;
 
 export function parsePeriodYearMonth(period: string): { y: number; m: number } | null {
   const match = /^(\d{4})-(\d{2})$/.exec(String(period || "").trim());
@@ -73,7 +73,7 @@ export type PaymentReminderState =
 
 /**
  * Warn when billing is active, monthly fee set, current month unpaid, and:
- * - "soon": within 7 days before month-end due (local)
+ * - "soon": within 3 days before month-end due (local)
  * - "overdue": after month-end due
  */
 export function getPaymentReminderState(args: {
