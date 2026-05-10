@@ -8,6 +8,7 @@ import { Banknote, Smartphone, Clock, CheckCircle2, AlertCircle, CalendarDays, D
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useDoc, useCollection, useMemoFirebase } from "@/firebase";
 import { doc, collection } from "firebase/firestore";
+import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
 
 export default function StudentBillingPage() {
   const { t } = useI18n();
@@ -165,10 +166,20 @@ export default function StudentBillingPage() {
                       </TableCell>
                       <TableCell>
                         <Badge
-                          variant={p.status === "paid" ? "default" : "outline"}
-                          className={p.status === "paid" ? "bg-green-100 text-green-800" : p.status === "pending" ? "bg-yellow-100 text-yellow-800" : ""}
+                          variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
+                          className={
+                            normalizedPaymentPaid(p.status)
+                              ? "bg-green-100 text-green-800 normal-case"
+                              : normalizedPaymentPending(p.status)
+                                ? "bg-yellow-100 text-yellow-800 normal-case"
+                                : ""
+                          }
                         >
-                          {p.status === "paid" ? t("paid") : t("pending")}
+                          {normalizedPaymentPaid(p.status)
+                            ? t("paid")
+                            : normalizedPaymentPending(p.status)
+                              ? t("pending")
+                              : String(p.status ?? "—")}
                         </Badge>
                       </TableCell>
                       <TableCell>

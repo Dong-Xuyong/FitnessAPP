@@ -22,8 +22,7 @@ import {
   User, 
   Ruler, 
   Weight, 
-  Target, 
-  Activity, 
+  Target,
   Zap,
   Save,
   TrendingDown,
@@ -71,6 +70,7 @@ import { useI18n } from "@/lib/i18n";
 import type { Milestone } from "@/lib/types";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -540,10 +540,18 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold">€{p.amount}</span>
                         <Badge
-                          variant={p.status === "paid" ? "default" : "outline"}
-                          className={p.status === "paid" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}
+                          variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
+                          className={
+                            normalizedPaymentPaid(p.status)
+                              ? "bg-green-100 text-green-800 normal-case"
+                              : "bg-yellow-100 text-yellow-800 normal-case"
+                          }
                         >
-                          {p.status}
+                          {normalizedPaymentPaid(p.status)
+                            ? t("paid")
+                            : normalizedPaymentPending(p.status)
+                              ? t("pending")
+                              : String(p.status ?? "—")}
                         </Badge>
                         <Button size="sm" variant="outline" onClick={() => startEditPayment(p)}>
                           {t("edit")}
@@ -683,6 +691,17 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     (s: any) => s.id === id || s.userId === id || (studentEmail && s.email === studentEmail)
   );
   const effectiveRoster = rosterStudent || altRosterDoc || null;
+
+  /** Same subdoc id student billing uses: global `rosterDocId` or roster doc id fallback. */
+  const paymentsFirestoreStudentId = useMemo(() => {
+    const fromGlobal =
+      typeof (globalStudent as Record<string, unknown> | null)?.rosterDocId === "string"
+        ? String((globalStudent as Record<string, unknown>).rosterDocId).trim()
+        : "";
+    if (fromGlobal) return fromGlobal;
+    if (!rosterStudent && altRosterDoc?.id) return String(altRosterDoc.id);
+    return id;
+  }, [globalStudent, rosterStudent, altRosterDoc, id]);
 
   // workoutPlans are always stored under the Auth UID (which is the URL param `id`)
   const workoutPlansRef = useMemoFirebase(() => {
@@ -844,7 +863,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     }
   }, [strengthExerciseOptions, selectedStrengthExercise]);
 
-  const lastActiveAt = useMemo(() => {
+  const lastSessionAt = useMemo(() => {
     let latest = 0;
     for (const session of workoutSessions || []) {
       const raw = session.completedAt || session.startedAt || session.date || "";
@@ -1761,7 +1780,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
               </DialogContent>
             </Dialog>
 
-            <div className="grid sm:grid-cols-3 gap-6">
+            <div className="grid sm:grid-cols-2 gap-6">
               <Card className="bg-accent/5">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -1776,32 +1795,20 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                   <p className="text-xs text-muted-foreground">{t("sessionAttendanceStreakHint")}</p>
                 </CardContent>
               </Card>
-              <Card className="bg-primary/5">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-primary" />
-                    {t("subscription")}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Badge variant={student.subscriptionStatus === 'active' ? 'default' : 'destructive'} className="capitalize">
-                    {student.subscriptionStatus || 'Inactive'}
-                  </Badge>
-                  <p className="text-xs text-muted-foreground mt-2">Status: {student.subscriptionStatus || 'Unknown'}</p>
-                </CardContent>
-              </Card>
               <Card className="bg-secondary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <History className="h-4 w-4 text-primary" />
-                    {t("lastActive")}
+                    {t("progressCardSessionsTitle")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm font-medium">
-                    {lastActiveAt ? new Date(lastActiveAt).toLocaleDateString() : t("noRecentActivity")}
+                    {lastSessionAt
+                      ? new Date(lastSessionAt).toLocaleDateString()
+                      : t("noWorkoutSessions")}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">{t("loggedSession")}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{t("progressCardSessionsHint")}</p>
                 </CardContent>
               </Card>
             </div>
@@ -2043,7 +2050,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           </TabsContent>
 
           <TabsContent value="billing" className="space-y-6">
-            <BillingTab db={db} user={user} studentId={id} toast={toast} />
+            <BillingTab db={db} user={user} studentId={paymentsFirestoreStudentId} toast={toast} />
           </TabsContent>
         </Tabs>
 
