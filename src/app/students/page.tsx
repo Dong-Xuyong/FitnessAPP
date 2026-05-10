@@ -18,22 +18,9 @@ import {
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, getDocs } from "firebase/firestore";
-
-function getStudentDisplayName(s: Record<string, unknown>, fallback: string): string {
-  const single = typeof s.name === "string" ? s.name.trim() : "";
-  if (single) return single;
-  const fn = typeof s.firstName === "string" ? s.firstName.trim() : "";
-  const ln = typeof s.lastName === "string" ? s.lastName.trim() : "";
-  const combined = [fn, ln].filter(Boolean).join(" ").trim();
-  if (combined) return combined;
-  return fallback;
-}
-
-function getStudentEmail(s: Record<string, unknown>): string {
-  const e = s.email;
-  return typeof e === "string" ? e.trim() : "";
-}
+import { collection } from "firebase/firestore";
+import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
+import { fetchRosterPaymentStatusMap } from "@/lib/roster-payment-status";
 
 export default function StudentsPage() {
   const { user } = useUser();
@@ -69,30 +56,12 @@ export default function StudentsPage() {
   // Fetch latest payment status for each roster student
   const [paymentStatusMap, setPaymentStatusMap] = useState<Record<string, { status: string; period: string }>>({});
   const fetchPaymentStatuses = useCallback(async () => {
-    if (!db || !user || !rosterStudents || rosterStudents.length === 0) return;
-    const now = new Date();
-    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const map: Record<string, { status: string; period: string }> = {};
-    for (const s of rosterStudents) {
-      try {
-        const paymentsSnap = await getDocs(
-          collection(db, "personalTrainers", user.uid, "students", s.id, "payments")
-        );
-        let latest: { status: string; period: string } | null = null;
-        paymentsSnap.forEach((d) => {
-          const data = d.data();
-          if (!latest || (data.period || "") > latest.period) {
-            latest = { status: data.status || "pending", period: data.period || "" };
-          }
-        });
-        if (latest) {
-          // If latest payment covers current month, use its status; otherwise mark as pending
-          map[s.id] = (latest as { status: string; period: string }).period >= currentPeriod
-            ? latest
-            : { status: "pending", period: currentPeriod };
-        }
-      } catch {}
+    if (!db || !user || !rosterStudents || rosterStudents.length === 0) {
+      setPaymentStatusMap({});
+      return;
     }
+    const ids = rosterStudents.map((s: any) => s.id).filter((id: string) => Boolean(id));
+    const map = await fetchRosterPaymentStatusMap(db, user.uid, ids);
     setPaymentStatusMap(map);
   }, [db, user, rosterStudents]);
 
@@ -107,7 +76,7 @@ export default function StudentsPage() {
       if (s.id === user?.uid) return false;
       if (!q) return true;
       const row = s as Record<string, unknown>;
-      const name = getStudentDisplayName(row).toLowerCase();
+      const name = getStudentDisplayName(row, "").toLowerCase();
       const email = getStudentEmail(row).toLowerCase();
       return name.includes(q) || email.includes(q);
     }) || [];

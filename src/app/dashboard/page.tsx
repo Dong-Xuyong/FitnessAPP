@@ -4,18 +4,27 @@
 import { Suspense } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Users, Activity, Calendar as CalendarIcon, TrendingUp, Loader2, Weight, Target, UserPlus, Dumbbell, Trash2, Pencil, X } from "lucide-react";
+import {
+  Users, Activity, Calendar as CalendarIcon, TrendingUp, Loader2, Weight, Target, UserPlus, Dumbbell, Trash2, Pencil, X,
+  Search, Banknote,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from "@/firebase";
 import { collection, doc, getDocs, deleteDoc, updateDoc } from "firebase/firestore";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
+import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
+import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
+import { fetchRosterPaymentStatusMap } from "@/lib/roster-payment-status";
 
 type StudentRow = Record<string, unknown> & { id: string; _onRoster?: boolean };
 
@@ -107,6 +116,52 @@ function DashboardContent() {
     [mergedStudents]
   );
 
+  const rosterOnlySorted = useMemo(
+    () => sortedStudents.filter((s) => s._onRoster),
+    [sortedStudents]
+  );
+
+  const [dashboardStudentSearch, setDashboardStudentSearch] = useState("");
+  const [dashboardPaymentFilter, setDashboardPaymentFilter] = useState<"all" | "paid" | "pending">("all");
+  const [dashboardPaymentStatusMap, setDashboardPaymentStatusMap] = useState<
+    Record<string, { status: string; period: string }>
+  >({});
+
+  const fetchDashboardPayments = useCallback(async () => {
+    if (!db || !user || !rosterStudents?.length) {
+      setDashboardPaymentStatusMap({});
+      return;
+    }
+    const ids = rosterStudents.map((s: StudentRow & { id: string }) => s.id).filter(Boolean);
+    const map = await fetchRosterPaymentStatusMap(db, user.uid, ids);
+    setDashboardPaymentStatusMap(map);
+  }, [db, user, rosterStudents]);
+
+  useEffect(() => {
+    fetchDashboardPayments();
+  }, [fetchDashboardPayments]);
+
+  const filteredDashboardRoster = useMemo(() => {
+    let rows = rosterOnlySorted;
+    const q = dashboardStudentSearch.toLowerCase().trim();
+    if (q) {
+      rows = rows.filter((student) => {
+        const row = student as StudentRow;
+        const name = getStudentDisplayName(row, "").toLowerCase();
+        const email = getStudentEmail(row).toLowerCase();
+        return name.includes(q) || email.includes(q);
+      });
+    }
+    if (dashboardPaymentFilter !== "all") {
+      rows = rows.filter((student) => {
+        const info = dashboardPaymentStatusMap[student.id];
+        const isPaid = info?.status === "paid";
+        return dashboardPaymentFilter === "paid" ? isPaid : !isPaid;
+      });
+    }
+    return rows;
+  }, [rosterOnlySorted, dashboardStudentSearch, dashboardPaymentFilter, dashboardPaymentStatusMap]);
+
   const portalStudentIdByEmail = useMemo(() => {
     const map = new Map<string, string>();
     for (const student of (portalStudents || []) as StudentRow[]) {
@@ -140,7 +195,23 @@ function DashboardContent() {
       setStreakByStudentId({});
       return;
     }
-    
+
+    const slotDm = Number((trainer as Record<string, unknown> | undefined)?.slotDurationMin) || 30;
+    let sessionSlotsList: SessionSlotAttendance[] = [];
+    try {
+      const slotsSnap = await getDocs(collection(db, "personalTrainers", user.uid, "sessionSlots"));
+      sessionSlotsList = slotsSnap.docs.map((d) => {
+        const data = d.data() as SessionSlotAttendance;
+        return {
+          ...data,
+          id: d.id,
+          date: String(data.date ?? ""),
+          startTime: String(data.startTime ?? ""),
+          students: Array.isArray(data.students) ? data.students : [],
+        };
+      });
+    } catch {}
+
     // Get current week boundaries (Monday to Sunday)
     const now = new Date();
     const dayOfWeek = now.getDay();
@@ -220,28 +291,7 @@ function DashboardContent() {
           }
         });
 
-        const nowTs = Date.now();
-        const plannedWorkouts = plansSnap.docs
-          .map((planDoc: any) => {
-            const data = planDoc.data();
-            const scheduledRaw = data.assignedAt || data.createdAt || "";
-            const ts = Date.parse(scheduledRaw);
-            return {
-              id: planDoc.id,
-              timestamp: Number.isFinite(ts) ? ts : 0,
-            };
-          })
-          .filter((plan: any) => plan.timestamp > 0 && plan.timestamp <= nowTs)
-          .sort((a: any, b: any) => b.timestamp - a.timestamp);
-
-        let streak = 0;
-        for (const plan of plannedWorkouts) {
-          if (completedPlanIds.has(plan.id)) {
-            streak += 1;
-            continue;
-          }
-          break;
-        }
+        const streak = maxAttendanceStreakForCandidates(sessionSlotsList, candidateIds, Date.now(), slotDm);
 
         totalStreakAcrossRoster += streak;
         streakStudentCount += 1;
@@ -254,7 +304,7 @@ function DashboardContent() {
     setTeamVelocityPercent(percentageValue);
     setAvgStreakValue(streakStudentCount > 0 ? Math.round(totalStreakAcrossRoster / streakStudentCount) : 0);
     setStreakByStudentId(streakMap);
-  }, [db, user, rosterStudents, portalStudentIdByEmail, t]);
+  }, [db, user, rosterStudents, portalStudentIdByEmail, t, trainer]);
 
   useEffect(() => {
     fetchAssignments();
@@ -442,96 +492,136 @@ function DashboardContent() {
                 <Link href="/students">{t("openDirectory")}</Link>
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               {isLoading ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
+              ) : rosterOnlySorted.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
+                  <Users className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                  <p className="text-sm">{t("noStudentsYet")}</p>
+                  <Button variant="outline" size="sm" className="mt-4" asChild>
+                    <Link href="/students">{t("studentDirectory")}</Link>
+                  </Button>
+                </div>
               ) : (
-                <div className="space-y-6">
-                  {sortedStudents.slice(0, 8).map((student) => (
-                    <Link key={student.id} href={`/students/${student.id}`} className="flex items-center justify-between hover:bg-accent/5 p-3 rounded-xl border border-transparent hover:border-border transition-all">
-                      <div className="flex items-center gap-4">
-                        <Avatar className="h-12 w-12 ring-2 ring-primary/5">
-                          <AvatarImage src={(student.photoUrl as string) || `https://picsum.photos/seed/${student.id}/100/100`} />
-                          <AvatarFallback>
-                            {String(student.firstName || student.name || "?")[0]}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          {(() => {
-                            const displayFirst = String(student.firstName || student.name || "").trim();
-                            const displayLast = student.lastName ? String(student.lastName).trim() : "";
-                            const weightValue = Number(student.weightKg);
-                            const goalWeightValue = Number(student.goalWeightKg);
-                            const streakValue = Number(student.currentStreakDays);
-                            const weightText = Number.isFinite(weightValue) ? String(weightValue) : "--";
-                            const goalWeightText = Number.isFinite(goalWeightValue) ? String(goalWeightValue) : "--";
-                            const streakText = Number.isFinite(streakValue) ? String(streakValue) : "0";
-
-                            return (
-                              <>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-bold leading-none">
-                              {displayFirst}{" "}
-                              {displayLast}
-                            </p>
-                            {student._onRoster ? (
-                              <Badge variant="secondary" className="text-[9px] h-4 px-1.5">
-                                {t("roster")}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[9px] h-4 px-1.5">
-                                {t("portal")}
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground capitalize mt-1">
-                            {String(student.goalType || t("notSet")).replace(/_/g, " ")}
-                          </p>
-                          {student._onRoster && typeof student.coachingNotes === "string" && student.coachingNotes.trim() && (
-                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                              {t("privateNote")}: {student.coachingNotes.trim()}
-                            </p>
-                          )}
-                          <div className="flex items-center gap-2 mt-2">
-                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                              <Weight className="h-3 w-3" /> {weightText}kg
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                              <Target className="h-3 w-3" /> {goalWeightText}kg
-                            </span>
-                          </div>
-                              </>
-                            );
-                          })()}
-                        </div>
+                <>
+                  <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                    <div className="flex-1 space-y-2">
+                      <Label className="text-xs text-muted-foreground sr-only">{t("searchByNameOrEmail")}</Label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          className="pl-9"
+                          placeholder={t("searchByNameOrEmail")}
+                          value={dashboardStudentSearch}
+                          onChange={(e) => setDashboardStudentSearch(e.target.value)}
+                        />
                       </div>
-                      <div className="text-right">
-                        <Badge variant="secondary" className="text-[10px] h-5">
-                          {student._onRoster
-                            ? (streakByStudentId[student.id] ?? 0)
-                            : 0}{t("dStreak")}
-                        </Badge>
-                        <p className="text-[10px] text-muted-foreground mt-2">
-                          {t("memberSince")}{" "}
-                          {student.joinedAt
-                            ? new Date(String(student.joinedAt)).toLocaleDateString()
-                            : t("today")}
-                        </p>
-                      </div>
-                    </Link>
-                  ))}
-                  {sortedStudents.length === 0 && (
+                    </div>
+                    <div className="w-full sm:w-44 space-y-2">
+                      <Label className="text-xs text-muted-foreground">{t("dashboardRosterPaymentFilter")}</Label>
+                      <Select value={dashboardPaymentFilter} onValueChange={(v) => setDashboardPaymentFilter(v as "all" | "paid" | "pending")}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">{t("filterAll")}</SelectItem>
+                          <SelectItem value="paid">{t("paid")}</SelectItem>
+                          <SelectItem value="pending">{t("pending")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {filteredDashboardRoster.length === 0 ? (
                     <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg bg-accent/5">
                       <Users className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                      <p className="text-sm">{t("noStudentsYet")}</p>
-                      <Button variant="outline" size="sm" className="mt-4" asChild>
-                        <Link href="/students">{t("studentDirectory")}</Link>
-                      </Button>
+                      <p className="text-sm">{t("noStudentsFound")}</p>
+                      <p className="text-xs mt-1">{t("tryDifferentSearchTerm")}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[min(60vh,520px)] overflow-y-auto pr-1">
+                      {filteredDashboardRoster.map((student) => {
+                        const pay = dashboardPaymentStatusMap[student.id];
+                        return (
+                          <Link
+                            key={student.id}
+                            href={`/students/${student.id}`}
+                            className="flex items-center justify-between gap-3 hover:bg-accent/5 p-3 rounded-xl border border-transparent hover:border-border transition-all"
+                          >
+                            <div className="flex items-center gap-4 min-w-0">
+                              <Avatar className="h-12 w-12 ring-2 ring-primary/5 shrink-0">
+                                <AvatarImage src={(student.photoUrl as string) || `https://picsum.photos/seed/${student.id}/100/100`} />
+                                <AvatarFallback>
+                                  {String(student.firstName || student.name || "?")[0]}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                {(() => {
+                                  const displayFirst = String(student.firstName || student.name || "").trim();
+                                  const displayLast = student.lastName ? String(student.lastName).trim() : "";
+                                  const weightValue = Number(student.weightKg);
+                                  const goalWeightValue = Number(student.goalWeightKg);
+                                  const weightText = Number.isFinite(weightValue) ? String(weightValue) : "--";
+                                  const goalWeightText = Number.isFinite(goalWeightValue) ? String(goalWeightValue) : "--";
+
+                                  return (
+                                    <>
+                                      <p className="text-sm font-bold leading-none truncate">
+                                        {displayFirst} {displayLast}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground capitalize mt-1 truncate">
+                                        {String(student.goalType || t("notSet")).replace(/_/g, " ")}
+                                      </p>
+                                      {typeof student.coachingNotes === "string" && student.coachingNotes.trim() && (
+                                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                          {t("privateNote")}: {student.coachingNotes.trim()}
+                                        </p>
+                                      )}
+                                      {pay && (
+                                        <Badge
+                                          variant={pay.status === "paid" ? "default" : "outline"}
+                                          className={`mt-1.5 text-[9px] h-5 gap-1 uppercase tracking-wide ${
+                                            pay.status === "paid"
+                                              ? "bg-green-600 hover:bg-green-600"
+                                              : "bg-yellow-100 text-yellow-900 border-yellow-200"
+                                          }`}
+                                        >
+                                          <Banknote className="h-3 w-3 shrink-0" />
+                                          {pay.status === "paid" ? t("paid") : t("pending")}
+                                        </Badge>
+                                      )}
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                          <Weight className="h-3 w-3" /> {weightText}kg
+                                        </span>
+                                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                          <Target className="h-3 w-3" /> {goalWeightText}kg
+                                        </span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                              <Badge variant="secondary" className="text-[10px] h-5">
+                                {streakByStudentId[student.id] ?? 0} {t("sessionsStreakCompact")}
+                              </Badge>
+                              <p className="text-[10px] text-muted-foreground">
+                                {t("memberSince")}{" "}
+                                {student.joinedAt
+                                  ? new Date(String(student.joinedAt)).toLocaleDateString()
+                                  : t("today")}
+                              </p>
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
                   )}
-                </div>
+                </>
               )}
             </CardContent>
           </Card>

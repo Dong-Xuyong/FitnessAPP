@@ -9,6 +9,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Award, Calendar, Target, Flame } from "lucide-react";
 import { useUser, useFirestore } from "@/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
+import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 
 function computeEpleyOneRm(weight: number, reps: number): number {
   if (!Number.isFinite(weight) || !Number.isFinite(reps) || weight <= 0 || reps <= 0) return 0;
@@ -47,9 +49,11 @@ export default function StudentProgressPage() {
         const resolvedStudentId = (studentSnap.data()?.rosterDocId as string | undefined) || uid;
         if (!trainerId) return;
 
-        const [sessionsSnap, workoutPlansSnap] = await Promise.all([
+        const [sessionsSnap, workoutPlansSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
           getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")),
           getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans")),
+          getDoc(doc(db, "personalTrainers", trainerId)),
+          getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots")),
         ]);
 
         if (cancelled) return;
@@ -87,33 +91,21 @@ export default function StudentProgressPage() {
         setMonthlyPlannedCount(plannedThisMonth);
         setGoalCompletionPercent(completion);
 
-        const now = Date.now();
-        const plannedWorkouts = workoutPlansSnap.docs
-          .map((planDoc) => ({
-            id: planDoc.id,
-            data: planDoc.data() as any,
-          }))
-          .map((plan) => {
-            const scheduledRaw = plan.data.weekStart || plan.data.assignedAt || plan.data.createdAt || "";
-            const timestamp = Date.parse(scheduledRaw);
-            return {
-              id: plan.id,
-              timestamp: Number.isFinite(timestamp) ? timestamp : 0,
-            };
-          })
-          .filter((plan) => plan.timestamp > 0 && plan.timestamp <= now)
-          .sort((a, b) => b.timestamp - a.timestamp);
-
-        let streak = 0;
-        for (const plan of plannedWorkouts) {
-          if (completedPlanIds.has(plan.id)) {
-            streak += 1;
-            continue;
-          }
-          break;
-        }
-
-        setCurrentStreak(streak);
+        const slotDm = Number(trainerSnap.data()?.slotDurationMin) || 30;
+        const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
+          const data = d.data() as SessionSlotAttendance;
+          return {
+            ...data,
+            id: d.id,
+            date: String(data.date ?? ""),
+            startTime: String(data.startTime ?? ""),
+            students: Array.isArray(data.students) ? data.students : [],
+          };
+        });
+        const candidateIds = Array.from(new Set([resolvedStudentId, uid].filter(Boolean)));
+        setCurrentStreak(
+          maxAttendanceStreakForCandidates(sessionSlotsList, candidateIds, Date.now(), slotDm)
+        );
 
         const oneRmByExercise = new Map<string, Array<{ timestamp: number; oneRm: number }>>();
         const bestByExercise = new Map<string, { oneRm: number; timestamp: number; weight: number; reps: number }>();
@@ -240,12 +232,14 @@ export default function StudentProgressPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Flame className="h-4 w-4" />
-                {t("currentStreak")}
+                {t("sessionAttendanceStreakTitle")}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{currentStreak} {t("workoutsLabel")}</div>
-              <p className="text-xs opacity-80 mt-1">{t("consecutiveWorkouts")}</p>
+              <div className="text-3xl font-bold">
+                {currentStreak} {t("sessionsStreakCompact")}
+              </div>
+              <p className="text-xs opacity-80 mt-1">{t("sessionAttendanceStreakHint")}</p>
             </CardContent>
           </Card>
 

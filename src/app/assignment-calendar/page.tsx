@@ -22,6 +22,12 @@ import {
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import {
+  blocksForLogicalSession,
+  logicalSessionEndMs,
+  normalizeAttendance,
+  type SessionAttendanceStatus,
+} from "@/lib/session-attendance-streak";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -34,6 +40,10 @@ type SlotStudent = {
   studentName: string;
   workoutPlanId?: string;
   workoutTitle?: string;
+  sessionStart?: string;
+  sessionDurationMin?: number;
+  sessionAttendance?: SessionAttendanceStatus;
+  sessionAttendanceAt?: string;
 };
 
 type SessionSlot = {
@@ -201,6 +211,7 @@ export default function AssignmentCalendarPage() {
   const [filterStudentSessionsPerWeek, setFilterStudentSessionsPerWeek] = useState<number | null>(null);
   const [isLoadingFilterStudent, setIsLoadingFilterStudent] = useState(false);
   const [isTogglingSlot, setIsTogglingSlot] = useState<string | null>(null);
+  const [isSavingAttendance, setIsSavingAttendance] = useState<string | null>(null);
 
   // Expandable week-assignment programs + inline note editing
   const [expandedAssignmentId, setExpandedAssignmentId] = useState<string | null>(null);
@@ -542,6 +553,7 @@ export default function AssignmentCalendarPage() {
       setSelectedPlanId("");
       return;
     }
+    const manageSlotDate = managingSlot.date;
     let cancelled = false;
     async function fetchPlans() {
       try {
@@ -554,7 +566,7 @@ export default function AssignmentCalendarPage() {
         if (!cancelled) {
           setStudentWorkoutPlans(plans);
           // Auto-select plan whose week matches the slot's week
-          const slotWeekStart = getWeekStart(managingSlot.date);
+          const slotWeekStart = getWeekStart(manageSlotDate);
           const match = plans.find((p: any) => {
             const planDate = (p.weekStart || p.assignedAt || p.createdAt || "").substring(0, 10);
             return planDate ? getWeekStart(planDate) === slotWeekStart : false;
@@ -593,6 +605,7 @@ export default function AssignmentCalendarPage() {
     const newStudent: SlotStudent = {
       studentId: addStudentId,
       studentName,
+      sessionAttendance: "pending",
       ...(effectivePlanId ? { workoutPlanId: effectivePlanId, workoutTitle: plan?.title } : {}),
     };
     const newStudents = [...currentStudents, newStudent];
@@ -717,11 +730,12 @@ export default function AssignmentCalendarPage() {
           const id = slotDocId(selectedDateStr, t);
           const s = slotsByTime.get(t);
           const maxS = s?.maxStudents ?? defaultMaxStudents;
-          const newEntry = {
+          const newEntry: SlotStudent = {
             studentId: filterStudentId,
             studentName,
             sessionStart: time,
             sessionDurationMin: effectiveSlotDuration,
+            sessionAttendance: "pending",
             ...(weekMatch ? { workoutTitle: weekMatch.programTitle } : {}),
           };
           const newStudents = [...(s?.students || []), newEntry];
@@ -737,6 +751,63 @@ export default function AssignmentCalendarPage() {
       toast({ title: "Erro", description: e?.message, variant: "destructive" });
     } finally {
       setIsTogglingSlot(null);
+    }
+  };
+
+  const handleSessionAttendanceSave = async (st: SlotStudent, status: SessionAttendanceStatus) => {
+    if (!db || !user || !managingSlot) return;
+    const date = managingSlot.date;
+    const sessionStartResolved = st.sessionStart ?? managingSlot.startTime;
+    const durationMin = st.sessionDurationMin ?? slotDurationMin;
+    const key = `${date}-${sessionStartResolved}-${st.studentId}`;
+    const nowMs = Date.now();
+    const endMs = logicalSessionEndMs(date, sessionStartResolved, durationMin);
+    if (Number.isFinite(endMs) && endMs > nowMs) {
+      toast({
+        title: "Sessão ainda não terminou",
+        description: "Só podes marcar presença ou falta depois do horário da sessão.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingAttendance(key);
+    const blockTimes = blocksForLogicalSession(sessionStartResolved, durationMin, slotDurationMin);
+    const atIso = new Date().toISOString();
+
+    try {
+      const nextSlots = [...sessionSlots];
+      for (const t of blockTimes) {
+        const id = slotDocId(date, t);
+        const slotIdx = nextSlots.findIndex((s) => s.id === id && s.date === date);
+        if (slotIdx < 0) continue;
+        const slot = nextSlots[slotIdx];
+        const newStudents = slot.students.map((row) => {
+          if (row.studentId !== st.studentId) return row;
+          const rowStart = row.sessionStart ?? slot.startTime;
+          if (rowStart !== sessionStartResolved) return row;
+          return { ...row, sessionAttendance: status, sessionAttendanceAt: atIso };
+        });
+        const newSlot: SessionSlot = { ...slot, students: newStudents };
+        await setDoc(doc(db, "personalTrainers", user.uid, "sessionSlots", id), newSlot);
+        nextSlots[slotIdx] = newSlot;
+      }
+      setSessionSlots(nextSlots);
+      const dialogDocId = slotDocId(date, managingSlot.startTime);
+      const updatedSlot = nextSlots.find((s) => s.id === dialogDocId && s.date === date) ?? null;
+      setManagingSlot((prev) => (prev ? { ...prev, slot: updatedSlot } : null));
+      toast({
+        title:
+          status === "present"
+            ? "Presença registada"
+            : status === "absent"
+              ? "Falta registada"
+              : "Marcado como pendente",
+      });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message, variant: "destructive" });
+    } finally {
+      setIsSavingAttendance(null);
     }
   };
 
@@ -1257,28 +1328,87 @@ export default function AssignmentCalendarPage() {
                           const sessionsPerWeek = rosterSt?.sessionsPerWeek as number | undefined;
                           const weekCount = getWeeklyCount(st.studentId, new Date(managingSlot.date + "T12:00:00"));
                           const overLimit = sessionsPerWeek != null && weekCount > sessionsPerWeek;
+                          const sessionSr = st.sessionStart ?? managingSlot.startTime;
+                          const durMin = st.sessionDurationMin ?? slotDurationMin;
+                          const endMs = logicalSessionEndMs(managingSlot.date, sessionSr, durMin);
+                          const futureSession = Number.isFinite(endMs) && endMs > Date.now();
+                          const attKey = `${managingSlot.date}-${sessionSr}-${st.studentId}`;
+                          const savingAtt = isSavingAttendance === attKey;
+                          const att = normalizeAttendance(st.sessionAttendance);
                           return (
-                            <div key={st.studentId}
-                              className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/30 border">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium">{st.studentName}</p>
-                                {st.workoutTitle && (
-                                  <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
-                                    <Dumbbell className="h-3 w-3 shrink-0" /> {st.workoutTitle}
-                                  </p>
-                                )}
-                                {sessionsPerWeek != null && (
-                                  <p className={`text-xs flex items-center gap-1 ${overLimit ? "text-destructive" : "text-muted-foreground"}`}>
-                                    {overLimit && <AlertTriangle className="h-3 w-3 shrink-0" />}
-                                    {weekCount}/{sessionsPerWeek}× esta semana
-                                  </p>
+                            <div
+                              key={`${st.studentId}-${sessionSr}`}
+                              className="flex flex-col gap-2 p-2.5 rounded-lg bg-muted/30 border">
+                              <div className="flex items-start gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium">{st.studentName}</p>
+                                  {st.workoutTitle && (
+                                    <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                                      <Dumbbell className="h-3 w-3 shrink-0" /> {st.workoutTitle}
+                                    </p>
+                                  )}
+                                  {sessionsPerWeek != null && (
+                                    <p className={`text-xs flex items-center gap-1 ${overLimit ? "text-destructive" : "text-muted-foreground"}`}>
+                                      {overLimit && <AlertTriangle className="h-3 w-3 shrink-0" />}
+                                      {weekCount}/{sessionsPerWeek}× esta semana
+                                    </p>
+                                  )}
+                                </div>
+                                <Button size="icon" variant="ghost"
+                                  className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0"
+                                  onClick={() => handleRemoveStudent(st.studentId)}>
+                                  <X className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wide shrink-0">
+                                  Presença
+                                </span>
+                                <Badge
+                                  variant={
+                                    att === "present" ? "default" : att === "absent" ? "destructive" : "secondary"
+                                  }
+                                  className="text-[10px] h-5 px-2"
+                                >
+                                  {att === "present" ? "Presente" : att === "absent" ? "Falta" : "Pendente"}
+                                </Badge>
+                                {futureSession && (
+                                  <span className="text-[10px] text-muted-foreground italic">após a sessão</span>
                                 )}
                               </div>
-                              <Button size="icon" variant="ghost"
-                                className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0"
-                                onClick={() => handleRemoveStudent(st.studentId)}>
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
+                              <div className="flex flex-wrap gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-[10px]"
+                                  disabled={futureSession || savingAtt}
+                                  onClick={() => handleSessionAttendanceSave(st, "present")}
+                                >
+                                  Presente
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-[10px] border-destructive/40 text-destructive hover:bg-destructive/10"
+                                  disabled={futureSession || savingAtt}
+                                  onClick={() => handleSessionAttendanceSave(st, "absent")}
+                                >
+                                  Falta
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-[10px]"
+                                  disabled={futureSession || savingAtt}
+                                  onClick={() => handleSessionAttendanceSave(st, "pending")}
+                                >
+                                  Pendente
+                                </Button>
+                                {savingAtt && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                              </div>
                             </div>
                           );
                         })}
@@ -1625,9 +1755,29 @@ export default function AssignmentCalendarPage() {
                           {isContinuation ? (
                             <span className="text-xs text-primary/60 italic">↳ continuação</span>
                           ) : isSessionStart ? (
-                            <p className="text-xs font-semibold text-primary">
-                              Inscrito · {slotsPerSession * slotDurationMin} min
-                            </p>
+                            <div className="space-y-1">
+                              <p className="text-xs font-semibold text-primary">
+                                Inscrito · {slotsPerSession * slotDurationMin} min
+                              </p>
+                              {myEntry && (
+                                <Badge
+                                  variant={
+                                    normalizeAttendance(myEntry.sessionAttendance) === "present"
+                                      ? "default"
+                                      : normalizeAttendance(myEntry.sessionAttendance) === "absent"
+                                        ? "destructive"
+                                        : "secondary"
+                                  }
+                                  className="text-[9px] h-4 px-1.5"
+                                >
+                                  {normalizeAttendance(myEntry.sessionAttendance) === "present"
+                                    ? "Presente"
+                                    : normalizeAttendance(myEntry.sessionAttendance) === "absent"
+                                      ? "Falta"
+                                      : "Presença pendente"}
+                                </Badge>
+                              )}
+                            </div>
                           ) : !hasEnoughBlocks ? (
                             <span className="text-xs text-muted-foreground">Bloco incompleto</span>
                           ) : isFull ? (

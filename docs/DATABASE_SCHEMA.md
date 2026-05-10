@@ -130,12 +130,31 @@ firestore (root)
 - `joinedAt`: When added to this trainer's roster
 - `currentProgramId`: Active workout program reference
 - `subscriptionStatus`: Payment/subscription state
-- `currentStreakDays`: Consecutive days of training
+- `currentStreakDays`: Legacy / optional streak field (UI streaks largely derived from calendar attendance + workout data)
 - `lastWorkoutAt`: Most recent workout completion
 
 **Access Pattern**:
 - Trainers can read/write to their own students subcollection
 - Used in trainer dashboard, student management, workout assignment
+
+---
+
+### `/personalTrainers/{trainerId}/sessionSlots/{slotId}` Documents
+**Purpose**: Calendar blocks where students enroll. Doc id encodes `{date}_{startTime_without_colon}` (e.g. `2026-04-10_1200`). Long sessions span multiple consecutive slot documents; each duplicated `students[]` row shares the same `sessionStart`, `sessionDurationMin`, and attendance fields.
+
+**Key Fields per slot doc**:
+- `date`: `YYYY-MM-DD`
+- `startTime`: Block start (`HH:mm`)
+- `maxStudents`: Capacity for this block
+- `students`: Array of `SlotStudent`:
+  - `studentId`, `studentName`: Roster identifiers (students book with Auth UID aligned to roster doc id where applicable)
+  - `sessionStart`: First block’s `startTime` for the booked session (continuation blocks reuse it)
+  - `sessionDurationMin`: Total session length
+  - `workoutPlanId`, `workoutTitle` (optional): Linked assignment
+  - `sessionAttendance`: `"pending"` (default/missing), `"present"`, or `"absent"` — set by coach after the session ends; drives **session attendance streak** in the UI
+  - `sessionAttendanceAt`: ISO timestamp when attendance was recorded
+
+**Streak semantics** (computed in app code): elapsed booked sessions sorted by end time descending; streak counts consecutive `present` until the first `pending` or `absent`.
 
 ---
 

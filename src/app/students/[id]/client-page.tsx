@@ -69,6 +69,8 @@ import {
 import { MilestonesTab } from "@/components/MilestonesTab";
 import { useI18n } from "@/lib/i18n";
 import type { Milestone } from "@/lib/types";
+import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
+import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -655,12 +657,18 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     return doc(db, "personalTrainers", user.uid, "students", id);
   }, [db, user, id]);
 
+  const trainerSettingsRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return doc(db, "personalTrainers", user.uid);
+  }, [db, user]);
+
   const globalStudentRef = useMemoFirebase(() => {
     if (!db || !id) return null;
     return doc(db, "students", id);
   }, [db, id]);
 
   const { data: rosterStudent, isLoading: rosterLoading } = useDoc(studentRef);
+  const { data: trainerSettings } = useDoc(trainerSettingsRef);
   const { data: globalStudent, isLoading: globalLoading } = useDoc(globalStudentRef);
 
   // Query all roster students to find matching doc (may have email-based ID)
@@ -689,6 +697,12 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   }, [db, user, id]);
   const { data: workoutSessions } = useCollection(workoutSessionsRef);
 
+  const sessionSlotsRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "personalTrainers", user.uid, "sessionSlots");
+  }, [db, user]);
+  const { data: trainerSessionSlots } = useCollection(sessionSlotsRef);
+
   const sortedWorkoutPlans = useMemo(() => {
     const completedPlanIds = new Set(
       (workoutSessions || [])
@@ -706,37 +720,13 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       .sort((a: any, b: any) => getAssignedWorkoutTimestamp(a) - getAssignedWorkoutTimestamp(b));
   }, [workoutPlans, workoutSessions]);
 
-  const currentWorkoutStreak = useMemo(() => {
-    const completedPlanIds = new Set(
-      (workoutSessions || [])
-        .filter((session: any) => session.completedAt && session.workoutPlanId)
-        .map((session: any) => session.workoutPlanId)
-    );
-
-    const now = Date.now();
-    const plannedWorkouts = (workoutPlans || [])
-      .map((plan: any) => {
-        const scheduledRaw = plan.assignedAt || plan.createdAt || "";
-        const timestamp = Date.parse(scheduledRaw);
-        return {
-          id: plan.id,
-          timestamp: Number.isFinite(timestamp) ? timestamp : 0,
-        };
-      })
-      .filter((plan: any) => plan.timestamp > 0 && plan.timestamp <= now)
-      .sort((a: any, b: any) => b.timestamp - a.timestamp);
-
-    let streak = 0;
-    for (const plan of plannedWorkouts) {
-      if (completedPlanIds.has(plan.id)) {
-        streak += 1;
-        continue;
-      }
-      break;
-    }
-
-    return streak;
-  }, [workoutPlans, workoutSessions]);
+  const sessionAttendanceStreak = useMemo(() => {
+    const slotDm = Number((trainerSettings as any)?.slotDurationMin) || 30;
+    const slots = (trainerSessionSlots || []) as SessionSlotAttendance[];
+    const rosterUid = String((effectiveRoster as any)?.userId || "").trim();
+    const candidateIds = Array.from(new Set([String(id || ""), rosterUid].filter(Boolean))) as string[];
+    return maxAttendanceStreakForCandidates(slots, candidateIds, Date.now(), slotDm);
+  }, [trainerSessionSlots, trainerSettings, effectiveRoster, id]);
 
   const sortedSessions = (workoutSessions || []).sort(
     (a: any, b: any) => (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
@@ -1776,12 +1766,14 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <Zap className="h-4 w-4 text-accent" />
-                    {t("currentStreak")}
+                    {t("sessionAttendanceStreakTitle")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold">{currentWorkoutStreak} {t("workouts")}</p>
-                  <p className="text-xs text-muted-foreground">{t("keepMomentum")}</p>
+                  <p className="text-2xl font-bold">
+                    {sessionAttendanceStreak} {t("sessionsStreakCompact")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{t("sessionAttendanceStreakHint")}</p>
                 </CardContent>
               </Card>
               <Card className="bg-primary/5">

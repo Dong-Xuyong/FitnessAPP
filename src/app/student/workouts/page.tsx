@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
 import { doc, getDoc, collection, getDocs, updateDoc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
+import type { SessionAttendanceStatus } from "@/lib/session-attendance-streak";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -29,8 +30,10 @@ type SlotStudent = {
   studentName: string;
   workoutPlanId?: string;
   workoutTitle?: string;
-  sessionStart?: string;       // start time of the full session (first block)
-  sessionDurationMin?: number; // total session length in minutes
+  sessionStart?: string;
+  sessionDurationMin?: number;
+  sessionAttendance?: SessionAttendanceStatus;
+  sessionAttendanceAt?: string;
 };
 type SessionSlot = { id: string; date: string; startTime: string; maxStudents: number; students: SlotStudent[] };
 
@@ -446,8 +449,9 @@ export default function StudentWorkoutsPage() {
           const newStudent: SlotStudent = {
             studentId: myId,
             studentName,
-            sessionStart: time,              // always mark the session's first block
+            sessionStart: time,
             sessionDurationMin: totalSessionMin,
+            sessionAttendance: "pending",
             ...(matchingPlan ? { workoutPlanId: matchingPlan.id, workoutTitle: matchingPlan.title } : {}),
           };
           const newStudents = [...(slot?.students || []), newStudent];
