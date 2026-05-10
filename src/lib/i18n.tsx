@@ -186,17 +186,20 @@ const translations = {
 
     // Landing page
     signIn: "Sign In",
-    elevateYour: "Elevate Your ",
-    coaching: "Coaching",
-    business: " Business",
-    landingDescription: "A professional platform for personal trainers to manage students, build programs, and track results.",
+    elevateYour: "Coaching ",
+    coaching: "Designed for You",
+    business: "",
+    landingDescription:
+      "The private training hub for Sergio Oliveira PT—tailored programs, your progress, and focused coaching in one place.",
     getStarted: "Get Started",
-    studentManagement: "Student Management",
-    studentManagementDesc: "Keep all your student data, goals, and history in one centralized, secure location.",
+    studentManagement: "Everything in One Place",
+    studentManagementDesc:
+      "Your goals, training history, and plan—organized so every session builds on the last.",
     aiProgramBuilder: "AI Program Builder",
     aiProgramBuilderDesc: "Generate tailored workout plans instantly based on student goals and fitness levels.",
-    progressTracking: "Progress Tracking",
-    progressTrackingDesc: "Visual charts for weight and strength progress help keep students motivated and on track.",
+    progressTracking: "See Your Progress Clearly",
+    progressTrackingDesc:
+      "Weight and strength charts make it easy to stay motivated and see how far you've come.",
     footerText: "© 2026 Sergio Oliveira PT. Built for champions.",
 
     // Login page
@@ -835,17 +838,20 @@ const translations = {
 
     // Landing page
     signIn: "Entrar",
-    elevateYour: "Eleve o Seu ",
-    coaching: "Coaching",
-    business: " Negócio",
-    landingDescription: "Uma plataforma profissional para personal trainers gerirem alunos, criarem programas e acompanharem resultados.",
+    elevateYour: "Coaching ",
+    coaching: "pensado para si",
+    business: "",
+    landingDescription:
+      "O espaço de treino do Sergio Oliveira PT—programas à sua medida, o seu progresso e acompanhamento focado num só lugar.",
     getStarted: "Começar",
-    studentManagement: "Gestão de Alunos",
-    studentManagementDesc: "Mantenha todos os dados, objetivos e histórico dos seus alunos num local centralizado e seguro.",
+    studentManagement: "Tudo num só lugar",
+    studentManagementDesc:
+      "Os seus objetivos, histórico de treinos e plano—organizados para cada sessão acrescentar à anterior.",
     aiProgramBuilder: "Criador de Programas com IA",
     aiProgramBuilderDesc: "Gere planos de treino personalizados instantaneamente com base nos objetivos e níveis de aptidão dos alunos.",
-    progressTracking: "Acompanhamento de Progresso",
-    progressTrackingDesc: "Gráficos visuais de peso e força ajudam a manter os alunos motivados e no caminho certo.",
+    progressTracking: "Veja o progresso com clareza",
+    progressTrackingDesc:
+      "Gráficos de peso e força tornam simples manter a motivação e ver a sua evolução.",
     footerText: "© 2026 Sergio Oliveira PT. Feito para campeões.",
 
     // Login page
