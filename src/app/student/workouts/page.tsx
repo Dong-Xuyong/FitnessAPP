@@ -46,6 +46,10 @@ interface WorkoutPlan {
   assignedAt?: string;
   completedAt?: string;
   status?: string;
+  /** When false, plan is part of a coach sequence and not yet unlocked */
+  studentUnlocked?: boolean;
+  sequenceGroupId?: string;
+  sequenceStepIndex?: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -268,6 +272,7 @@ export default function StudentWorkoutsPage() {
         const activePlans = plans.filter(p => {
           if (p.completedAt || p.status === "completed") return false;
           if (expiredPlans.some(e => e.id === p.id)) return false;
+          if (p.studentUnlocked === false) return false;
           return getPlanDaysUntilExpiry(p) >= 0;
         });
         activePlans.sort((a,b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || ""));
@@ -360,11 +365,19 @@ export default function StudentWorkoutsPage() {
     return [...workouts]
       .filter((w) => {
         const planDate = (w.weekStart || w.assignedAt || w.createdAt || "").substring(0, 10);
-        return planDate ? getWeekStart(planDate) === selectedWeekStart : false;
+        if (planDate) return getWeekStart(planDate) === selectedWeekStart;
+        // Program sequences created without week/assigned/created dates apply to any week view.
+        if (w.sequenceGroupId) return true;
+        return false;
       })
-      .sort(
-        (a, b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || "")
-      );
+      .sort((a, b) => {
+        const ra = getPlanReferenceDate(a);
+        const rb = getPlanReferenceDate(b);
+        const ta = ra ? Date.parse(ra) : 0;
+        const tb = rb ? Date.parse(rb) : 0;
+        if (ta !== tb) return ta - tb;
+        return (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0);
+      });
   }, [workouts, selectedWeekStart]);
 
   // ── Register / unregister ─────────────────────────────────────────────────────
@@ -456,11 +469,20 @@ export default function StudentWorkoutsPage() {
           }
         }
 
-        // Match plan by week (not specific date)
-        const matchingPlan = workouts.find((w) => {
-          const planDate = (w.weekStart || w.assignedAt || w.createdAt || "").substring(0, 10);
-          return planDate ? getWeekStart(planDate) === selectedWeekStart : false;
-        });
+        // Match plan by week (not specific date), else first unlocked undated sequence step
+        const matchingPlan =
+          workouts.find((w) => {
+            const planDate = (w.weekStart || w.assignedAt || w.createdAt || "").substring(0, 10);
+            return planDate ? getWeekStart(planDate) === selectedWeekStart : false;
+          }) ||
+          [...workouts]
+            .filter(
+              (w) =>
+                !!w.sequenceGroupId &&
+                !(w.weekStart || w.assignedAt || w.createdAt) &&
+                w.studentUnlocked !== false
+            )
+            .sort((a, b) => (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0))[0];
         const totalSessionMin = slotsNeeded * slotDurationMin;
         const nextSlots = [...sessionSlots];
 

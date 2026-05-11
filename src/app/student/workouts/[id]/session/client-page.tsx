@@ -19,16 +19,11 @@ import {
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
+import { doc, getDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 import {
-  doc,
-  getDoc,
-  collection,
-  writeBatch,
-  query,
-  orderBy,
-  limit,
-  getDocs,
-} from "firebase/firestore";
+  commitFinishedWorkoutSession,
+  exerciseHasLoggedSet,
+} from "@/lib/workout-session-finish";
 import { cn } from "@/lib/utils";
 
 const SESSION_QUERY_LIMIT = 40;
@@ -45,17 +40,6 @@ interface SetLog {
 }
 
 type LastPerf = { weight: number; reps: number };
-
-/** True when reps (>0) are set; empty weight OK for bodyweight. */
-function exerciseHasLoggedSet(log: SetLog | undefined): boolean {
-  if (!log) return false;
-  const reps = Number(String(log.reps).trim());
-  if (!Number.isFinite(reps) || reps <= 0) return false;
-  const wStr = String(log.weight).trim();
-  if (wStr === "") return true;
-  const w = Number(wStr);
-  return Number.isFinite(w) && w >= 0;
-}
 
 function normalizeExerciseKey(name: string): string {
   return name.trim().toLowerCase();
@@ -124,6 +108,8 @@ interface WorkoutPlan {
   personalTrainerId: string;
   assignedAt?: string;
   createdAt?: string;
+  studentUnlocked?: boolean;
+  sequenceNextPlanId?: string | null;
 }
 
 export default function WorkoutSessionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -283,76 +269,31 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
       setIsFinished(true);
       return;
     }
+    if (workout.studentUnlocked === false) return;
     setIsSaving(true);
     try {
       const trainerId = workout.personalTrainerId;
       const resolvedStudentId = effectiveStudentId || user.uid;
       const parsedBw = parseOptionalBodyWeightKg(sessionBodyWeightKg);
       const parsedBf = parseOptionalBodyFatPercent(sessionBodyFatPercent);
-      const batch = writeBatch(db);
-      const sessionsCol = collection(
+      await commitFinishedWorkoutSession({
         db,
-        "personalTrainers",
         trainerId,
-        "students",
-        resolvedStudentId,
-        "workoutSessions"
-      );
-      const sessionRef = doc(sessionsCol);
-      batch.set(sessionRef, {
+        storageStudentId: resolvedStudentId,
+        sessionStudentAuthUid: user.uid,
         workoutPlanId: workoutId,
         workoutTitle: workout.title,
-        studentId: user.uid,
-        personalTrainerId: trainerId,
-        date: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
+        sequenceNextPlanId: workout.sequenceNextPlanId,
+        exercises,
+        logs,
         bodyWeightKg: parsedBw,
-        sessionBodyFatPercent: parsedBf,
-        difficultyNotes: difficultyNotes.trim().slice(0, NOTE_MAX_LENGTH),
-        moodNotes: moodNotes.trim().slice(0, NOTE_MAX_LENGTH),
-        sessionDifficultyRating: sessionDifficultyRating ?? null,
-        sessionMoodRating: sessionMoodRating ?? null,
-        exercises: exercises.map((ex, i) => {
-          const log = logs[i] ?? { weight: "", reps: "" };
-          return {
-            exerciseName: ex.exerciseName,
-            sets: [
-              {
-                setNumber: 1,
-                weight: Number(log.weight) || 0,
-                reps: Number(log.reps) || 0,
-                completed: exerciseHasLoggedSet(log),
-              },
-            ],
-          };
-        }),
+        bodyFatPercent: parsedBf,
+        difficultyNotes,
+        moodNotes,
+        sessionDifficultyRating,
+        sessionMoodRating,
+        noteMaxLength: NOTE_MAX_LENGTH,
       });
-      const planRef = doc(
-        db,
-        "personalTrainers",
-        trainerId,
-        "students",
-        resolvedStudentId,
-        "workoutPlans",
-        workoutId
-      );
-      const finishedAt = new Date().toISOString();
-      batch.update(planRef, {
-        completedAt: finishedAt,
-        status: "completed",
-      });
-      if (parsedBw != null || parsedBf != null) {
-        const profilePatch: Record<string, number> = {};
-        if (parsedBw != null) profilePatch.weightKg = parsedBw;
-        if (parsedBf != null) profilePatch.bodyFatPercent = parsedBf;
-        batch.set(doc(db, "students", user.uid), profilePatch, { merge: true });
-        batch.set(
-          doc(db, "personalTrainers", trainerId, "students", resolvedStudentId),
-          profilePatch,
-          { merge: true }
-        );
-      }
-      await batch.commit();
       setIsFinished(true);
     } catch (e) {
       console.error("Error saving session:", e);
@@ -371,7 +312,36 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  if (!workout || exercises.length === 0) {
+  if (!workout) {
+    return (
+      <StudentNavigation>
+        <div className="text-center py-20 space-y-4">
+          <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
+          <h2 className="text-2xl font-bold">{t("workoutNotFound")}</h2>
+          <Button asChild>
+            <Link href="/student/workouts">{t("backToWorkouts")}</Link>
+          </Button>
+        </div>
+      </StudentNavigation>
+    );
+  }
+
+  if (workout.studentUnlocked === false) {
+    return (
+      <StudentNavigation>
+        <div className="text-center py-20 space-y-4 max-w-md mx-auto">
+          <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
+          <h2 className="text-2xl font-bold">{t("workoutPlanLockedTitle")}</h2>
+          <p className="text-muted-foreground">{t("workoutPlanLockedDescription")}</p>
+          <Button asChild>
+            <Link href="/student/workouts">{t("backToWorkouts")}</Link>
+          </Button>
+        </div>
+      </StudentNavigation>
+    );
+  }
+
+  if (exercises.length === 0) {
     return (
       <StudentNavigation>
         <div className="text-center py-20 space-y-4">

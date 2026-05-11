@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -34,9 +34,10 @@ import {
   ChevronDown,
   ChevronUp,
   Scale,
+  ListOrdered,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
   useUser,
   useFirestore,
@@ -46,10 +47,10 @@ import {
   updateDocumentNonBlocking,
   setDocumentNonBlocking,
 } from "@/firebase";
-import { doc, collection, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
+import { doc, collection, addDoc, updateDoc, deleteDoc, getDoc, query, where, writeBatch } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { deleteStudent } from "@/lib/firestore/students";
 import {
   AlertDialog,
@@ -63,7 +64,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MilestonesTab } from "@/components/MilestonesTab";
 import { useI18n } from "@/lib/i18n";
-import type { Milestone } from "@/lib/types";
+import type { Milestone, TrainingProgramDocument } from "@/lib/types";
+import { AssignStudentSequenceForm } from "@/components/AssignStudentSequenceForm";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
@@ -72,7 +74,9 @@ import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-p
 import {
   currentBillingPeriod,
   ensurePendingPaymentForCurrentPeriod,
+  ensurePendingPaymentForNextPeriodIfWindow,
 } from "@/lib/roster-payment-status";
+import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -81,34 +85,17 @@ function getAssignedWorkoutTimestamp(plan: any): number {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
-function formatWeekLabelFromPlan(plan: any): string {
-  const weekStartRaw = String(plan?.weekStart || "").trim();
-  if (weekStartRaw) {
-    const weekStartDate = new Date(weekStartRaw + "T12:00:00");
-    if (!Number.isNaN(weekStartDate.getTime())) {
-      return weekStartDate.toLocaleDateString(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-    }
+/** Management tab: sequence steps by index within group; sequence groups before loose plans; else by assign time. */
+function compareActiveAssignedPlans(a: any, b: any): number {
+  const ga = a.sequenceGroupId ? String(a.sequenceGroupId) : "";
+  const gb = b.sequenceGroupId ? String(b.sequenceGroupId) : "";
+  if (ga && gb) {
+    if (ga === gb) return (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0);
+    return ga.localeCompare(gb);
   }
-
-  const assignedAtRaw = String(plan?.assignedAt || plan?.createdAt || "").trim();
-  if (assignedAtRaw) {
-    const assignedDate = new Date(assignedAtRaw);
-    if (!Number.isNaN(assignedDate.getTime())) {
-      return assignedDate.toLocaleDateString(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-    }
-  }
-
-  return "—";
+  if (ga && !gb) return -1;
+  if (!ga && gb) return 1;
+  return getAssignedWorkoutTimestamp(a) - getAssignedWorkoutTimestamp(b);
 }
 
 function increaseAssignedReps(reps: string, repIncrease: number): string {
@@ -217,6 +204,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       return;
     }
     void ensurePendingPaymentForCurrentPeriod(db, user.uid, studentId);
+    void ensurePendingPaymentForNextPeriodIfWindow(db, user.uid, studentId);
   }, [db, user, studentId, rosterData]);
 
   const handleSaveBillingConfig = () => {
@@ -247,9 +235,12 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
         amount: Number(newPayment.amount) || Number(monthlyRate) || 0,
         method: newPayment.method,
         status: newPayment.status,
-        paidAt: newPayment.status === "paid" ? new Date().toISOString() : null,
+        paidAt: normalizedPaymentPaid(newPayment.status) ? new Date().toISOString() : null,
         createdAt: new Date().toISOString(),
       });
+      if (normalizedPaymentPaid(newPayment.status)) {
+        await tryAutoUnblockAfterPaymentRecorded(db, user.uid, studentId);
+      }
       toast({ title: t("paymentRecorded") });
       setShowAddPayment(false);
       setNewPayment({ period: "", amount: "", method: "mbway", status: "paid" });
@@ -277,8 +268,11 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
         amount: Number(editingPayment.amount) || 0,
         method: editingPayment.method,
         status: editingPayment.status,
-        paidAt: editingPayment.status === "paid" ? new Date().toISOString() : null,
+        paidAt: normalizedPaymentPaid(editingPayment.status) ? new Date().toISOString() : null,
       });
+      if (normalizedPaymentPaid(editingPayment.status)) {
+        await tryAutoUnblockAfterPaymentRecorded(db, user.uid, studentId);
+      }
       toast({ title: t("paymentUpdated") });
       setEditingPaymentId(null);
       setEditingPayment({ period: "", amount: "", method: "mbway", status: "paid" });
@@ -635,11 +629,11 @@ function computeEpleyOneRm(weight: number, reps: number): number {
 }
 
 const STUDENT_DETAIL_TABS = [
-  "progress",
-  "workoutHistory",
-  "milestones",
   "management",
   "billing",
+  "workoutHistory",
+  "milestones",
+  "progress",
 ] as const;
 type StudentDetailTab = (typeof STUDENT_DETAIL_TABS)[number];
 
@@ -650,13 +644,33 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const { t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const [studentDetailTab, setStudentDetailTab] = useState<StudentDetailTab>("progress");
 
   useEffect(() => {
     const tab = searchParams.get("tab");
-    if (!tab || !STUDENT_DETAIL_TABS.includes(tab as StudentDetailTab)) return;
-    setStudentDetailTab(tab as StudentDetailTab);
+    if (tab && STUDENT_DETAIL_TABS.includes(tab as StudentDetailTab)) {
+      setStudentDetailTab(tab as StudentDetailTab);
+    } else {
+      setStudentDetailTab("progress");
+    }
   }, [searchParams]);
+
+  const handleStudentDetailTabChange = useCallback(
+    (v: string) => {
+      const next = v as StudentDetailTab;
+      setStudentDetailTab(next);
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "progress") {
+        params.delete("tab");
+      } else {
+        params.set("tab", next);
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
 
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingToRoster, setIsAddingToRoster] = useState(false);
@@ -677,6 +691,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [editingAssignedExerciseNote, setEditingAssignedExerciseNote] = useState("");
   const [isSavingAssignedExerciseNote, setIsSavingAssignedExerciseNote] = useState(false);
   const [deletingWorkoutPlanId, setDeletingWorkoutPlanId] = useState<string | null>(null);
+  const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false);
+  const [sequenceFormKey, setSequenceFormKey] = useState(0);
   const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
 
   const studentRef = useMemoFirebase(() => {
@@ -704,6 +720,20 @@ export default function StudentDetailPage({ id }: { id: string }) {
     return collection(db, "personalTrainers", user.uid, "students");
   }, [db, user]);
   const { data: allRoster } = useCollection(allRosterQuery);
+
+  const trainingProgramsRef = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "personalTrainers", user.uid, "personalTrainingPrograms");
+  }, [db, user]);
+  const { data: trainingPrograms } = useCollection(trainingProgramsRef);
+
+  const assignableLibraryPrograms = useMemo(() => {
+    const rows = (trainingPrograms || []) as (TrainingProgramDocument & { id: string })[];
+    return rows
+      .filter((p) => p && p.id && p.programType !== "weekly" && p.programType !== "sequence")
+      .slice()
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }));
+  }, [trainingPrograms]);
 
   const studentEmail = (globalStudent as any)?.email;
   const altRosterDoc = allRoster?.find(
@@ -755,8 +785,21 @@ export default function StudentDetailPage({ id }: { id: string }) {
           plan.status !== "completed" &&
           !completedPlanIds.has(plan.id)
       )
-      .sort((a: any, b: any) => getAssignedWorkoutTimestamp(a) - getAssignedWorkoutTimestamp(b));
+      .sort(compareActiveAssignedPlans);
   }, [workoutPlans, workoutSessions]);
+
+  useEffect(() => {
+    const expand = searchParams.get("expandPlan")?.trim();
+    const tab = searchParams.get("tab");
+    if (!expand || tab !== "management") return;
+    const hasPlan = (sortedWorkoutPlans as Array<{ id?: string }>).some((p) => p.id === expand);
+    if (!hasPlan) return;
+    setExpandedAssignedPlanId(expand);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("expandPlan");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [searchParams, sortedWorkoutPlans, pathname, router]);
 
   const sessionAttendanceStreak = useMemo(() => {
     const slotDm = Number((trainerSettings as any)?.slotDurationMin) || 30;
@@ -956,7 +999,26 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
     setDeletingWorkoutPlanId(planId);
     try {
-      await deleteDoc(doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", planId));
+      const planRef = doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", planId);
+      const snap = await getDoc(planRef);
+      const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+      const stepIndex = Number(data?.sequenceStepIndex ?? NaN);
+      const nextId = String(data?.sequenceNextPlanId || "").trim();
+      const isSequenceHead =
+        !!data?.sequenceGroupId &&
+        Number.isFinite(stepIndex) &&
+        stepIndex === 0 &&
+        !!nextId;
+
+      if (isSequenceHead) {
+        const batch = writeBatch(db);
+        const nextRef = doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", nextId);
+        batch.update(nextRef, { studentUnlocked: true });
+        batch.delete(planRef);
+        await batch.commit();
+      } else {
+        await deleteDoc(planRef);
+      }
       toast({ title: t("assignedWorkoutRemoved") });
     } catch (error: any) {
       toast({
@@ -1155,12 +1217,12 @@ export default function StudentDetailPage({ id }: { id: string }) {
     try {
       updateDocumentNonBlocking(
         doc(db, "personalTrainers", user.uid, "students", id),
-        { blocked: newBlocked }
+        { blocked: newBlocked, blockedReason: newBlocked ? "manual" : null }
       );
       // Also update global student doc so the student app can check
       setDocumentNonBlocking(
         doc(db, "students", id),
-        { blocked: newBlocked },
+        { blocked: newBlocked, blockedReason: newBlocked ? "manual" : null },
         { merge: true }
       );
       toast({
@@ -1335,6 +1397,34 @@ export default function StudentDetailPage({ id }: { id: string }) {
         </AlertDialog>
 
         {/* Block/Unblock Confirmation */}
+        <Dialog
+          open={sequenceDialogOpen}
+          onOpenChange={(open) => {
+            setSequenceDialogOpen(open);
+            if (open) setSequenceFormKey((k) => k + 1);
+          }}
+        >
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{t("sequenceAssignTitle")}</DialogTitle>
+              <DialogDescription>{t("sequenceAssignDescription")}</DialogDescription>
+            </DialogHeader>
+            {db && user ? (
+              <AssignStudentSequenceForm
+                key={sequenceFormKey}
+                db={db}
+                trainerId={user.uid}
+                studentStorageId={id}
+                assignablePrograms={assignableLibraryPrograms}
+                disabled={portalOnly}
+                variant="dialog"
+                onCancel={() => setSequenceDialogOpen(false)}
+                onSuccess={() => setSequenceDialogOpen(false)}
+              />
+            ) : null}
+          </DialogContent>
+        </Dialog>
+
         <AlertDialog open={showBlockConfirm} onOpenChange={setShowBlockConfirm}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -1417,14 +1507,13 @@ export default function StudentDetailPage({ id }: { id: string }) {
           </div>
         )}
 
-        <Tabs
-          value={studentDetailTab}
-          onValueChange={(v) => setStudentDetailTab(v as StudentDetailTab)}
-          className="space-y-6"
-        >
+        <Tabs value={studentDetailTab} onValueChange={handleStudentDetailTabChange} className="space-y-6">
           <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1">
-            <TabsTrigger value="progress" className="text-xs sm:text-sm">
-              {t("progress")}
+            <TabsTrigger value="management" className="text-xs sm:text-sm">
+              {t("coachingManagement")}
+            </TabsTrigger>
+            <TabsTrigger value="billing" className="text-xs sm:text-sm">
+              {t("billing")}
             </TabsTrigger>
             <TabsTrigger value="workoutHistory" className="text-xs sm:text-sm">
               {t("workoutHistory")}
@@ -1432,11 +1521,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
             <TabsTrigger value="milestones" className="text-xs sm:text-sm">
               {t("milestones")}
             </TabsTrigger>
-            <TabsTrigger value="management" className="text-xs sm:text-sm">
-              {t("coachingManagement")}
-            </TabsTrigger>
-            <TabsTrigger value="billing" className="text-xs sm:text-sm">
-              {t("billing")}
+            <TabsTrigger value="progress" className="text-xs sm:text-sm">
+              {t("progress")}
             </TabsTrigger>
           </TabsList>
 
@@ -1648,13 +1734,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                         {(session.sessionDifficultyRating != null ||
                           session.sessionMoodRating != null ||
                           session.difficultyNotes ||
-                          session.moodNotes ||
-                          (session.bodyWeightKg != null &&
-                            Number.isFinite(Number(session.bodyWeightKg)) &&
-                            Number(session.bodyWeightKg) > 0) ||
-                          (session.sessionBodyFatPercent != null &&
-                            Number.isFinite(Number(session.sessionBodyFatPercent)) &&
-                            Number(session.sessionBodyFatPercent) > 0)) && (
+                          session.moodNotes) && (
                           <div className="text-xs rounded-md bg-muted/40 border border-border/60 p-3 space-y-2">
                             <div className="flex flex-wrap gap-x-4 gap-y-1 items-center font-medium">
                               {(() => {
@@ -1674,26 +1754,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
                                 return (
                                   <span className="text-muted-foreground">
                                     {t("sessionMoodCoach")}: <span aria-hidden>{faces[mr - 1]}</span> ({mr}/5)
-                                  </span>
-                                );
-                              })()}
-                              {(() => {
-                                const bw = Number(session.bodyWeightKg);
-                                if (!Number.isFinite(bw) || bw <= 0) return null;
-                                return (
-                                  <span className="text-muted-foreground tabular-nums">
-                                    {t("sessionBodyWeightCoach")}:{" "}
-                                    <span className="font-semibold text-foreground/90">{bw} kg</span>
-                                  </span>
-                                );
-                              })()}
-                              {(() => {
-                                const bf = Number(session.sessionBodyFatPercent);
-                                if (!Number.isFinite(bf) || bf <= 0) return null;
-                                return (
-                                  <span className="text-muted-foreground tabular-nums">
-                                    {t("sessionBodyFatCoach")}:{" "}
-                                    <span className="font-semibold text-foreground/90">{bf}%</span>
                                   </span>
                                 );
                               })()}
@@ -1806,11 +1866,22 @@ export default function StudentDetailPage({ id }: { id: string }) {
                 </Card>
 
                 <Card className="bg-primary/5 border-primary/20">
-                  <CardHeader>
-                    <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
-                    <CardDescription>
-                      {t("assignedWorkouts")}
-                    </CardDescription>
+                  <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+                    <div className="space-y-1.5">
+                      <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
+                      <CardDescription>{t("assignedWorkouts")}</CardDescription>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="shrink-0 gap-2"
+                      disabled={portalOnly}
+                      onClick={() => setSequenceDialogOpen(true)}
+                    >
+                      <ListOrdered className="h-4 w-4" />
+                      {t("assignSequence")}
+                    </Button>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {sortedWorkoutPlans.length > 0 ? (
@@ -1821,12 +1892,19 @@ export default function StudentDetailPage({ id }: { id: string }) {
                               <Dumbbell className="h-4 w-4 text-primary shrink-0" />
                               <div className="min-w-0">
                                 <span className="text-sm font-medium block truncate">{plan.title || "Untitled"}</span>
-                                <span className="text-xs text-muted-foreground block truncate">
-                                  Week: {formatWeekLabelFromPlan(plan)}
-                                </span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                              {plan.sequenceGroupId ? (
+                                <Badge variant="secondary" className="text-xs">
+                                  {String(plan.sequenceStepLabel || "")} · {t("assignSequence")}
+                                </Badge>
+                              ) : null}
+                              {plan.sequenceGroupId ? (
+                                <Badge variant={plan.studentUnlocked === false ? "destructive" : "outline"}>
+                                  {plan.studentUnlocked === false ? t("sequenceLockedBadge") : t("sequenceUnlockedBadge")}
+                                </Badge>
+                              ) : null}
                               <Badge variant="outline">{t("active")}</Badge>
                               <Button
                                 size="icon"

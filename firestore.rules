@@ -86,6 +86,18 @@ service cloud.firestore {
       );
     }
 
+    /** Student unlocks the next step in a sequence (only `studentUnlocked` false → true). */
+    function studentUnlockingSequenceStep(personalTrainerId, studentId) {
+      return (
+        canStudentAccessTrainerStudentPath(personalTrainerId, studentId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentUnlocked']) &&
+        resource.data.studentUnlocked == false &&
+        request.resource.data.studentUnlocked == true &&
+        resource.data.sequenceUnlockAfterPlanId is string &&
+        get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)/workoutPlans/$(resource.data.sequenceUnlockAfterPlanId)).data.status == 'completed'
+      );
+    }
+
     // Global Exercises Library
     match /exercises/{exerciseId} {
       allow read: if isSignedIn();
@@ -101,8 +113,9 @@ service cloud.firestore {
     match /students/{studentId} {
       allow read: if isSignedIn();
       allow create: if isOwner(studentId);
-      // Trainers can update to set trainerId / rosterDocId linking fields
-      allow update: if isOwner(studentId) || isTrainer();
+      // Trainers can update to set trainerId / rosterDocId linking fields.
+      // Students may update their profile but not `blocked` / `blockedReason` (coach or Admin SDK only).
+      allow update: if isTrainer() || (isOwner(studentId) && isFieldUnchanged('blocked') && isFieldUnchanged('blockedReason'));
       allow delete: if false;
     }
 
@@ -175,10 +188,11 @@ service cloud.firestore {
         allow create: if (isOwner(personalTrainerId) && matchesPath('trainerId', personalTrainerId)) || 
                       isOwner(studentId);
                       
-        // Ensure trainerId cannot be changed once established
+        // Ensure trainerId cannot be changed once established.
+        // Linked students may not change `blocked` / `blockedReason` on the roster doc.
         allow update: if (isFieldUnchanged('trainerId')) && (
           isOwner(personalTrainerId) ||
-          isOwner(studentId) ||
+          (isOwner(studentId) && isFieldUnchanged('blocked') && isFieldUnchanged('blockedReason')) ||
           linkedStudentBodyMetricsMerge(personalTrainerId, studentId)
         );
         
@@ -188,7 +202,8 @@ service cloud.firestore {
           allow get, list: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
           allow create: if isOwner(personalTrainerId);
           allow update: if isOwner(personalTrainerId) ||
-            studentMarkingWorkoutPlanComplete(personalTrainerId, studentId);
+            studentMarkingWorkoutPlanComplete(personalTrainerId, studentId) ||
+            studentUnlockingSequenceStep(personalTrainerId, studentId);
           allow delete: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
         }
 

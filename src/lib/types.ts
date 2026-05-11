@@ -89,7 +89,9 @@ export interface TrainingProgramDocument {
   level?: FitnessLevel | "all";
   durationWeeks?: number;
   sessions: TrainingProgramSession[];
-  programType?: 'single' | 'weekly';
+  programType?: 'single' | 'weekly' | 'sequence';
+  /** For `programType: 'sequence'` templates: default repeat count when assigning to a student. */
+  sequenceRepeatCycles?: number;
   sourceProgramIds?: string[];
   /** Display names parallel to sourceProgramIds (weekly meta-programs). */
   sourceProgramNames?: string[];
@@ -118,6 +120,22 @@ export interface StrengthRecord {
 
 export type MilestoneStatus = 'active' | 'completed' | 'missed' | 'paused';
 export type MilestoneCategory = 'weight' | 'strength' | 'endurance' | 'flexibility' | 'milestone' | 'other';
+
+/**
+ * Optional fields on `personalTrainers/{tid}/students/{sid}/workoutPlans/{id}` for gated sequences (A→B→C, cycles).
+ * Legacy plans omit these fields; treat missing `studentUnlocked` as unlocked.
+ */
+export interface WorkoutPlanSequenceFields {
+  sequenceGroupId: string;
+  sequenceStepIndex: number;
+  sequenceStepLabel?: string;
+  /** Present on every step after the first; must be completed before this doc may unlock. */
+  sequenceUnlockAfterPlanId?: string | null;
+  /** Next plan in the chain; student batch unlocks it when the current plan is completed. */
+  sequenceNextPlanId?: string | null;
+  /** When false, student cannot read or start this plan until the previous step is completed. */
+  studentUnlocked: boolean;
+}
 
 export interface Milestone {
   id: string;

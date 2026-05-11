@@ -57,7 +57,13 @@ firestore (root)
 │                       │       restSeconds: number,
 │                       │       notes: string (optional)
 │                       │   }
-│                       └── completedDates: array[] (timestamps)
+│                       ├── completedDates: array[] (timestamps) (legacy / optional)
+│                       ├── sequenceGroupId: string (optional; sequence assignment)
+│                       ├── sequenceStepIndex: number (optional; 0-based chain order)
+│                       ├── sequenceStepLabel: string (optional; e.g. "A", "B")
+│                       ├── sequenceUnlockAfterPlanId: string (optional; prior plan id that must be completed)
+│                       ├── sequenceNextPlanId: string (optional; next plan to unlock)
+│                       └── studentUnlocked: boolean (optional; false = hidden from student until unlocked)
 │
 └── students/                                  # Global student directory
     └── {studentId}/                           # Document for each student
@@ -169,11 +175,12 @@ firestore (root)
 - `createdAt`: When the plan was created
 - `assignedBy`: Trainer who created it
 - `exercises`: Array of exercise objects with sets, reps, rest times
-- `completedDates`: Array tracking when student completed this workout
+- `completedDates`: Array tracking when student completed this workout (legacy / optional)
+- **Sequence fields** (optional): Coaches may assign an ordered chain (e.g. A→B→C) with repeat cycles. All steps are created up front; `studentUnlocked` is `true` only for the first step. Completing a step (session batch) sets `completedAt` / `status` on that plan and sets `studentUnlocked: true` on `sequenceNextPlanId`. Students may only read plans where `studentUnlocked` is not `false`.
 
 **Access Pattern**:
 - Trainers create and manage workout plans
-- Students view and log completion of assigned workouts
+- Students view and log completion of assigned workouts (and may unlock the next sequence step per security rules)
 
 ---
 

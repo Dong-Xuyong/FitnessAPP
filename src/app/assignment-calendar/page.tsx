@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,14 +16,15 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, setDoc, getDoc, doc } from "firebase/firestore";
 import {
   CalendarDays, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
-  Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp, Pencil, Save,
+  Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp,
+  ExternalLink, ClipboardList, History,
 } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import {
   blocksForLogicalSession,
@@ -67,18 +69,262 @@ type WeekAssignment = {
   programTitle: string;
 };
 
-/** Match denormalized student workout plan to a week-program assignment (source of truth for assigned exercises). */
-function matchWorkoutPlanForAssignment(assignment: WeekAssignment, plans: any[] | undefined): any | undefined {
-  if (!plans?.length) return undefined;
-  const { weekStart, programId, programTitle } = assignment;
-  const title = String(programTitle || "").trim();
-  return plans.find((p: any) => {
-    if (p.weekStart !== weekStart) return false;
-    if (p.programId === programId || p.sourceTrainingProgramId === programId) return true;
-    const noProgRef = p.programId == null && p.sourceTrainingProgramId == null;
-    if (noProgRef && String(p.title || "").trim() === title) return true;
-    return false;
-  });
+type DayBookedStudent = {
+  studentId: string;
+  studentName: string;
+  workoutTitle?: string;
+  workoutPlanId?: string;
+  unlinkedSlotTitle?: string;
+  firestoreStudentId: string;
+  times: string[];
+};
+
+type CalendarRosterBucket = "noPlan" | "active" | "completed";
+
+type RosterPlanDetailEntry =
+  | { status: "loading" }
+  | { status: "error" }
+  | {
+      status: "ready";
+      title: string;
+      exercises: Array<{ exerciseName?: string; name?: string; notes?: string }>;
+    };
+
+type CalendarDayRosterRowProps = {
+  row: DayBookedStudent;
+  bucket: CalendarRosterBucket;
+  rosterStudentsSorted: Array<{ id: string } & Record<string, unknown>>;
+  unlockedProgramByFirestoreId: Record<string, { id: string; title: string }>;
+  rosterPlanMetaByKey: Record<string, { title: string; isCompleted: boolean }>;
+  weekProgramSummaryByStudentId: Map<string, string>;
+  expandedRosterPlanKey: string | null;
+  setExpandedRosterPlanKey: Dispatch<SetStateAction<string | null>>;
+  rosterPlanDetailByKey: Record<string, RosterPlanDetailEntry>;
+  t: (key: string) => string;
+};
+
+function CalendarDayRosterRow({
+  row,
+  bucket,
+  rosterStudentsSorted,
+  unlockedProgramByFirestoreId,
+  rosterPlanMetaByKey,
+  weekProgramSummaryByStudentId,
+  expandedRosterPlanKey,
+  setExpandedRosterPlanKey,
+  rosterPlanDetailByKey,
+  t,
+}: CalendarDayRosterRowProps) {
+  const fid = row.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, row.studentId);
+  const slotPlanId = String(row.workoutPlanId || "").trim();
+  const unlockedPick =
+    unlockedProgramByFirestoreId[fid] ||
+    (fid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
+  const unlockedId = String(unlockedPick?.id || "").trim();
+  const displayPlanId = slotPlanId || unlockedId;
+  const unlockedTitle = unlockedPick?.title || "";
+  const weekProgramLine =
+    weekProgramSummaryByStudentId.get(fid) ||
+    (fid !== row.studentId ? weekProgramSummaryByStudentId.get(row.studentId) : undefined) ||
+    "";
+  const unlinked = String(row.unlinkedSlotTitle || "").trim();
+  const fallbackLine = unlockedTitle || weekProgramLine || unlinked;
+
+  const slotMetaKey = slotPlanId ? `${fid}__${slotPlanId}` : "";
+  const unlockedMetaKey = unlockedId ? `${fid}__${unlockedId}` : "";
+  const hasSlotMeta = !!slotMetaKey && Object.prototype.hasOwnProperty.call(rosterPlanMetaByKey, slotMetaKey);
+  const hasUnlockedMeta =
+    !!unlockedMetaKey && Object.prototype.hasOwnProperty.call(rosterPlanMetaByKey, unlockedMetaKey);
+  const slotMeta = slotMetaKey ? rosterPlanMetaByKey[slotMetaKey] : undefined;
+  const unlockedMeta = unlockedMetaKey ? rosterPlanMetaByKey[unlockedMetaKey] : undefined;
+
+  const expandPlanId =
+    bucket === "completed" && slotPlanId && slotMeta?.isCompleted ? slotPlanId : displayPlanId;
+
+  let programLabel: string;
+  if (!displayPlanId) {
+    programLabel = fallbackLine || t("calendarDayNoProgramLinked");
+  } else if (slotPlanId) {
+    if (!hasSlotMeta) {
+      programLabel = fallbackLine || t("calendarDayPlanResolving");
+    } else {
+      const slotTitle = String(slotMeta?.title || "").trim();
+      const bookingTitle = String(row.workoutTitle || "").trim();
+      programLabel = slotTitle || bookingTitle || fallbackLine || t("calendarDayNoProgramLinked");
+    }
+  } else if (!hasUnlockedMeta) {
+    programLabel = fallbackLine || t("calendarDayPlanResolving");
+  } else {
+    const unlockedResolved = String(unlockedMeta?.title || "").trim();
+    programLabel = unlockedResolved || fallbackLine || t("calendarDayNoProgramLinked");
+  }
+
+  const nextProgramLine =
+    slotPlanId &&
+    slotMeta?.isCompleted &&
+    unlockedId &&
+    unlockedId !== slotPlanId &&
+    (String(unlockedMeta?.title || "").trim() || unlockedTitle)
+      ? t("calendarRosterNextProgramHint").replace(
+          "{title}",
+          String(unlockedMeta?.title || "").trim() || unlockedTitle
+        )
+      : "";
+
+  const rosterMatch = rosterStudentsSorted.find(
+    (s) => s.id === row.studentId || String((s as Record<string, unknown>).userId || "") === row.studentId
+  ) as (Record<string, unknown> & { id: string }) | undefined;
+  const studentProfileId = rosterMatch?.id ?? row.studentId;
+  const resolvedTitleForContext = slotPlanId
+    ? hasSlotMeta
+      ? String(slotMeta?.title || "").trim()
+      : ""
+    : hasUnlockedMeta
+      ? String(unlockedMeta?.title || "").trim()
+      : "";
+  const hasProgramContext =
+    Boolean(displayPlanId) &&
+    (Boolean(resolvedTitleForContext) ||
+      Boolean(fallbackLine) ||
+      (Boolean(slotPlanId) && !hasSlotMeta) ||
+      (Boolean(unlockedId) && !hasUnlockedMeta && !slotPlanId));
+  const defaultProfileHref =
+    hasProgramContext &&
+    (resolvedTitleForContext || fallbackLine || (Boolean(slotPlanId) && !hasSlotMeta) || (Boolean(unlockedId) && !hasUnlockedMeta && !slotPlanId))
+      ? `/students/${studentProfileId}`
+      : `/students/${studentProfileId}?tab=management`;
+  const profileHref =
+    bucket === "completed" ? `/students/${studentProfileId}?tab=workoutHistory` : defaultProfileHref;
+  const displayName = rosterMatch ? getStudentDisplayName(rosterMatch, row.studentName) : row.studentName;
+  const initial = displayName.trim().charAt(0).toUpperCase() || "?";
+  const avatarSrc =
+    (rosterMatch?.photoUrl as string) ||
+    `https://picsum.photos/seed/${encodeURIComponent(rosterMatch?.id ?? row.studentId)}/100/100`;
+  const rosterExpandKey = expandPlanId ? `${fid}__${expandPlanId}` : "";
+  const isRosterExpanded = !!rosterExpandKey && expandedRosterPlanKey === rosterExpandKey;
+  const rosterDetail = rosterExpandKey ? rosterPlanDetailByKey[rosterExpandKey] : undefined;
+
+  return (
+    <Collapsible
+      open={isRosterExpanded}
+      onOpenChange={(next) => {
+        if (!expandPlanId || !rosterExpandKey) return;
+        setExpandedRosterPlanKey(next ? rosterExpandKey : null);
+      }}
+      className="rounded-lg border bg-background transition-colors hover:bg-muted/40 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ring-offset-background"
+    >
+      <div className="flex items-start gap-2 px-3 py-2.5">
+        <Link
+          href={profileHref}
+          title={displayName}
+          aria-label={`${t("viewStudentProfile")}: ${displayName}`}
+          className="flex items-start gap-3 min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+        >
+          <Avatar className="h-9 w-9 shrink-0 border border-border/50">
+            <AvatarImage src={avatarSrc} alt="" />
+            <AvatarFallback className="text-xs">{initial}</AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold truncate">{displayName}</p>
+            <p className="text-xs text-muted-foreground truncate flex items-center gap-1.5">
+              <Dumbbell className="h-3 w-3 shrink-0" />
+              {programLabel}
+            </p>
+            {nextProgramLine ? (
+              <p className="text-xs text-muted-foreground/90 mt-0.5 leading-snug">{nextProgramLine}</p>
+            ) : null}
+            {row.times.length > 0 ? (
+              <p className="text-xs text-muted-foreground/80 mt-0.5 tabular-nums">
+                {t("calendarDayBookedTimes")}: {row.times.join(", ")}
+              </p>
+            ) : null}
+          </div>
+        </Link>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            disabled={!expandPlanId}
+            title={t("calendarRosterExpandDetails")}
+            aria-expanded={isRosterExpanded}
+          >
+            {isRosterExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </Button>
+        </CollapsibleTrigger>
+      </div>
+
+      <CollapsibleContent className="border-t bg-muted/10 px-3 pb-3 pt-2 space-y-3">
+        {!expandPlanId ? (
+          <p className="text-xs text-muted-foreground">{t("calendarRosterNoEffectivePlan")}</p>
+        ) : rosterDetail?.status === "loading" || !rosterDetail ? (
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-[60%]" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : rosterDetail.status === "error" ? (
+          <p className="text-xs text-destructive">{t("calendarRosterPlanDetailError")}</p>
+        ) : (
+          <>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              {t("calendarRosterPlanDetailsTitle")}
+              {rosterDetail.title ? (
+                <span className="font-medium text-foreground normal-case"> — {rosterDetail.title}</span>
+              ) : null}
+            </p>
+            {rosterDetail.exercises.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("calendarRosterPlanDetailEmpty")}</p>
+            ) : (
+              <ul className="space-y-2">
+                {rosterDetail.exercises.map((exercise, index) => (
+                  <li
+                    key={`${exercise.exerciseName || exercise.name || "ex"}-${index}`}
+                    className="rounded-md border bg-background p-2 text-sm"
+                  >
+                    <p className="font-medium">
+                      {exercise.exerciseName || exercise.name || `${t("exerciseName")} ${index + 1}`}
+                    </p>
+                    {exercise.notes ? (
+                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{exercise.notes}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+                <Link
+                  href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                >
+                  <ExternalLink className="h-4 w-4 shrink-0" />
+                  {t("calendarRosterOpenManagement")}
+                </Link>
+              </Button>
+              {bucket === "completed" ? (
+                <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+                  <Link href={`/students/${studentProfileId}?tab=workoutHistory`}>
+                    <History className="h-4 w-4 shrink-0" />
+                    {t("calendarRosterViewWorkoutHistory")}
+                  </Link>
+                </Button>
+              ) : (
+                <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
+                  <Link
+                    href={`/students/${studentProfileId}/workouts/${encodeURIComponent(displayPlanId)}/coach-session`}
+                  >
+                    <ClipboardList className="h-4 w-4 shrink-0" />
+                    {t("calendarRosterLogSession")}
+                  </Link>
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -181,6 +427,57 @@ function weekLabel(weekStart: string): string {
   return `${mon.toLocaleDateString(undefined, short)} – ${sun.toLocaleDateString(undefined, { ...short, year: "numeric" })}`;
 }
 
+/** Doc id under `students/{id}/workoutPlans` — slot rows may use roster id or linked auth `userId`. */
+function resolveFirestoreStudentId(
+  roster: Array<{ id: string } & Record<string, unknown>>,
+  slotStudentId: string
+): string {
+  const match = roster.find(
+    (s) => s.id === slotStudentId || String(s.userId || "") === slotStudentId
+  );
+  return match?.id ?? slotStudentId;
+}
+
+function isActiveWorkoutPlanDoc(p: Record<string, unknown>): boolean {
+  if (p.completedAt || p.status === "completed" || p.status === "expired") return false;
+  return true;
+}
+
+type PrimaryUnlockedPlan = { id: string; title: string };
+
+/**
+ * Primary unlocked active plan: first unlocked step in the earliest sequence group
+ * (lexicographic group id), else the most recently assigned non-sequence active plan.
+ */
+function pickPrimaryUnlockedPlan(
+  plans: Array<Record<string, unknown> & { id?: string }>
+): PrimaryUnlockedPlan | null {
+  const active = plans.filter(isActiveWorkoutPlanDoc);
+  const unlocked = active.filter((p) => p.studentUnlocked !== false);
+  if (!unlocked.length) return null;
+  const asRow = (p: Record<string, unknown> & { id?: string }): PrimaryUnlockedPlan | null => {
+    const id = String(p?.id || "").trim();
+    const title = String(p?.title || "").trim();
+    if (!id || !title) return null;
+    return { id, title };
+  };
+  const inSequence = unlocked.filter((p) => p.sequenceGroupId);
+  if (inSequence.length) {
+    const sorted = [...inSequence].sort((a, b) => {
+      const g = String(a.sequenceGroupId || "").localeCompare(String(b.sequenceGroupId || ""));
+      if (g !== 0) return g;
+      return (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0);
+    });
+    return asRow(sorted[0]!);
+  }
+  const sortedLoose = [...unlocked].sort((a, b) => {
+    const ta = Date.parse(String(a.assignedAt || a.createdAt || "")) || 0;
+    const tb = Date.parse(String(b.assignedAt || b.createdAt || "")) || 0;
+    return tb - ta;
+  });
+  return asRow(sortedLoose[0]!);
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function AssignmentCalendarPage() {
@@ -234,13 +531,29 @@ export default function AssignmentCalendarPage() {
   const [isTogglingSlot, setIsTogglingSlot] = useState<string | null>(null);
   const [isSavingAttendance, setIsSavingAttendance] = useState<string | null>(null);
 
-  // Expandable week-assignment programs + inline note editing
-  const [expandedAssignmentId, setExpandedAssignmentId] = useState<string | null>(null);
-  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null); // library: "lib:programId-si-ei" | plan: "plan:studentId-planId-ei"
-  const [editingNoteValue, setEditingNoteValue] = useState("");
-  const [isSavingNote, setIsSavingNote] = useState(false);
-  /** workoutPlans for students that have assignments in the selected calendar week (exercises may differ from library template). */
-  const [weekWorkoutPlansByStudent, setWeekWorkoutPlansByStudent] = useState<Record<string, any[]>>({});
+  /** Per `firestoreStudentId__planId`: title + completion (for roster labels and grouping). */
+  const [rosterPlanMetaByKey, setRosterPlanMetaByKey] = useState<
+    Record<string, { title: string; isCompleted: boolean }>
+  >({});
+  /** Primary unlocked active plan `{ id, title }` per Firestore `students/{id}` id (roster when slot has no plan). */
+  const [unlockedProgramByFirestoreId, setUnlockedProgramByFirestoreId] = useState<
+    Record<string, { id: string; title: string }>
+  >({});
+
+  /** `${firestoreStudentId}__${planId}` → fetched plan detail for day roster expand. */
+  const [expandedRosterPlanKey, setExpandedRosterPlanKey] = useState<string | null>(null);
+  const [rosterPlanDetailByKey, setRosterPlanDetailByKey] = useState<
+    Record<
+      string,
+      | { status: "loading" }
+      | { status: "error" }
+      | {
+          status: "ready";
+          title: string;
+          exercises: Array<{ exerciseName?: string; name?: string; notes?: string }>;
+        }
+    >
+  >({});
 
   // Manage slot dialog
   const [managingSlot, setManagingSlot] = useState<{
@@ -404,6 +717,60 @@ export default function AssignmentCalendarPage() {
 
   // Student filter helpers
   const isFilterActive = !!filterStudentId;
+
+  const studentsBookedOnSelectedDay = useMemo((): DayBookedStudent[] => {
+    const map = new Map<string, DayBookedStudent>();
+    for (const slot of sessionSlots) {
+      if (slot.date !== selectedDateStr) continue;
+      for (const st of slot.students || []) {
+        if (isFilterActive && st.studentId !== filterStudentId) continue;
+        const timeLabel = String(st.sessionStart || slot.startTime || "");
+        const title = String(st.workoutTitle || "").trim();
+        const pid = String(st.workoutPlanId || "").trim();
+        const firestoreStudentId = resolveFirestoreStudentId(rosterStudentsSorted, st.studentId);
+        const prev = map.get(st.studentId);
+        if (!prev) {
+          map.set(st.studentId, {
+            studentId: st.studentId,
+            studentName: String(st.studentName || "").trim() || st.studentId,
+            workoutTitle: pid && title ? title : undefined,
+            workoutPlanId: pid || undefined,
+            unlinkedSlotTitle: !pid && title ? title : undefined,
+            firestoreStudentId,
+            times: timeLabel ? [timeLabel] : [],
+          });
+        } else {
+          if (timeLabel && !prev.times.includes(timeLabel)) prev.times.push(timeLabel);
+          prev.times.sort();
+          if (pid) {
+            prev.workoutPlanId = pid;
+            if (title) prev.workoutTitle = title;
+            prev.unlinkedSlotTitle = undefined;
+          } else if (title && !prev.unlinkedSlotTitle) {
+            prev.unlinkedSlotTitle = title;
+          }
+          const nm = String(st.studentName || "").trim();
+          if (nm) prev.studentName = nm;
+          prev.firestoreStudentId = resolveFirestoreStudentId(rosterStudentsSorted, st.studentId);
+        }
+      }
+    }
+    return [...map.values()].sort((a, b) =>
+      a.studentName.localeCompare(b.studentName, undefined, { sensitivity: "base" })
+    );
+  }, [sessionSlots, selectedDateStr, isFilterActive, filterStudentId, rosterStudentsSorted]);
+
+  const selectedCalendarDayLabel = useMemo(
+    () =>
+      selectedDate.toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      }),
+    [selectedDate]
+  );
+
   const calendarFilterStudentLabel = useMemo(() => {
     if (!filterStudentId) return "Todos os alunos";
     const row = rosterStudentsSorted.find((x) => x.id === filterStudentId) as Record<string, unknown> | undefined;
@@ -433,42 +800,183 @@ export default function AssignmentCalendarPage() {
     [weekAssignments, selectedWeekStart, isFilterActive, filterStudentId]
   );
 
-  const studentIdsForSelectedWeek = useMemo(
-    () => [...new Set(selectedWeekAssignments.map((a) => a.studentId))],
-    [selectedWeekAssignments]
-  );
+  const weekProgramSummaryByStudentId = useMemo(() => {
+    const buckets = new Map<string, string[]>();
+    for (const a of selectedWeekAssignments) {
+      const label = String(a.programTitle || "").trim();
+      if (!label) continue;
+      const arr = buckets.get(a.studentId) ?? [];
+      if (!arr.includes(label)) arr.push(label);
+      buckets.set(a.studentId, arr);
+    }
+    const flat = new Map<string, string>();
+    for (const [sid, arr] of buckets) flat.set(sid, arr.join(", "));
+    return flat;
+  }, [selectedWeekAssignments]);
 
   useEffect(() => {
     if (!db || !user) return;
-    if (studentIdsForSelectedWeek.length === 0) {
-      setWeekWorkoutPlansByStudent({});
+    let cancelled = false;
+    const rows = studentsBookedOnSelectedDay;
+    if (rows.length === 0) {
+      setUnlockedProgramByFirestoreId({});
       return;
     }
+    const fids = [...new Set(rows.map((r) => r.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, r.studentId)))];
+    (async () => {
+      const next: Record<string, { id: string; title: string }> = {};
+      await Promise.all(
+        fids.map(async (fid) => {
+          try {
+            const snap = await getDocs(
+              collection(db, "personalTrainers", user.uid, "students", fid, "workoutPlans")
+            );
+            if (cancelled) return;
+            const planRows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id?: string }));
+            const picked = pickPrimaryUnlockedPlan(planRows);
+            if (picked) next[fid] = picked;
+          } catch {
+            /* skip */
+          }
+        })
+      );
+      if (!cancelled) setUnlockedProgramByFirestoreId(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted]);
+
+  useEffect(() => {
+    if (!db || !user || !expandedRosterPlanKey) return;
+    const sep = expandedRosterPlanKey.indexOf("__");
+    if (sep < 0) return;
+    const storageFid = expandedRosterPlanKey.slice(0, sep);
+    const planId = expandedRosterPlanKey.slice(sep + 2);
+    if (!storageFid || !planId) return;
+
+    setRosterPlanDetailByKey((prev) => {
+      const cur = prev[expandedRosterPlanKey];
+      if (cur?.status === "ready" || cur?.status === "loading") return prev;
+      return { ...prev, [expandedRosterPlanKey]: { status: "loading" } };
+    });
+
     let cancelled = false;
+    const key = expandedRosterPlanKey;
     (async () => {
       try {
-        const entries = await Promise.all(
-          studentIdsForSelectedWeek.map(async (sid) => {
-            const snap = await getDocs(
-              collection(db!, "personalTrainers", user!.uid, "students", sid, "workoutPlans")
-            );
-            const forWeek = snap.docs
-              .map((d) => ({ id: d.id, ...d.data() }))
-              .filter((p: any) => p.weekStart === selectedWeekStart);
-            return [sid, forWeek] as const;
-          })
+        const snap = await getDoc(
+          doc(db, "personalTrainers", user.uid, "students", storageFid, "workoutPlans", planId)
         );
-        if (!cancelled) {
-          setWeekWorkoutPlansByStudent(Object.fromEntries(entries));
+        if (cancelled) return;
+        if (!snap.exists()) {
+          setRosterPlanDetailByKey((p) => ({ ...p, [key]: { status: "error" } }));
+          return;
         }
+        const data = snap.data() as Record<string, unknown>;
+        const exercises = Array.isArray(data.exercises)
+          ? (data.exercises as Array<{ exerciseName?: string; name?: string; notes?: string }>)
+          : [];
+        const title = String(data.title || "").trim();
+        setRosterPlanDetailByKey((p) => ({
+          ...p,
+          [key]: { status: "ready", title, exercises },
+        }));
       } catch {
-        if (!cancelled) setWeekWorkoutPlansByStudent({});
+        if (!cancelled) setRosterPlanDetailByKey((p) => ({ ...p, [key]: { status: "error" } }));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [db, user, selectedWeekStart, studentIdsForSelectedWeek]);
+  }, [expandedRosterPlanKey, db, user]);
+
+  useEffect(() => {
+    if (!db || !user) return;
+    let cancelled = false;
+    const rows = studentsBookedOnSelectedDay;
+    const keysToFetch = new Map<string, { fid: string; planId: string }>();
+    for (const row of rows) {
+      const fid = row.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, row.studentId);
+      const slotPlanId = String(row.workoutPlanId || "").trim();
+      const unlockedPick =
+        unlockedProgramByFirestoreId[fid] ||
+        (fid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
+      const unlockedId = String(unlockedPick?.id || "").trim();
+      if (slotPlanId) {
+        const slotKey = `${fid}__${slotPlanId}`;
+        if (!keysToFetch.has(slotKey)) keysToFetch.set(slotKey, { fid, planId: slotPlanId });
+      }
+      if (unlockedId && unlockedId !== slotPlanId) {
+        const uKey = `${fid}__${unlockedId}`;
+        if (!keysToFetch.has(uKey)) keysToFetch.set(uKey, { fid, planId: unlockedId });
+      }
+    }
+    if (keysToFetch.size === 0) {
+      setRosterPlanMetaByKey({});
+      return;
+    }
+    (async () => {
+      const next: Record<string, { title: string; isCompleted: boolean }> = {};
+      await Promise.all(
+        [...keysToFetch.entries()].map(async ([key, { fid, planId }]) => {
+          try {
+            const snap = await getDoc(
+              doc(db, "personalTrainers", user.uid, "students", fid, "workoutPlans", planId)
+            );
+            if (cancelled) return;
+            if (!snap.exists()) {
+              next[key] = { title: "", isCompleted: false };
+              return;
+            }
+            const data = snap.data() as Record<string, unknown>;
+            const title = String(data?.title || "").trim();
+            const isCompleted =
+              Boolean(data?.completedAt) ||
+              data?.status === "completed" ||
+              data?.status === "expired";
+            next[key] = { title, isCompleted };
+          } catch {
+            if (!cancelled) next[key] = { title: "", isCompleted: false };
+          }
+        })
+      );
+      if (!cancelled) setRosterPlanMetaByKey(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, unlockedProgramByFirestoreId]);
+
+  /** Without `workoutPlanId` on the slot, we cannot infer "today's workout was completed" vs "next unlocked plan"
+   *  from plans alone (would need e.g. same-day `workoutSessions` query). */
+  const calendarRosterBuckets = useMemo(() => {
+    const noPlan: DayBookedStudent[] = [];
+    const active: DayBookedStudent[] = [];
+    const completed: DayBookedStudent[] = [];
+    for (const row of studentsBookedOnSelectedDay) {
+      const fid = row.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, row.studentId);
+      const slotPlanId = String(row.workoutPlanId || "").trim();
+      const unlockedPick =
+        unlockedProgramByFirestoreId[fid] ||
+        (fid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
+      const unlockedId = String(unlockedPick?.id || "").trim();
+      if (!slotPlanId && !unlockedId) {
+        noPlan.push(row);
+        continue;
+      }
+      if (slotPlanId) {
+        const slotMeta = rosterPlanMetaByKey[`${fid}__${slotPlanId}`];
+        if (slotMeta?.isCompleted) completed.push(row);
+        else active.push(row);
+        continue;
+      }
+      const meta = rosterPlanMetaByKey[`${fid}__${unlockedId}`];
+      if (meta?.isCompleted) completed.push(row);
+      else active.push(row);
+    }
+    return { noPlan, active, completed };
+  }, [studentsBookedOnSelectedDay, rosterStudentsSorted, unlockedProgramByFirestoreId, rosterPlanMetaByKey]);
 
   const weeklyPrograms = useMemo(
     () =>
@@ -806,6 +1314,34 @@ export default function AssignmentCalendarPage() {
         const student = (rosterStudents || []).find((s: any) => s.id === filterStudentId) as any;
         const studentName = `${student?.firstName || ""} ${student?.lastName || ""}`.trim() || "Aluno";
         const weekMatch = weekAssignments.find((a) => a.studentId === filterStudentId && a.weekStart === selectedWeekStart);
+        let weekPlanId = "";
+        if (weekMatch && db && user) {
+          try {
+            const plansSnap = await getDocs(
+              collection(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans")
+            );
+            const ws = selectedWeekStart;
+            const pidMatch = String(weekMatch.programId || "").trim();
+            let matchDoc = plansSnap.docs.find((d) => {
+              const data = d.data() as Record<string, unknown>;
+              const wk = String(data.weekStart || "").slice(0, 10);
+              if (wk !== ws) return false;
+              return (
+                String(data.programId || "") === pidMatch ||
+                String(data.sourceTrainingProgramId || "") === pidMatch
+              );
+            });
+            if (!matchDoc) {
+              matchDoc = plansSnap.docs.find((d) => {
+                const data = d.data() as Record<string, unknown>;
+                return String(data.weekStart || "").slice(0, 10) === ws;
+              });
+            }
+            weekPlanId = matchDoc?.id ?? "";
+          } catch {
+            weekPlanId = "";
+          }
+        }
         const nextSlots = [...sessionSlots];
         for (const t of blocksToBook) {
           const id = slotDocId(selectedDateStr, t);
@@ -818,6 +1354,7 @@ export default function AssignmentCalendarPage() {
             sessionDurationMin: effectiveSlotDuration,
             sessionAttendance: "pending",
             ...(weekMatch ? { workoutTitle: weekMatch.programTitle } : {}),
+            ...(weekPlanId ? { workoutPlanId: weekPlanId } : {}),
           };
           const newStudents = [...(s?.students || []), newEntry];
           const newSlot: SessionSlot = { id, date: selectedDateStr, startTime: t, maxStudents: maxS, students: newStudents };
@@ -889,71 +1426,6 @@ export default function AssignmentCalendarPage() {
       toast({ title: "Erro", description: e?.message, variant: "destructive" });
     } finally {
       setIsSavingAttendance(null);
-    }
-  };
-
-  // ── Inline note editing for week-assignment programs ───────────────────────
-
-  const handleSaveNote = async (
-    programId: string,
-    sessionIdx: number,
-    exIdx: number,
-    newNote: string,
-    opts?: { studentId?: string; workoutPlanId?: string }
-  ) => {
-    if (!db || !user) return;
-    const { studentId, workoutPlanId } = opts || {};
-    if (workoutPlanId && studentId) {
-      setIsSavingNote(true);
-      try {
-        const plans = weekWorkoutPlansByStudent[studentId] || [];
-        const plan = plans.find((p: any) => p.id === workoutPlanId);
-        const list = [...(plan?.exercises || [])];
-        if (exIdx < 0 || exIdx >= list.length) return;
-        list[exIdx] = { ...list[exIdx], notes: newNote };
-        await updateDoc(
-          doc(db, "personalTrainers", user.uid, "students", studentId, "workoutPlans", workoutPlanId),
-          { exercises: list }
-        );
-        setWeekWorkoutPlansByStudent((prev) => ({
-          ...prev,
-          [studentId]: (prev[studentId] || []).map((p: any) =>
-            p.id === workoutPlanId ? { ...p, exercises: list } : p
-          ),
-        }));
-        setEditingNoteKey(null);
-        toast({ title: "Nota guardada" });
-      } catch (e: any) {
-        toast({ title: "Erro", description: e?.message, variant: "destructive" });
-      } finally {
-        setIsSavingNote(false);
-      }
-      return;
-    }
-
-    const program = programs.find((p) => p.id === programId);
-    if (!program) return;
-    setIsSavingNote(true);
-    try {
-      const updatedSessions = (program.sessions || []).map((s: any, si: number) => {
-        if (si !== sessionIdx) return s;
-        const exercises = (s.exercises || []).map((e: any, ei: number) =>
-          ei === exIdx ? { ...e, notes: newNote } : e
-        );
-        return { ...s, exercises };
-      });
-      await setDoc(
-        doc(db, "personalTrainers", user.uid, "personalTrainingPrograms", programId),
-        { sessions: updatedSessions, updatedAt: new Date().toISOString() },
-        { merge: true }
-      );
-      setPrograms((prev) => prev.map((p) => p.id === programId ? { ...p, sessions: updatedSessions } : p));
-      setEditingNoteKey(null);
-      toast({ title: "Nota guardada" });
-    } catch (e: any) {
-      toast({ title: "Erro", description: e?.message, variant: "destructive" });
-    } finally {
-      setIsSavingNote(false);
     }
   };
 
@@ -2064,19 +2536,26 @@ export default function AssignmentCalendarPage() {
           </Card>
         </div>
 
-        {/* ── Week Program Assignments ────────────────────────────────────────── */}
+        {/* ── Students booked on selected day (calendar) ─────────────────────── */}
         <Card>
           <CardHeader>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Dumbbell className="h-4 w-4 text-primary" /> Programas da Semana
+                  <Users className="h-4 w-4 text-primary" /> {t("calendarDayRosterTitle")}
                 </CardTitle>
-                <CardDescription>{selectedWeekLabel}</CardDescription>
+                <CardDescription>{selectedCalendarDayLabel}</CardDescription>
               </div>
-              <Button size="sm" className="gap-1.5 shrink-0"
-                onClick={() => { setAssignWeekStudentId(isFilterActive ? filterStudentId : ""); setAssignWeekProgramId(""); setAssignWeekOpen(true); }}>
-                <UserPlus className="h-4 w-4" /> Atribuir Programa
+              <Button
+                size="sm"
+                className="gap-1.5 shrink-0"
+                onClick={() => {
+                  setAssignWeekStudentId(isFilterActive ? filterStudentId : "");
+                  setAssignWeekProgramId("");
+                  setAssignWeekOpen(true);
+                }}
+              >
+                <UserPlus className="h-4 w-4" /> {t("assignProgram")}
               </Button>
             </div>
             {isFilterActive && (
@@ -2113,119 +2592,82 @@ export default function AssignmentCalendarPage() {
             )}
           </CardHeader>
           <CardContent>
-            {selectedWeekAssignments.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                Nenhum programa atribuído para esta semana. Clica em "Atribuir Programa" para começar.
-              </p>
+            {studentsBookedOnSelectedDay.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">{t("calendarDayRosterEmpty")}</p>
             ) : (
-              <div className="space-y-2">
-                {selectedWeekAssignments.map((a) => {
-                  const prog = programs.find((p) => p.id === a.programId);
-                  const matchedPlan = matchWorkoutPlanForAssignment(a, weekWorkoutPlansByStudent[a.studentId]);
-                  const libExercises = (prog?.sessions || []).flatMap((s: any, si: number) =>
-                    (s.exercises || []).map((e: any, ei: number) => ({ ...e, sessionIdx: si, exIdx: ei }))
-                  );
-                  const planExercises =
-                    matchedPlan && Array.isArray(matchedPlan.exercises) && matchedPlan.exercises.length > 0
-                      ? matchedPlan.exercises.map((e: any, ei: number) => ({
-                          ...e,
-                          sessionIdx: -1,
-                          exIdx: ei,
-                          workoutPlanId: matchedPlan.id,
-                          planStudentId: a.studentId,
-                        }))
-                      : [];
-                  const exercises = planExercises.length > 0 ? planExercises : libExercises;
-                  const isExpanded = expandedAssignmentId === a.id;
-
-                  return (
-                    <div key={a.id} className="rounded-lg border overflow-hidden">
-                      {/* Header row */}
-                      <div className="flex items-center gap-3 px-3 py-2.5 bg-muted/20">
-                        <Dumbbell className="h-4 w-4 text-primary shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold truncate">{a.studentName}</p>
-                          <p className="text-xs text-muted-foreground truncate">{a.programTitle}</p>
-                        </div>
-                        <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-                          {exercises.length} exerc.
-                        </span>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0"
-                          onClick={() => setExpandedAssignmentId(isExpanded ? null : a.id)}>
-                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        </Button>
-                        <Button size="icon" variant="ghost"
-                          className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0"
-                          onClick={() => handleRemoveWeekAssignment(a.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-
-                      {/* Expanded exercise list */}
-                      {isExpanded && (
-                        <div className="divide-y">
-                          {exercises.length === 0 ? (
-                            <p className="text-sm text-muted-foreground text-center py-4">
-                              Sem exercícios neste programa.
-                            </p>
-                          ) : exercises.map((ex: any, flatIdx: number) => {
-                            const noteKey = ex.workoutPlanId
-                              ? `plan:${ex.planStudentId}-${ex.workoutPlanId}-${ex.exIdx}`
-                              : `lib:${a.programId}-${ex.sessionIdx}-${ex.exIdx}`;
-                            const isEditing = editingNoteKey === noteKey;
-                            return (
-                              <div key={flatIdx} className="px-4 py-3 space-y-1.5">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className="text-sm font-semibold">{ex.exerciseName}</p>
-                                  {!isEditing && (
-                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-primary shrink-0"
-                                      onClick={() => {
-                                        setEditingNoteKey(noteKey);
-                                        setEditingNoteValue(ex.notes || "");
-                                      }}>
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                  )}
-                                </div>
-                                {isEditing ? (
-                                  <div className="space-y-2">
-                                    <Textarea
-                                      value={editingNoteValue}
-                                      onChange={(e) => setEditingNoteValue(e.target.value)}
-                                      className="text-xs min-h-[80px]"
-                                      placeholder="Séries, reps, descanso, instruções…"
-                                    />
-                                    <div className="flex gap-2">
-                                      <Button size="sm" className="h-7 text-xs gap-1.5"
-                                        onClick={() =>
-                                          handleSaveNote(a.programId, ex.sessionIdx, ex.exIdx, editingNoteValue,
-                                            ex.workoutPlanId
-                                              ? { studentId: ex.planStudentId, workoutPlanId: ex.workoutPlanId }
-                                              : undefined
-                                          )}
-                                        disabled={isSavingNote}>
-                                        {isSavingNote ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                                        Guardar
-                                      </Button>
-                                      <Button size="sm" variant="outline" className="h-7 text-xs"
-                                        onClick={() => setEditingNoteKey(null)}>
-                                        Cancelar
-                                      </Button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <p className="text-xs text-muted-foreground whitespace-pre-line">
-                                    {ex.notes || <span className="italic">Sem notas. Clica no lápis para adicionar.</span>}
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+              <div className="space-y-6">
+                {calendarRosterBuckets.noPlan.length > 0 ? (
+                  <div className="rounded-lg border border-border/60 bg-muted/15 p-4 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {t("calendarRosterSectionNoPlan")}
+                    </p>
+                    <div className="space-y-2">
+                      {calendarRosterBuckets.noPlan.map((row) => (
+                        <CalendarDayRosterRow
+                          key={row.studentId}
+                          row={row}
+                          bucket="noPlan"
+                          rosterStudentsSorted={rosterStudentsSorted}
+                          unlockedProgramByFirestoreId={unlockedProgramByFirestoreId}
+                          rosterPlanMetaByKey={rosterPlanMetaByKey}
+                          weekProgramSummaryByStudentId={weekProgramSummaryByStudentId}
+                          expandedRosterPlanKey={expandedRosterPlanKey}
+                          setExpandedRosterPlanKey={setExpandedRosterPlanKey}
+                          rosterPlanDetailByKey={rosterPlanDetailByKey}
+                          t={t}
+                        />
+                      ))}
                     </div>
-                  );
-                })}
+                  </div>
+                ) : null}
+                {calendarRosterBuckets.active.length > 0 ? (
+                  <div className="rounded-lg border border-border/60 bg-background p-4 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {t("calendarRosterSectionActivePlan")}
+                    </p>
+                    <div className="space-y-2">
+                      {calendarRosterBuckets.active.map((row) => (
+                        <CalendarDayRosterRow
+                          key={row.studentId}
+                          row={row}
+                          bucket="active"
+                          rosterStudentsSorted={rosterStudentsSorted}
+                          unlockedProgramByFirestoreId={unlockedProgramByFirestoreId}
+                          rosterPlanMetaByKey={rosterPlanMetaByKey}
+                          weekProgramSummaryByStudentId={weekProgramSummaryByStudentId}
+                          expandedRosterPlanKey={expandedRosterPlanKey}
+                          setExpandedRosterPlanKey={setExpandedRosterPlanKey}
+                          rosterPlanDetailByKey={rosterPlanDetailByKey}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {calendarRosterBuckets.completed.length > 0 ? (
+                  <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/25 p-4 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {t("calendarRosterSectionCompletedPlan")}
+                    </p>
+                    <div className="space-y-2">
+                      {calendarRosterBuckets.completed.map((row) => (
+                        <CalendarDayRosterRow
+                          key={row.studentId}
+                          row={row}
+                          bucket="completed"
+                          rosterStudentsSorted={rosterStudentsSorted}
+                          unlockedProgramByFirestoreId={unlockedProgramByFirestoreId}
+                          rosterPlanMetaByKey={rosterPlanMetaByKey}
+                          weekProgramSummaryByStudentId={weekProgramSummaryByStudentId}
+                          expandedRosterPlanKey={expandedRosterPlanKey}
+                          setExpandedRosterPlanKey={setExpandedRosterPlanKey}
+                          rosterPlanDetailByKey={rosterPlanDetailByKey}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </CardContent>
