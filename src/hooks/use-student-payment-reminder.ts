@@ -73,8 +73,19 @@ export function useStudentPaymentReminder(
     }
 
     void run();
+    const intervalMs = 60 * 60 * 1000;
+    const tick = setInterval(() => {
+      if (!cancelled) void run();
+    }, intervalMs);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && !cancelled) void run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       cancelled = true;
+      clearInterval(tick);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [db, userUid]);
 

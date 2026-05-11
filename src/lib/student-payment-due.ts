@@ -1,6 +1,31 @@
-import { currentBillingPeriod } from "@/lib/roster-payment-status";
+import { currentBillingPeriod, nextBillingPeriod } from "@/lib/roster-payment-status";
 
-const REMINDER_LEAD_MS = 3 * 24 * 60 * 60 * 1000;
+/**
+ * Client-side billing dates use the device local calendar (same as `Date` getters).
+ * The scheduled payment-enforcement job uses `Europe/Lisbon` — keep logic aligned in `functions/src/`.
+ */
+
+/** True only on the second-to-last calendar day of the month (local). */
+export function isPenultimateDayOfMonth(now = new Date()): boolean {
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return now.getDate() === lastDay - 1;
+}
+
+/** End of calendar day 6 of the payment month for `YYYY-MM` (local). On-time through this instant. */
+export function graceDeadlineEndForPeriod(period: string): Date | null {
+  const parsed = parsePeriodYearMonth(period);
+  if (!parsed) return null;
+  const { y, m } = parsed;
+  return new Date(y, m - 1, 6, 23, 59, 59, 999);
+}
+
+/** Start of calendar day 7 of the payment month (local). Blocking applies from here if still unpaid. */
+export function blockStartsAtForPeriod(period: string): Date | null {
+  const parsed = parsePeriodYearMonth(period);
+  if (!parsed) return null;
+  const { y, m } = parsed;
+  return new Date(y, m - 1, 7, 0, 0, 0, 0);
+}
 
 export function parsePeriodYearMonth(period: string): { y: number; m: number } | null {
   const match = /^(\d{4})-(\d{2})$/.exec(String(period || "").trim());
@@ -71,10 +96,42 @@ export type PaymentReminderState =
   | { show: false }
   | { show: true; variant: "soon" | "overdue"; dueDate: Date };
 
+function uniqueCanonicalPeriodsFromPayments(
+  payments: Array<{ period?: string; status?: string }>
+): string[] {
+  const set = new Set<string>();
+  for (const p of payments) {
+    const ym = canonicalBillingPeriodYm(p.period);
+    if (ym) set.add(ym);
+  }
+  return [...set];
+}
+
+/** Most recent `YYYY-MM` that is unpaid and past grace deadline (local `now`). */
+function latestOverduePeriod(
+  now: Date,
+  payments: Array<{ period?: string; status?: string }>
+): string | null {
+  const nowMs = now.getTime();
+  const candidates = new Set(uniqueCanonicalPeriodsFromPayments(payments));
+  candidates.add(currentBillingPeriod(now));
+
+  let best: string | null = null;
+  for (const p of candidates) {
+    if (isPeriodPaid(payments, p)) continue;
+    const graceEnd = graceDeadlineEndForPeriod(p);
+    if (!graceEnd || Number.isNaN(graceEnd.getTime())) continue;
+    if (nowMs <= graceEnd.getTime()) continue;
+    if (!best || p > best) best = p;
+  }
+  return best;
+}
+
 /**
- * Warn when billing is active, monthly fee set, current month unpaid, and:
- * - "soon": within 3 days before month-end due (local)
- * - "overdue": after month-end due
+ * Warn when billing is active and monthly fee set:
+ * - "overdue": any tracked period (current + periods in `payments`) is unpaid after end of day 6 of that month
+ * - "soon": on the penultimate calendar day of the current month, if next month's period is not yet paid
+ *   (due by the 6th of next month)
  */
 export function getPaymentReminderState(args: {
   now: Date;
@@ -87,27 +144,22 @@ export function getPaymentReminderState(args: {
     return { show: false };
   }
 
-  const period = currentBillingPeriod(now);
-  if (isPeriodPaid(payments, period)) {
-    return { show: false };
+  const overduePeriod = latestOverduePeriod(now, payments);
+  if (overduePeriod) {
+    const dueDate = graceDeadlineEndForPeriod(overduePeriod);
+    if (dueDate && !Number.isNaN(dueDate.getTime())) {
+      return { show: true, variant: "overdue", dueDate };
+    }
   }
 
-  const dueDate = endOfDueDayForPeriod(period);
-  if (!dueDate || Number.isNaN(dueDate.getTime())) {
-    return { show: false };
-  }
-
-  const nowMs = now.getTime();
-
-  if (nowMs > dueDate.getTime()) {
-    return { show: true, variant: "overdue", dueDate };
-  }
-
-  const windowStart = new Date(dueDate.getTime() - REMINDER_LEAD_MS);
-  windowStart.setHours(0, 0, 0, 0);
-
-  if (nowMs >= windowStart.getTime() && nowMs <= dueDate.getTime()) {
-    return { show: true, variant: "soon", dueDate };
+  if (isPenultimateDayOfMonth(now)) {
+    const next = nextBillingPeriod(now);
+    if (!isPeriodPaid(payments, next)) {
+      const dueDate = graceDeadlineEndForPeriod(next);
+      if (dueDate && !Number.isNaN(dueDate.getTime())) {
+        return { show: true, variant: "soon", dueDate };
+      }
+    }
   }
 
   return { show: false };

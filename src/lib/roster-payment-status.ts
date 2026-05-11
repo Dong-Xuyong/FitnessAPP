@@ -17,6 +17,25 @@ export function currentBillingPeriod(now = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** `YYYY-MM` for the calendar month after `now` (December rolls to January next year). */
+export function nextBillingPeriod(now = new Date()): string {
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  if (m === 12) return `${y + 1}-01`;
+  return `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
+/** True when `now` is on one of the last three calendar days of the month (local). */
+export function isWithinLastThreeDaysOfMonth(now = new Date()): boolean {
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return now.getDate() >= lastDay - 2;
+}
+
+function rosterPaymentStatusIsPaid(raw: unknown): boolean {
+  const s = String(raw ?? "").trim().toLowerCase();
+  return s === "paid" || s === "pago";
+}
+
 /**
  * If billing is active and no payment row exists for the current `YYYY-MM`, creates a pending payment.
  * @returns true when a new Firestore document was added.
@@ -57,6 +76,50 @@ export async function ensurePendingPaymentForCurrentPeriod(
   return true;
 }
 
+/**
+ * During the last three days of the calendar month, ensure a pending row exists for **next** `YYYY-MM`.
+ * @returns true when a new Firestore document was added.
+ */
+export async function ensurePendingPaymentForNextPeriodIfWindow(
+  db: Firestore,
+  trainerUid: string,
+  rosterStudentId: string,
+  now = new Date()
+): Promise<boolean> {
+  if (!isWithinLastThreeDaysOfMonth(now)) return false;
+
+  const rosterRef = doc(db, "personalTrainers", trainerUid, "students", rosterStudentId);
+  const rosterSnap = await getDoc(rosterRef);
+  if (!rosterSnap.exists()) return false;
+
+  const roster = rosterSnap.data() as Record<string, unknown>;
+  if (String(roster.billingStatus ?? "").trim().toLowerCase() !== "active") {
+    return false;
+  }
+  const amount = Number(roster.monthlyRate ?? 0);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+
+  const period = nextBillingPeriod(now);
+  const paymentsCol = collection(db, "personalTrainers", trainerUid, "students", rosterStudentId, "payments");
+  const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
+  if (!existing.empty) return false;
+
+  const method = String(roster.paymentMethod ?? "mbway") || "mbway";
+  const nowIso = now.toISOString();
+
+  await addDoc(paymentsCol, {
+    period,
+    amount,
+    method,
+    status: "pending",
+    paidAt: null,
+    createdAt: nowIso,
+    source: "auto_next_month_window",
+  });
+
+  return true;
+}
+
 export async function ensureRosterPendingPaymentsForCurrentMonth(
   db: Firestore,
   trainerUid: string,
@@ -64,6 +127,16 @@ export async function ensureRosterPendingPaymentsForCurrentMonth(
 ): Promise<void> {
   await Promise.all(
     rosterStudentIds.map((id) => ensurePendingPaymentForCurrentPeriod(db, trainerUid, id))
+  );
+}
+
+export async function ensureRosterPendingNextPeriodIfWindow(
+  db: Firestore,
+  trainerUid: string,
+  rosterStudentIds: string[]
+): Promise<void> {
+  await Promise.all(
+    rosterStudentIds.map((id) => ensurePendingPaymentForNextPeriodIfWindow(db, trainerUid, id))
   );
 }
 
@@ -87,8 +160,9 @@ export async function fetchRosterPaymentStatusMap(
       const best = paymentsSnap.docs.reduce<RosterPaymentStatus | null>((acc, docSnap) => {
         const data = docSnap.data();
         const period = String(data.period ?? "");
+        const st = String(data.status ?? "pending");
         const candidate: RosterPaymentStatus = {
-          status: String(data.status ?? "pending"),
+          status: rosterPaymentStatusIsPaid(st) ? "paid" : st,
           period,
         };
         if (!acc || period > acc.period) return candidate;

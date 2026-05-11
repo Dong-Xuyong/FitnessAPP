@@ -23,7 +23,9 @@ import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
 import {
   fetchRosterPaymentStatusMap,
   ensureRosterPendingPaymentsForCurrentMonth,
+  ensureRosterPendingNextPeriodIfWindow,
 } from "@/lib/roster-payment-status";
+import { normalizedPaymentPaid } from "@/lib/student-payment-due";
 
 export default function StudentsPage() {
   const { user } = useUser();
@@ -65,6 +67,7 @@ export default function StudentsPage() {
     }
     const ids = rosterStudents.map((s: any) => s.id).filter((id: string) => Boolean(id));
     await ensureRosterPendingPaymentsForCurrentMonth(db, user.uid, ids);
+    await ensureRosterPendingNextPeriodIfWindow(db, user.uid, ids);
     const map = await fetchRosterPaymentStatusMap(db, user.uid, ids);
     setPaymentStatusMap(map);
   }, [db, user, rosterStudents]);
@@ -168,13 +171,13 @@ export default function StudentsPage() {
                           )}
                           {rosterRow && paymentInfo && (
                             <Badge
-                              variant={paymentInfo.status === "paid" ? "default" : "outline"}
-                              className={`mt-1 text-[10px] uppercase tracking-wide gap-1 ${paymentInfo.status === "paid"
+                              variant={normalizedPaymentPaid(paymentInfo.status) ? "default" : "outline"}
+                              className={`mt-1 text-[10px] uppercase tracking-wide gap-1 ${normalizedPaymentPaid(paymentInfo.status)
                                 ? "bg-green-100 text-green-800"
                                 : "bg-yellow-100 text-yellow-800"}`}
                             >
                               <Banknote className="h-3 w-3" />
-                              {paymentInfo.status === "paid" ? "Paid" : "Pending"}
+                              {normalizedPaymentPaid(paymentInfo.status) ? "Paid" : "Pending"}
                             </Badge>
                           )}
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mt-2 mb-0.5">
