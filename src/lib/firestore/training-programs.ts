@@ -1,6 +1,7 @@
 import type { CollectionReference, Firestore } from "firebase/firestore";
-import { collection, getDocs } from "firebase/firestore";
+import { addDoc, collection, getDocs } from "firebase/firestore";
 import type { TrainingProgramSession } from "@/lib/types";
+import type { DefaultTrainingProgram } from "@/lib/default-programs";
 import {
   DEFAULT_TRAINING_PROGRAMS,
   DEFAULT_WEEKLY_STRENGTH_ALL_SOURCE_NAMES,
@@ -85,13 +86,18 @@ export function totalExercisesInProgram(
   return sessions.reduce((n, s) => n + (s.exercises?.length ?? 0), 0);
 }
 
+function getStrengthTemplateByName(name: string): DefaultTrainingProgram | undefined {
+  return DEFAULT_TRAINING_PROGRAMS.find((p) => p.name === name);
+}
+
 export type EnsureWeeklyStrengthCycleResult =
   | { success: true; created: boolean; createdCount: number; addedTitles: string[] }
   | { success: false; missingNames: string[] }
   | { success: false; message: string };
 
 /**
- * Adds default weekly strength meta-programs (PU, Dip, Squat) when all six base templates exist.
+ * Adds default weekly strength meta-programs (PU, Dip, Squat).
+ * Creates any missing six base templates from {@link DEFAULT_TRAINING_PROGRAMS}, then weekly metas.
  * Idempotent: skips if {@link DEFAULT_WEEKLY_STRENGTH_LEGACY_TITLE} exists; otherwise creates any missing cycle titles.
  */
 export async function ensureDefaultWeeklyStrengthCycle(
@@ -110,16 +116,44 @@ export async function ensureDefaultWeeklyStrengthCycle(
       if (name) existingTitles.add(name);
     }
 
-    const missingNames = DEFAULT_WEEKLY_STRENGTH_ALL_SOURCE_NAMES.filter((n) => !idByName.get(n));
-    if (missingNames.length > 0) {
-      return { success: false, missingNames };
+    const now = new Date().toISOString();
+
+    for (const name of DEFAULT_WEEKLY_STRENGTH_ALL_SOURCE_NAMES) {
+      if (idByName.has(name)) continue;
+      const template = getStrengthTemplateByName(name);
+      if (!template) {
+        return {
+          success: false,
+          message: `Missing default template definition for "${name}".`,
+        };
+      }
+      const ref = await addDoc(programsCol, {
+        trainerId,
+        name: template.name,
+        description: template.description,
+        category: template.category,
+        level: template.level,
+        durationWeeks: template.durationWeeks,
+        sessions: template.sessions,
+        createdAt: now,
+        updatedAt: now,
+      });
+      idByName.set(name, ref.id);
+      existingTitles.add(name);
+    }
+
+    const stillMissing = DEFAULT_WEEKLY_STRENGTH_ALL_SOURCE_NAMES.filter((n) => !idByName.get(n));
+    if (stillMissing.length > 0) {
+      return {
+        success: false,
+        message: `Could not resolve required programs: ${stillMissing.join(", ")}`,
+      };
     }
 
     if (existingTitles.has(DEFAULT_WEEKLY_STRENGTH_LEGACY_TITLE)) {
       return { success: true, created: false, createdCount: 0, addedTitles: [] };
     }
 
-    const now = new Date().toISOString();
     const addedTitles: string[] = [];
 
     for (const cycle of DEFAULT_WEEKLY_STRENGTH_CYCLES) {
