@@ -169,8 +169,6 @@ type CalendarDayRosterRowProps = {
   setExpandedRosterPlanKey: Dispatch<SetStateAction<string | null>>;
   rosterPlanDetailByKey: Record<string, RosterPlanDetailEntry>;
   rosterSessionLogByKey: Record<string, RosterSessionLogEntry>;
-  /** Latest `workoutTitle` among sessions completed on the calendar day (completed-row subtitle). */
-  lastWorkoutTitleOnSelectedDayByFid: Record<string, string>;
   onRequestEditRosterSession?: (payload: {
     storageFid: string;
     session: EditWorkoutSessionDialogSession;
@@ -189,7 +187,6 @@ function CalendarDayRosterRow({
   setExpandedRosterPlanKey,
   rosterPlanDetailByKey,
   rosterSessionLogByKey,
-  lastWorkoutTitleOnSelectedDayByFid,
   onRequestEditRosterSession,
   t,
 }: CalendarDayRosterRowProps) {
@@ -803,10 +800,6 @@ export default function AssignmentCalendarPage() {
   );
   /** `fid__slotPlanId` → same-day completed session with `workoutPlanId` matching the slot plan (stale plan meta). */
   const [sessionCompletedSlotPlanByKey, setSessionCompletedSlotPlanByKey] = useState<Record<string, boolean>>({});
-  /** `fid` → `workoutTitle` of the most recently `completedAt` session on `selectedDateStr`. */
-  const [lastWorkoutTitleOnSelectedDayByFid, setLastWorkoutTitleOnSelectedDayByFid] = useState<
-    Record<string, string>
-  >({});
   /** Primary unlocked active plan `{ id, title }` per Firestore `students/{id}` id (roster when slot has no plan). */
   const [unlockedProgramByFirestoreId, setUnlockedProgramByFirestoreId] = useState<
     Record<string, { id: string; title: string }>
@@ -1358,7 +1351,6 @@ export default function AssignmentCalendarPage() {
     if (rows.length === 0) {
       setSessionCompletedOnSelectedDayByFid({});
       setSessionCompletedSlotPlanByKey({});
-      setLastWorkoutTitleOnSelectedDayByFid({});
       return;
     }
     const fids = [
@@ -1377,7 +1369,6 @@ export default function AssignmentCalendarPage() {
     (async () => {
       const dayByFid: Record<string, boolean> = {};
       const slotByKey: Record<string, boolean> = {};
-      const lastTitleByFid: Record<string, string> = {};
       await Promise.all(
         fids.map(async (fid) => {
           try {
@@ -1386,8 +1377,6 @@ export default function AssignmentCalendarPage() {
             );
             if (cancelled) return;
             const slotsToMatch = slotKeysForFid.get(fid);
-            let bestT = -1;
-            let bestTitle = "";
             snap.forEach((docSnap) => {
               const data = docSnap.data() as Record<string, unknown>;
               const dayStr = sessionCompletionCalendarDay(data);
@@ -1397,14 +1386,7 @@ export default function AssignmentCalendarPage() {
               if (wp && slotsToMatch?.has(`${fid}__${wp}`)) {
                 slotByKey[`${fid}__${wp}`] = true;
               }
-              const tMs = firestoreScalarToDate(data.completedAt)?.getTime() ?? 0;
-              if (tMs >= bestT) {
-                bestT = tMs;
-                const wt = String(data.workoutTitle || "").trim();
-                if (wt) bestTitle = wt;
-              }
             });
-            if (bestTitle) lastTitleByFid[fid] = bestTitle;
           } catch {
             /* skip */
           }
@@ -1413,7 +1395,6 @@ export default function AssignmentCalendarPage() {
       if (!cancelled) {
         setSessionCompletedOnSelectedDayByFid(dayByFid);
         setSessionCompletedSlotPlanByKey(slotByKey);
-        setLastWorkoutTitleOnSelectedDayByFid(lastTitleByFid);
       }
     })();
     return () => {
@@ -3173,7 +3154,6 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
-                          lastWorkoutTitleOnSelectedDayByFid={lastWorkoutTitleOnSelectedDayByFid}
                           t={t}
                         />
                       ))}
@@ -3199,7 +3179,6 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
-                          lastWorkoutTitleOnSelectedDayByFid={lastWorkoutTitleOnSelectedDayByFid}
                           t={t}
                         />
                       ))}
@@ -3225,7 +3204,6 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
-                          lastWorkoutTitleOnSelectedDayByFid={lastWorkoutTitleOnSelectedDayByFid}
                           onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />
