@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,7 +28,7 @@ import {
 export default function StudentsPage() {
   const { user } = useUser();
   const db = useFirestore();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -74,16 +74,33 @@ export default function StudentsPage() {
   }, [fetchPaymentStatuses]);
 
   const q = searchQuery.toLowerCase().trim();
+  const sortLocale = locale === "pt" ? "pt-PT" : "en-US";
 
-  const filteredStudents =
-    allStudents?.filter((s) => {
-      if (s.id === user?.uid) return false;
-      if (!q) return true;
-      const row = s as Record<string, unknown>;
-      const name = getStudentDisplayName(row, "").toLowerCase();
-      const email = getStudentEmail(row).toLowerCase();
-      return name.includes(q) || email.includes(q);
-    }) || [];
+  const filteredStudents = useMemo(() => {
+    if (!allStudents?.length) return [];
+    const nameFallback = t("unnamed");
+    const collatorOpts: Intl.CollatorOptions = { sensitivity: "base" };
+    return [...allStudents]
+      .filter((s) => {
+        if (s.id === user?.uid) return false;
+        if (!q) return true;
+        const row = s as Record<string, unknown>;
+        const name = getStudentDisplayName(row, nameFallback).toLowerCase();
+        const email = getStudentEmail(row).toLowerCase();
+        return name.includes(q) || email.includes(q);
+      })
+      .sort((a, b) => {
+        const rowA = a as Record<string, unknown>;
+        const rowB = b as Record<string, unknown>;
+        const cmp = getStudentDisplayName(rowA, nameFallback).localeCompare(
+          getStudentDisplayName(rowB, nameFallback),
+          sortLocale,
+          collatorOpts
+        );
+        if (cmp !== 0) return cmp;
+        return getStudentEmail(rowA).localeCompare(getStudentEmail(rowB), sortLocale, collatorOpts);
+      });
+  }, [allStudents, user?.uid, q, t, sortLocale]);
 
   return (
     <Navigation>

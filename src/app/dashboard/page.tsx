@@ -82,7 +82,7 @@ function DashboardContent() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   const trainerRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -109,15 +109,20 @@ function DashboardContent() {
     [portalStudents, rosterStudents]
   );
 
-  const sortedStudents = useMemo(
-    () =>
-      [...mergedStudents].sort(
-        (a, b) =>
-          new Date(String(b.joinedAt || 0)).getTime() -
-          new Date(String(a.joinedAt || 0)).getTime()
-      ),
-    [mergedStudents]
-  );
+  const sortLocale = locale === "pt" ? "pt-PT" : "en-US";
+  const sortedStudents = useMemo(() => {
+    const nameFallback = t("unnamed");
+    const collatorOpts: Intl.CollatorOptions = { sensitivity: "base" };
+    return [...mergedStudents].sort((a, b) => {
+      const cmp = getStudentDisplayName(a, nameFallback).localeCompare(
+        getStudentDisplayName(b, nameFallback),
+        sortLocale,
+        collatorOpts
+      );
+      if (cmp !== 0) return cmp;
+      return getStudentEmail(a).localeCompare(getStudentEmail(b), sortLocale, collatorOpts);
+    });
+  }, [mergedStudents, t, sortLocale]);
 
   const rosterOnlySorted = useMemo(
     () => sortedStudents.filter((s) => s._onRoster),
