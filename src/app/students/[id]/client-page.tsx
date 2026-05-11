@@ -62,6 +62,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { EditWorkoutSessionDialog } from "@/components/EditWorkoutSessionDialog";
 import { MilestonesTab } from "@/components/MilestonesTab";
 import { useI18n } from "@/lib/i18n";
 import type { Milestone, TrainingProgramDocument } from "@/lib/types";
@@ -678,7 +679,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [isBlocking, setIsBlocking] = useState(false);
-  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
   const [confirmDeletePlanId, setConfirmDeletePlanId] = useState<string | null>(null);
   const [coachingNotes, setCoachingNotes] = useState("");
   const [editStats, setEditStats] = useState({
@@ -940,7 +940,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
   }, [workoutSessions]);
 
   const [editSession, setEditSession] = useState<any>(null);
-  const [editExercises, setEditExercises] = useState<any[]>([]);
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
 
   const milestonesRef = useMemoFirebase(() => {
     if (!db || !user || !id) return null;
@@ -964,34 +964,17 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const openEditSession = (session: any) => {
     setEditSession(session);
-    setEditExercises(
-      (session.exercises || []).map((ex: any) => ({
-        name: ex.exerciseName || ex.name || "",
-        sets: Array.isArray(ex.sets)
-          ? ex.sets.map((s: any) => ({ weight: s.weight ?? 0, reps: s.reps ?? 0 }))
-          : Array.from({ length: Number(ex.sets) || 1 }, () => ({ weight: Number(ex.weight) || 0, reps: Number(ex.reps) || 0 })),
-      }))
-    );
   };
 
-  const handleSaveSession = async () => {
-    if (!editSession || !db || !user) return;
-    const ref = doc(db, "personalTrainers", user.uid, "students", id, "workoutSessions", editSession.id);
-    await updateDoc(ref, {
-      exercises: editExercises.map((ex) => ({
-        exerciseName: ex.name,
-        sets: ex.sets,
-      })),
-    });
-    toast({ title: t("sessionUpdated") });
-    setEditSession(null);
-  };
-
-  const handleDeleteSession = async (sessionId: string) => {
+  const handleDeleteSessionFromList = async (sessionId: string) => {
     if (!db || !user) return;
-    await deleteDoc(doc(db, "personalTrainers", user.uid, "students", id, "workoutSessions", sessionId));
-    toast({ title: t("sessionDeleted") });
-    setEditSession(null);
+    try {
+      await deleteDoc(doc(db, "personalTrainers", user.uid, "students", id, "workoutSessions", sessionId));
+      toast({ title: t("sessionDeleted") });
+      setConfirmDeleteSessionId(null);
+    } catch {
+      toast({ variant: "destructive", title: t("deleteSessionFailed") });
+    }
   };
 
   const handleDeleteWorkoutPlan = async (planId: string) => {
@@ -1470,7 +1453,9 @@ export default function StudentDetailPage({ id }: { id: string }) {
               <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive hover:bg-destructive/90"
-                onClick={() => { if (confirmDeleteSessionId) { handleDeleteSession(confirmDeleteSessionId); setConfirmDeleteSessionId(null); } }}
+                onClick={() => {
+                  if (confirmDeleteSessionId) void handleDeleteSessionFromList(confirmDeleteSessionId);
+                }}
               >
                 <Trash2 className="h-4 w-4 mr-2" /> {t("deleteSession")}
               </AlertDialogAction>
@@ -2081,112 +2066,24 @@ export default function StudentDetailPage({ id }: { id: string }) {
           </TabsContent>
         </Tabs>
 
-        <Dialog open={!!editSession} onOpenChange={(open) => !open && setEditSession(null)}>
-          <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>
-                {t("editSession")} — {editSession?.workoutTitle || "Workout"}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              {editExercises.map((ex, ei) => (
-                <div key={ei} className="border rounded-lg p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Input
-                      className="font-medium text-sm h-8"
-                      value={ex.name}
-                      onChange={(e) => {
-                        const copy = [...editExercises];
-                        copy[ei] = { ...copy[ei], name: e.target.value };
-                        setEditExercises(copy);
-                      }}
-                    />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 ml-2 text-destructive shrink-0"
-                      onClick={() => setEditExercises(editExercises.filter((_, i) => i !== ei))}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                  <div className="space-y-1">
-                    {ex.sets.map((s: any, si: number) => (
-                      <div key={si} className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground w-12 shrink-0">Set {si + 1}</span>
-                        <Input
-                          type="number"
-                          className="h-7 text-xs"
-                          placeholder="kg"
-                          value={s.weight}
-                          onChange={(e) => {
-                            const copy = [...editExercises];
-                            const sets = [...copy[ei].sets];
-                            sets[si] = { ...sets[si], weight: Number(e.target.value) || 0 };
-                            copy[ei] = { ...copy[ei], sets };
-                            setEditExercises(copy);
-                          }}
-                        />
-                        <span className="text-xs">kg ×</span>
-                        <Input
-                          type="number"
-                          className="h-7 text-xs"
-                          placeholder="reps"
-                          value={s.reps}
-                          onChange={(e) => {
-                            const copy = [...editExercises];
-                            const sets = [...copy[ei].sets];
-                            sets[si] = { ...sets[si], reps: Number(e.target.value) || 0 };
-                            copy[ei] = { ...copy[ei], sets };
-                            setEditExercises(copy);
-                          }}
-                        />
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-6 w-6 text-destructive"
-                          onClick={() => {
-                            const copy = [...editExercises];
-                            copy[ei] = {
-                              ...copy[ei],
-                              sets: copy[ei].sets.filter((_: any, i: number) => i !== si),
-                            };
-                            setEditExercises(copy);
-                          }}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-xs mt-1"
-                      onClick={() => {
-                        const copy = [...editExercises];
-                        copy[ei] = { ...copy[ei], sets: [...copy[ei].sets, { weight: 0, reps: 0 }] };
-                        setEditExercises(copy);
-                      }}
-                    >
-                      + Add Set
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              <div className="flex gap-2 pt-2">
-                <Button className="flex-1" onClick={handleSaveSession}>
-                  {t("saveChanges")}
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => editSession && setConfirmDeleteSessionId(editSession.id)}
-                >
-                  {t("deleteSession")}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <EditWorkoutSessionDialog
+          open={!!editSession}
+          onOpenChange={(o) => !o && setEditSession(null)}
+          db={db}
+          trainerUid={user?.uid}
+          storageStudentId={id}
+          session={
+            editSession
+              ? {
+                  id: editSession.id,
+                  workoutTitle: editSession.workoutTitle,
+                  exercises: editSession.exercises,
+                }
+              : null
+          }
+          t={t}
+          toast={toast}
+        />
       </div>
     </Navigation>
   );

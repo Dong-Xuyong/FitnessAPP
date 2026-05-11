@@ -5,23 +5,13 @@ import { Suspense } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
-  Users, Activity, Calendar as CalendarIcon, TrendingUp, Loader2, Weight, Target, UserPlus, Dumbbell, Trash2, Pencil, X,
+  Users, Loader2, Weight, Target, UserPlus, Dumbbell, Trash2, Pencil, X,
   Search, Banknote,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -40,7 +30,6 @@ import {
   ensureRosterPendingNextPeriodIfWindow,
 } from "@/lib/roster-payment-status";
 import { normalizedPaymentPaid } from "@/lib/student-payment-due";
-import { clearAllTrainerWorkoutPlans } from "@/lib/firestore/clear-trainer-assignments";
 
 type StudentRow = Record<string, unknown> & { id: string; _onRoster?: boolean };
 
@@ -198,8 +187,6 @@ function DashboardContent() {
 
   // Fetch all workout plans assigned to roster students
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [teamVelocityPercent, setTeamVelocityPercent] = useState(0);
-  const [avgStreakValue, setAvgStreakValue] = useState(0);
   const [streakByStudentId, setStreakByStudentId] = useState<Record<string, number>>({});
   const [calendarDate, setCalendarDate] = useState(new Date().toISOString().split("T")[0]);
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
@@ -208,16 +195,10 @@ function DashboardContent() {
   const [editExercises, setEditExercises] = useState<Assignment["exercises"]>([]);
   const [editDate, setEditDate] = useState("");
   const [editTime, setEditTime] = useState("");
-  const [bulkClearOpen, setBulkClearOpen] = useState(false);
-  const [bulkClearConfirm, setBulkClearConfirm] = useState("");
-  const [isBulkClearing, setIsBulkClearing] = useState(false);
-
   const fetchAssignments = useCallback(async () => {
     if (!db || !user) return;
     if (!rosterStudents || rosterStudents.length === 0) {
       setAssignments([]);
-      setTeamVelocityPercent(0);
-      setAvgStreakValue(0);
       setStreakByStudentId({});
       return;
     }
@@ -238,21 +219,7 @@ function DashboardContent() {
       });
     } catch {}
 
-    // Get current week boundaries (Monday to Sunday)
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const diffToMonday = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-    const weekStart = new Date(now.getFullYear(), now.getMonth(), diffToMonday);
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 7);
-    weekEnd.setHours(23, 59, 59, 999);
-    
     const all: Assignment[] = [];
-    let totalPlannedThisWeek = 0;
-    let totalCompletedThisWeek = 0;
-    let totalStreakAcrossRoster = 0;
-    let streakStudentCount = 0;
     const streakMap: Record<string, number> = {};
     
     for (const student of rosterStudents) {
@@ -279,19 +246,10 @@ function DashboardContent() {
             break;
           }
         }
-        
-        const completedPlanIds = new Set<string>();
-        sessionsSnap.forEach((sessDoc: any) => {
-          const data = sessDoc.data();
-          if (data.completedAt) {
-            completedPlanIds.add(data.workoutPlanId);
-          }
-        });
-        
+
         plansSnap.forEach((d: any) => {
           const data = d.data();
-          const assignedDate = new Date(data.assignedAt || data.createdAt || "");
-          
+
           all.push({
             planId: d.id,
             studentId: rosterStudentId,
@@ -307,28 +265,15 @@ function DashboardContent() {
               weight: ex.weight,
             })),
           });
-          
-          // Track week completion
-          if (assignedDate >= weekStart && assignedDate <= weekEnd) {
-            totalPlannedThisWeek += 1;
-            if (completedPlanIds.has(d.id)) {
-              totalCompletedThisWeek += 1;
-            }
-          }
         });
 
         const streak = maxAttendanceStreakForCandidates(sessionSlotsList, candidateIds, Date.now(), slotDm);
 
-        totalStreakAcrossRoster += streak;
-        streakStudentCount += 1;
         streakMap[rosterStudentId] = streak;
       } catch {}
     }
     
     setAssignments(all);
-    const percentageValue = totalPlannedThisWeek > 0 ? Math.round((totalCompletedThisWeek / totalPlannedThisWeek) * 100) : 0;
-    setTeamVelocityPercent(percentageValue);
-    setAvgStreakValue(streakStudentCount > 0 ? Math.round(totalStreakAcrossRoster / streakStudentCount) : 0);
     setStreakByStudentId(streakMap);
   }, [db, user, rosterStudents, portalStudentIdByEmail, t, trainer]);
 
@@ -416,87 +361,7 @@ function DashboardContent() {
     setEditTime(a.scheduledTime || "");
   };
 
-  const handleBulkClearPlans = async () => {
-    if (!db || !user) return;
-    if (bulkClearConfirm !== "DELETE") return;
-    setIsBulkClearing(true);
-    try {
-      const { deletedPlanCount, deletedWeekAssignmentCount } = await clearAllTrainerWorkoutPlans(
-        db,
-        user.uid,
-        (rosterStudents || []) as { id: string; userId?: string; email?: string }[],
-        portalStudentIdByEmail
-      );
-      toast({
-        title: t("bulkClearPlansSuccess"),
-        description: [
-          t("bulkClearPlansCountDetail").replace("{count}", String(deletedPlanCount)),
-          t("bulkClearWeekAssignmentsCountDetail").replace("{count}", String(deletedWeekAssignmentCount)),
-        ].join(" "),
-      });
-      setBulkClearOpen(false);
-      setBulkClearConfirm("");
-      fetchAssignments();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : t("bulkClearPlansFailed");
-      toast({ variant: "destructive", title: t("bulkClearPlansFailed"), description: msg });
-    } finally {
-      setIsBulkClearing(false);
-    }
-  };
-
   const isLoading = isLoadingPortal || isLoadingRoster;
-  const rosterCount = rosterStudents?.length ?? 0;
-  const portalCount = mergedStudents.length;
-
-  const goalSuccessPercent = useMemo(() => {
-    if (!rosterStudents || rosterStudents.length === 0) return 0;
-
-    let totalWithGoals = 0;
-    let reachedGoals = 0;
-
-    for (const student of rosterStudents as StudentRow[]) {
-      const weight = Number(student.weightKg);
-      const goalWeight = Number(student.goalWeightKg);
-      const goalType = String(student.goalType || "").toLowerCase();
-
-      if (!Number.isFinite(weight) || !Number.isFinite(goalWeight) || goalWeight <= 0) continue;
-      totalWithGoals += 1;
-
-      if (goalType === "weight_loss") {
-        if (weight <= goalWeight) reachedGoals += 1;
-      } else if (goalType === "muscle_gain") {
-        if (weight >= goalWeight) reachedGoals += 1;
-      } else {
-        if (Math.abs(weight - goalWeight) <= 1) reachedGoals += 1;
-      }
-    }
-
-    if (totalWithGoals === 0) return 0;
-    return Math.round((reachedGoals / totalWithGoals) * 100);
-  }, [rosterStudents]);
-
-  const stats = [
-    {
-      label: t("portalStudents"),
-      value: portalCount.toString(),
-      icon: Users,
-      change: `${rosterCount} ${t("onYourRoster")}`,
-    },
-    {
-      label: t("teamVelocity"),
-      value: `${teamVelocityPercent}%`,
-      icon: Activity,
-      change: t("workoutCompletionRate"),
-    },
-    {
-      label: t("avgStreak"),
-      value: String(avgStreakValue),
-      icon: TrendingUp,
-      change: t("rosterOnly"),
-    },
-    { label: t("goalSuccess"), value: `${goalSuccessPercent}%`, icon: Target, change: t("targetWeightsReached") },
-  ];
 
   if (isUserLoading) {
     return (
@@ -520,79 +385,6 @@ function DashboardContent() {
             </Link>
           </Button>
         </header>
-
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {stats.map((stat) => (
-            <Card key={stat.label}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
-                <stat.icon className="w-4 h-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
-                <p className="text-xs text-muted-foreground">{stat.change}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {db && user && (
-          <Card className="border-destructive/25 bg-destructive/[0.03]">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">{t("bulkClearPlansTitle")}</CardTitle>
-              <CardDescription>{t("bulkClearPlansDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AlertDialog
-                open={bulkClearOpen}
-                onOpenChange={(open) => {
-                  setBulkClearOpen(open);
-                  setBulkClearConfirm(open ? "" : "");
-                }}
-              >
-                <AlertDialogTrigger asChild>
-                  <Button type="button" variant="destructive" size="sm" className="gap-2">
-                    <Trash2 className="h-4 w-4" />
-                    {t("bulkClearPlansButton")}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>{t("bulkClearPlansTitle")}</AlertDialogTitle>
-                    <AlertDialogDescription className="space-y-3">
-                      <span className="block">{t("bulkClearPlansDescription")}</span>
-                      <span className="block font-medium text-foreground">{t("bulkClearPlansConfirmHint")}</span>
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <div className="space-y-2 py-2">
-                    <Label htmlFor="bulk-clear-confirm">{t("bulkClearPlansConfirmPlaceholder")}</Label>
-                    <Input
-                      id="bulk-clear-confirm"
-                      autoComplete="off"
-                      value={bulkClearConfirm}
-                      onChange={(e) => setBulkClearConfirm(e.target.value)}
-                      placeholder={t("bulkClearPlansConfirmPlaceholder")}
-                      disabled={isBulkClearing}
-                    />
-                  </div>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={isBulkClearing}>{t("cancel")}</AlertDialogCancel>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      disabled={bulkClearConfirm !== "DELETE" || isBulkClearing}
-                      className="gap-2"
-                      onClick={() => void handleBulkClearPlans()}
-                    >
-                      {isBulkClearing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      {t("confirm")}
-                    </Button>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </CardContent>
-          </Card>
-        )}
 
         <div className="grid lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-3">

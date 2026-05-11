@@ -105,9 +105,19 @@ const translations = {
     calendarRosterSectionCompletedPlan: "Completed workout",
     calendarRosterViewWorkoutHistory: "Workout history",
     calendarRosterNextProgramHint: "Next: {title}",
+    calendarRosterSlotPlanNotOnProfile:
+      "This booking’s plan is not on the student’s profile (missing or outdated link).",
     calendarRosterPlanDetailEmpty: "No exercises in this plan.",
     calendarRosterPlanDetailError: "Could not load workout details.",
     calendarRosterNoEffectivePlan: "No workout plan available to expand.",
+    calendarRosterSessionLogTitle: "Session log",
+    calendarRosterUntitledSession: "Workout",
+    calendarRosterSessionLogEmpty: "No workout session was logged for this athlete on this day.",
+    calendarRosterSessionLogCoachHint:
+      "Use Log or edit session to enter the weights and reps the athlete actually did.",
+    calendarRosterLogOrEditSession: "Log or edit session",
+    calendarRosterSessionDifferentPlanHint:
+      "Showing the last workout logged this day. It may belong to a different plan than this booking row—use Log or edit session to open that plan.",
     coachWorkoutSessionTitle: "Log workout (coach)",
     coachWorkoutSessionBack: "Back to student",
     coachWorkoutSessionSubtitle: "Session is saved to this student’s history.",
@@ -873,9 +883,19 @@ const translations = {
     calendarRosterSectionCompletedPlan: "Treino concluído",
     calendarRosterViewWorkoutHistory: "Histórico de treinos",
     calendarRosterNextProgramHint: "A seguir: {title}",
+    calendarRosterSlotPlanNotOnProfile:
+      "O plano desta reserva não está na ficha do aluno (ligação em falta ou desatualizada).",
     calendarRosterPlanDetailEmpty: "Este plano não tem exercícios.",
     calendarRosterPlanDetailError: "Não foi possível carregar os detalhes do treino.",
     calendarRosterNoEffectivePlan: "Não há plano para mostrar aqui.",
+    calendarRosterSessionLogTitle: "Registo do treino",
+    calendarRosterUntitledSession: "Treino",
+    calendarRosterSessionLogEmpty: "Não há nenhuma sessão de treino registada para este aluno neste dia.",
+    calendarRosterSessionLogCoachHint:
+      "Use Registar ou corrigir treino para introduzir as cargas e repetições que o aluno fez.",
+    calendarRosterLogOrEditSession: "Registar ou corrigir treino",
+    calendarRosterSessionDifferentPlanHint:
+      "A mostrar o último treino registado neste dia. Pode ser de outro plano que o da reserva—use Registar ou corrigir treino para abrir esse plano.",
     coachWorkoutSessionTitle: "Registar treino (treinador)",
     coachWorkoutSessionBack: "Voltar ao aluno",
     coachWorkoutSessionSubtitle: "A sessão fica no histórico deste aluno.",
