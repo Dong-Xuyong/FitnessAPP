@@ -305,7 +305,7 @@ const translations = {
     noProgramsYet: "No programs yet",
     noProgramsYetDesc: "Build a routine in the program builder, or load default programs to get started.",
     loadDefaultPrograms: "Load Default Programs",
-    addDefaultWeeklyStrengthCycle: "Add default strength weekly cycle",
+    addDefaultWeeklyStrengthCycle: "Plano Dong",
     weeklyStrengthCycleAdded: "Weekly cycles added",
     weeklyStrengthCycleAddedDesc:
       "The default PU, Dip, and squat weekly strength programs are now under Saved Weekly Programs.",
@@ -1011,7 +1011,7 @@ const translations = {
     noProgramsYet: "Ainda sem programas",
     noProgramsYetDesc: "Crie uma rotina no criador de programas ou carregue programas padrão para começar.",
     loadDefaultPrograms: "Carregar Programas Padrão",
-    addDefaultWeeklyStrengthCycle: "Adicionar ciclo semanal de força predefinido",
+    addDefaultWeeklyStrengthCycle: "plano Dong",
     weeklyStrengthCycleAdded: "Ciclos semanais adicionados",
     weeklyStrengthCycleAddedDesc:
       "Os programas semanais de força predefinidos (PU, Dip e agachamento) estão agora em Programas Semanais Guardados.",
