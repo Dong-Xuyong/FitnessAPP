@@ -527,7 +527,7 @@ export default function StudentWorkoutsPage() {
                   workout:     "bg-primary/10 font-medium",
                   unavailable: "opacity-30 line-through text-muted-foreground",
                 }}
-                className="w-full rounded-md border"
+                className="rounded-md border max-w-full"
               />
 
               {/* Legend */}

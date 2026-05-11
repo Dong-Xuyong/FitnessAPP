@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, updateDoc } from "firebase/firestore";
 import {
@@ -29,6 +31,7 @@ import {
   type SessionAttendanceStatus,
 } from "@/lib/session-attendance-streak";
 import { buildWorkoutPlanExercises } from "@/lib/training-program-assignment";
+import { getStudentDisplayName } from "@/lib/student-display";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -201,6 +204,9 @@ export default function AssignmentCalendarPage() {
   const [slotDurationMin, setSlotDurationMin] = useState(30);
   const [defaultMaxStudents, setDefaultMaxStudents] = useState(4);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  /** Sidebar preview panels (calendar card); collapsed by default to save space. */
+  const [availabilityPreviewOpen, setAvailabilityPreviewOpen] = useState(false);
+  const [blockSettingsPreviewOpen, setBlockSettingsPreviewOpen] = useState(false);
 
   // Session slots
   const [sessionSlots, setSessionSlots] = useState<SessionSlot[]>([]);
@@ -254,6 +260,15 @@ export default function AssignmentCalendarPage() {
     return collection(db, "personalTrainers", user.uid, "students");
   }, [db, user]);
   const { data: rosterStudents, isLoading: isLoadingRoster } = useCollection(studentsQuery);
+
+  const rosterStudentsSorted = useMemo(() => {
+    const list = [...(rosterStudents || [])] as Array<{ id: string } & Record<string, unknown>>;
+    return list.sort((a, b) =>
+      getStudentDisplayName(a, "Sem nome").localeCompare(getStudentDisplayName(b, "Sem nome"), undefined, {
+        sensitivity: "base",
+      })
+    );
+  }, [rosterStudents]);
 
   // ── Load trainer settings ──────────────────────────────────────────────────
 
@@ -389,6 +404,18 @@ export default function AssignmentCalendarPage() {
 
   // Student filter helpers
   const isFilterActive = !!filterStudentId;
+  const calendarFilterStudentLabel = useMemo(() => {
+    if (!filterStudentId) return "Todos os alunos";
+    const row = rosterStudentsSorted.find((x) => x.id === filterStudentId) as Record<string, unknown> | undefined;
+    return row ? getStudentDisplayName(row, "Sem nome") : "Aluno";
+  }, [filterStudentId, rosterStudentsSorted]);
+
+  const calendarFilterSelectedRow = useMemo(() => {
+    if (!filterStudentId) return undefined;
+    return rosterStudentsSorted.find((x) => x.id === filterStudentId) as
+      | (Record<string, unknown> & { id: string })
+      | undefined;
+  }, [filterStudentId, rosterStudentsSorted]);
   const effectiveSlotDuration = isFilterActive && filterStudentSessionDuration
     ? filterStudentSessionDuration
     : slotDurationMin;
@@ -1606,53 +1633,70 @@ export default function AssignmentCalendarPage() {
               <CardDescription>Seleciona um dia para ver o horário</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <MonthCalendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={(d) => { if (d) setSelectedDate(d); }}
-                modifiers={{ hasSlots: slotDates, unavailable: isUnavailableDay, hasProgram: assignedWeekDates }}
-                modifiersClassNames={{
-                  hasSlots:   "bg-accent/20 text-accent font-semibold rounded-full",
-                  hasProgram: "bg-primary/10 font-medium",
-                  unavailable: "opacity-40 line-through text-muted-foreground",
-                }}
-                className="w-full rounded-md border"
-              />
-
-              {/* Legend */}
-              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-accent/30 border border-accent/40 inline-block" />
-                  Com sessões
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-sm bg-primary/20 inline-block" />
-                  Semana com programa
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-muted border inline-block" />
-                  Indisponível
-                </span>
-              </div>
-
               {/* Student filter */}
               <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
                   <Users className="h-3.5 w-3.5" /> Ver por aluno
                 </p>
                 <Select value={filterStudentId || "__all__"} onValueChange={(v) => setFilterStudentId(v === "__all__" ? "" : v)}>
-                  <SelectTrigger className="h-8 text-sm">
-                    {isLoadingFilterStudent
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <SelectValue placeholder="Todos os alunos" />}
+                  <SelectTrigger
+                    className="min-h-9 h-auto py-1.5 text-sm gap-2"
+                    aria-label={`Ver por aluno: ${calendarFilterStudentLabel}`}
+                  >
+                    {isLoadingFilterStudent ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                    ) : filterStudentId ? (
+                      /* div (not span): SelectTrigger applies [&>span]:line-clamp-1 which breaks horizontal flex */
+                      <div className="flex min-w-0 flex-1 flex-row items-center gap-2">
+                        <Avatar className="h-7 w-7 shrink-0 border border-border/50">
+                          <AvatarImage
+                            src={
+                              (calendarFilterSelectedRow?.photoUrl as string) ||
+                              `https://picsum.photos/seed/${filterStudentId}/100/100`
+                            }
+                            alt=""
+                          />
+                          <AvatarFallback className="text-[10px]">
+                            {calendarFilterSelectedRow
+                              ? (() => {
+                                  const n = getStudentDisplayName(calendarFilterSelectedRow, "Sem nome");
+                                  return n !== "Sem nome" ? n.trim().charAt(0).toUpperCase() || "?" : "?";
+                                })()
+                              : "?"}
+                          </AvatarFallback>
+                        </Avatar>
+                        {/* No SelectValue: Radix would mirror SelectItem (avatar+text) */}
+                        <span className="min-w-0 flex-1 truncate text-left" aria-hidden="true">
+                          {calendarFilterStudentLabel}
+                        </span>
+                      </div>
+                    ) : (
+                      <SelectValue placeholder="Todos os alunos" />
+                    )}
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__all__">Todos os alunos</SelectItem>
-                    {(rosterStudents || []).map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {`${s.firstName || ""} ${s.lastName || ""}`.trim() || "Sem nome"}
-                      </SelectItem>
-                    ))}
+                    {rosterStudentsSorted.map((s) => {
+                      const row = s as Record<string, unknown> & { id: string };
+                      const displayName = getStudentDisplayName(row, "Sem nome");
+                      const initial =
+                        displayName !== "Sem nome"
+                          ? displayName.trim().charAt(0).toUpperCase() || "?"
+                          : "?";
+                      const src =
+                        (row.photoUrl as string) || `https://picsum.photos/seed/${row.id}/100/100`;
+                      return (
+                        <SelectItem key={row.id} value={row.id}>
+                          <span className="flex items-center gap-2 min-w-0">
+                            <Avatar className="h-7 w-7 shrink-0 border border-border/50">
+                              <AvatarImage src={src} alt="" />
+                              <AvatarFallback className="text-[10px]">{initial}</AvatarFallback>
+                            </Avatar>
+                            <span className="truncate">{displayName}</span>
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
                 {isFilterActive && filterStudentSessionDuration && (
@@ -1678,75 +1722,142 @@ export default function AssignmentCalendarPage() {
                 )}
               </div>
 
-              {/* Availability */}
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5" /> Disponibilidade
-                  </p>
-                  <Button size="sm" variant="ghost" className="h-7 px-2 gap-1 text-xs" onClick={openAvailability}>
-                    <Settings2 className="h-3.5 w-3.5" /> Editar
-                  </Button>
-                </div>
-                <div className="space-y-1">
-                  {DAY_KEYS.map((day) => {
-                    const sched = availability[day];
-                    const active = sched?.enabled && sched.ranges.length > 0;
-                    return (
-                      <div key={day} className={`text-xs ${active ? "" : "opacity-40"}`}>
-                        <div className="flex items-start gap-1">
-                          <span className="font-medium w-8 shrink-0 pt-0.5">{DAY_LABELS_SHORT[day]}</span>
-                          {active ? (
-                            <div className="flex flex-col gap-0.5">
-                              {sched.ranges.map((r, i) => (
-                                <span key={i} className="text-primary font-semibold">{r.startTime} – {r.endTime}</span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="italic text-muted-foreground">Indisponível</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+              <MonthCalendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={(d) => { if (d) setSelectedDate(d); }}
+                modifiers={{ hasSlots: slotDates, unavailable: isUnavailableDay, hasProgram: assignedWeekDates }}
+                modifiersClassNames={{
+                  hasSlots:   "bg-accent/20 text-accent font-semibold rounded-full",
+                  hasProgram: "bg-primary/10 font-medium",
+                  unavailable: "opacity-40 line-through text-muted-foreground",
+                }}
+                className="rounded-md border max-w-full"
+              />
+
+              {/* Legend */}
+              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-accent/30 border border-accent/40 inline-block" />
+                  Com sessões
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-primary/20 inline-block" />
+                  Semana com programa
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-muted border inline-block" />
+                  Indisponível
+                </span>
               </div>
 
-              {/* Block settings */}
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Definições dos blocos
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Duração</Label>
-                    <Select value={String(slotDurationMin)} onValueChange={(v) => setSlotDurationMin(Number(v))}>
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[15, 30, 45, 60, 90].map((v) => (
-                          <SelectItem key={v} value={String(v)}>{v} min</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {/* Availability (collapsible preview) */}
+              <Collapsible open={availabilityPreviewOpen} onOpenChange={setAvailabilityPreviewOpen}>
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex flex-1 min-w-0 items-center justify-between gap-2 rounded-md py-0.5 text-left outline-none ring-offset-background hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 min-w-0">
+                          <Clock className="h-3.5 w-3.5 shrink-0" /> Disponibilidade
+                        </span>
+                        {availabilityPreviewOpen ? (
+                          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                      </button>
+                    </CollapsibleTrigger>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 gap-1 text-xs shrink-0"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        openAvailability();
+                      }}
+                    >
+                      <Settings2 className="h-3.5 w-3.5" /> Editar
+                    </Button>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Máx. alunos</Label>
-                    <Input
-                      type="number" min="1" max="20"
-                      value={defaultMaxStudents}
-                      onChange={(e) => setDefaultMaxStudents(Number(e.target.value) || 4)}
-                      className="h-8 text-sm"
-                    />
-                  </div>
+                  <CollapsibleContent className="space-y-1">
+                    {DAY_KEYS.map((day) => {
+                      const sched = availability[day];
+                      const active = sched?.enabled && sched.ranges.length > 0;
+                      return (
+                        <div key={day} className={`text-xs ${active ? "" : "opacity-40"}`}>
+                          <div className="flex items-start gap-1">
+                            <span className="font-medium w-8 shrink-0 pt-0.5">{DAY_LABELS_SHORT[day]}</span>
+                            {active ? (
+                              <div className="flex flex-col gap-0.5">
+                                {sched.ranges.map((r, i) => (
+                                  <span key={i} className="text-primary font-semibold">{r.startTime} – {r.endTime}</span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="italic text-muted-foreground">Indisponível</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </CollapsibleContent>
                 </div>
-                <Button size="sm" variant="outline" className="w-full h-8 gap-1.5 text-xs"
-                  onClick={handleSaveSettings} disabled={isSavingSettings}>
-                  {isSavingSettings && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Guardar definições
-                </Button>
-              </div>
+              </Collapsible>
+
+              {/* Block settings (collapsible) */}
+              <Collapsible open={blockSettingsPreviewOpen} onOpenChange={setBlockSettingsPreviewOpen}>
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 rounded-md py-0.5 text-left outline-none ring-offset-background hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Definições dos blocos
+                      </span>
+                      {blockSettingsPreviewOpen ? (
+                        <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Duração</Label>
+                        <Select value={String(slotDurationMin)} onValueChange={(v) => setSlotDurationMin(Number(v))}>
+                          <SelectTrigger className="h-8 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[15, 30, 45, 60, 90].map((v) => (
+                              <SelectItem key={v} value={String(v)}>{v} min</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Máx. alunos</Label>
+                        <Input
+                          type="number" min="1" max="20"
+                          value={defaultMaxStudents}
+                          onChange={(e) => setDefaultMaxStudents(Number(e.target.value) || 4)}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" className="w-full h-8 gap-1.5 text-xs"
+                      onClick={handleSaveSettings} disabled={isSavingSettings}>
+                      {isSavingSettings && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Guardar definições
+                    </Button>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
             </CardContent>
           </Card>
 
