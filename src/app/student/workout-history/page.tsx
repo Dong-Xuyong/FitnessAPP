@@ -77,13 +77,9 @@ function SessionFeedbackSummary({ session, t }: { session: WorkoutSession; t: (k
   const mr = Number(session.sessionMoodRating);
   const showDifficultyFace = Number.isFinite(dr) && dr >= 1 && dr <= 5;
   const showMoodFace = Number.isFinite(mr) && mr >= 1 && mr <= 5;
-  const bw = Number(session.bodyWeightKg);
-  const bf = Number(session.sessionBodyFatPercent);
-  const hasBodyWeight = Number.isFinite(bw) && bw > 0;
-  const hasBodyFat = Number.isFinite(bf) && bf > 0;
   const hasRatingRow = showDifficultyFace || showMoodFace;
   const hasNotes = !!(session.difficultyNotes?.trim() || session.moodNotes?.trim());
-  if (!hasRatingRow && !hasNotes && !hasBodyWeight && !hasBodyFat) return null;
+  if (!hasRatingRow && !hasNotes) return null;
 
   return (
     <div className="mt-2 text-xs rounded-md bg-muted/50 border border-border/50 px-2.5 py-2 space-y-1.5">
@@ -98,21 +94,6 @@ function SessionFeedbackSummary({ session, t }: { session: WorkoutSession; t: (k
             <span className="text-muted-foreground">
               {t("sessionMoodCoach")}: <span aria-hidden>{MOOD_FACES[mr - 1]}</span> ({mr}/5)
             </span>
-          ) : null}
-        </div>
-      ) : null}
-      {hasBodyWeight || hasBodyFat ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground tabular-nums">
-          {hasBodyWeight ? (
-            <p>
-              {t("sessionBodyWeightCoach")}:{" "}
-              <span className="font-semibold text-foreground/90">{bw} kg</span>
-            </p>
-          ) : null}
-          {hasBodyFat ? (
-            <p>
-              {t("sessionBodyFatCoach")}: <span className="font-semibold text-foreground/90">{bf}%</span>
-            </p>
           ) : null}
         </div>
       ) : null}

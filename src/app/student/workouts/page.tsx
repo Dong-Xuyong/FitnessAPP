@@ -55,6 +55,9 @@ const DAY_KEYS = ["sunday","monday","tuesday","wednesday","thursday","friday","s
 /** Same window as booking: changes within 1 hour of start are not allowed. */
 const SESSION_SIGNUP_CUTOFF_MS = 60 * 60 * 1000;
 
+/** Weekly-assigned plans stay startable for this many days after the end of their week (Mon–Sun). */
+const WEEKLY_PLAN_GRACE_DAYS_AFTER_WEEK = 28;
+
 /**
  * Returns true only when every slot in the array is exactly `dur` minutes
  * after the previous one. Prevents non-adjacent slots (e.g. 09:00 + 12:00)
@@ -139,12 +142,13 @@ function getPlanReferenceDate(plan: WorkoutPlan): string | undefined {
 
 function getPlanDaysUntilExpiry(plan: WorkoutPlan): number {
   if (plan.weekStart) {
-    // Weekly plans should remain active until the end of the assigned week.
+    // Weekly plans: active through end of assigned week, then a grace window so students
+    // can still open them from the calendar for recent past weeks until completed.
     const weekStartDate = new Date(plan.weekStart.substring(0, 10) + "T12:00:00");
     if (isNaN(weekStartDate.getTime())) return 0;
-    const weekEndDate = new Date(weekStartDate);
-    weekEndDate.setDate(weekEndDate.getDate() + 6);
-    return daysUntilDate(toDateStr(weekEndDate));
+    const accessEnd = new Date(weekStartDate);
+    accessEnd.setDate(accessEnd.getDate() + 6 + WEEKLY_PLAN_GRACE_DAYS_AFTER_WEEK);
+    return daysUntilDate(toDateStr(accessEnd));
   }
   return daysUntilDate(plan.assignedAt || plan.createdAt);
 }
@@ -349,13 +353,18 @@ export default function StudentWorkoutsPage() {
     return dates;
   }, [workouts]);
 
-  // Program assigned for the selected week (if any)
   const selectedWeekStart = getWeekStart(selectedDateStr);
-  const selectedWeekProgram = useMemo(() => {
-    return workouts.find((w) => {
-      const planDate = (w.weekStart || w.assignedAt || w.createdAt || "").substring(0, 10);
-      return planDate ? getWeekStart(planDate) === selectedWeekStart : false;
-    }) ?? null;
+
+  /** Plans for the week selected on the calendar (Monday of that week), sorted by reference date. */
+  const weekPlansOrdered = useMemo(() => {
+    return [...workouts]
+      .filter((w) => {
+        const planDate = (w.weekStart || w.assignedAt || w.createdAt || "").substring(0, 10);
+        return planDate ? getWeekStart(planDate) === selectedWeekStart : false;
+      })
+      .sort(
+        (a, b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || "")
+      );
   }, [workouts, selectedWeekStart]);
 
   // ── Register / unregister ─────────────────────────────────────────────────────
@@ -575,13 +584,17 @@ export default function StudentWorkoutsPage() {
           {/* Right: Day schedule */}
           <Card className="lg:col-span-3">
             <CardHeader>
-              {/* Week program banner */}
-              {selectedWeekProgram && (
+              {/* Week selected on calendar — same filter as program list below */}
+              {weekPlansOrdered.length > 0 && (
                 <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 mb-2">
                   <Dumbbell className="h-4 w-4 text-primary shrink-0" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Programa desta semana</p>
-                    <p className="text-sm font-semibold text-primary truncate">{selectedWeekProgram.title}</p>
+                    <p className="text-sm font-semibold text-primary">
+                      {weekPlansOrdered.length === 1
+                        ? weekPlansOrdered[0].title
+                        : `${weekPlansOrdered.length} programas nesta semana`}
+                    </p>
                   </div>
                 </div>
               )}
@@ -774,18 +787,12 @@ export default function StudentWorkoutsPage() {
           </Card>
         </div>
 
-        {/* Assigned workout plans — any active assignment can be started */}
-        {workouts.length > 0 && (() => {
-          const weekPlans = workouts.filter(w => {
-            const planDate = (w.weekStart || w.assignedAt || w.createdAt || "").substring(0, 10);
-            return planDate ? getWeekStart(planDate) === selectedWeekStart : false;
-          });
-          if (weekPlans.length === 0) return null;
-          return (
+        {/* Assigned workout plans for the week selected on the calendar */}
+        {weekPlansOrdered.length > 0 && (
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Programa desta semana</h2>
             <div className="space-y-2">
-              {weekPlans.map(w => {
+              {weekPlansOrdered.map((w) => {
                 const isExpanded = expandedWorkoutId === w.id;
                 const weekDate = w.weekStart
                   ? new Date(w.weekStart + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })
@@ -843,8 +850,7 @@ export default function StudentWorkoutsPage() {
               })}
             </div>
           </div>
-          );
-        })()}
+        )}
 
       </div>
     </StudentNavigation>
