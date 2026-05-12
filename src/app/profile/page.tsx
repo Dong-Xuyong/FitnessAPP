@@ -108,8 +108,11 @@ export default function TrainerProfilePage() {
             <CardContent className="space-y-6 -mt-8 relative z-10">
               <div className="flex flex-col items-center gap-4 mb-6">
                 <div className="relative group">
-                  <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg">
-                    <AvatarImage src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`} />
+                  <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg bg-muted/40">
+                    <AvatarImage
+                      className="object-contain object-center"
+                      src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`}
+                    />
                     <AvatarFallback className="text-xl font-bold">
                       {formData.firstName?.[0] || "C"}
                     </AvatarFallback>

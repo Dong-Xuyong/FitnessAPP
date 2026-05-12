@@ -50,9 +50,12 @@ export default function StudentBillingPage() {
   const sessionDurationMin = billing?.sessionDurationMin as number | undefined;
   const hasPlanInfo = sessionsPerWeek || sessionDurationMin;
 
+  const paymentMethodLabel = (method: string | undefined) =>
+    method === "mbway" ? "MB WAY" : method === "bank_transfer" ? "Bank Transfer" : method || "—";
+
   return (
     <StudentNavigation>
-      <div className="space-y-6">
+      <div className="space-y-6 w-full min-w-0">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("billing")}</h1>
           <p className="text-muted-foreground">{t("viewPaymentStatus")}</p>
@@ -105,49 +108,104 @@ export default function StudentBillingPage() {
           </CardHeader>
           <CardContent>
             {sortedPayments.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("period")}</TableHead>
-                    <TableHead>{t("amount")}</TableHead>
-                    <TableHead>{t("method")}</TableHead>
-                    <TableHead>{t("status")}</TableHead>
-                    <TableHead>{t("datePaid")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+              <>
+                <div className="md:hidden space-y-3">
                   {sortedPayments.map((p: any) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.period || "—"}</TableCell>
-                      <TableCell>€{p.amount || 0}</TableCell>
-                      <TableCell className="capitalize">
-                        {p.method === "mbway" ? "MB WAY" : p.method === "bank_transfer" ? "Bank Transfer" : (p.method || "—")}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
-                          className={
-                            normalizedPaymentPaid(p.status)
-                              ? "bg-green-100 text-green-800 normal-case"
-                              : normalizedPaymentPending(p.status)
-                                ? "bg-yellow-100 text-yellow-800 normal-case"
-                                : ""
-                          }
-                        >
-                          {normalizedPaymentPaid(p.status)
-                            ? t("paid")
-                            : normalizedPaymentPending(p.status)
-                              ? t("pending")
-                              : String(p.status ?? "—")}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}
-                      </TableCell>
-                    </TableRow>
+                    <div
+                      key={p.id}
+                      className="rounded-lg border bg-card/50 p-4 space-y-3 text-sm min-w-0"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2 gap-y-1">
+                        <div className="min-w-0">
+                          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                            {t("period")}
+                          </p>
+                          <p className="font-semibold break-words">{p.period || "—"}</p>
+                        </div>
+                        <p className="text-lg font-bold text-primary shrink-0">€{p.amount || 0}</p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 text-xs sm:text-sm">
+                        <div>
+                          <p className="text-muted-foreground">{t("method")}</p>
+                          <p className="capitalize break-words">{paymentMethodLabel(p.method)}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-muted-foreground">{t("status")}</p>
+                            <Badge
+                              variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
+                              className={
+                                normalizedPaymentPaid(p.status)
+                                  ? "bg-green-100 text-green-800 normal-case mt-1"
+                                  : normalizedPaymentPending(p.status)
+                                    ? "bg-yellow-100 text-yellow-800 normal-case mt-1"
+                                    : "mt-1"
+                              }
+                            >
+                              {normalizedPaymentPaid(p.status)
+                                ? t("paid")
+                                : normalizedPaymentPending(p.status)
+                                  ? t("pending")
+                                  : String(p.status ?? "—")}
+                            </Badge>
+                          </div>
+                          <div className="text-right min-w-0">
+                            <p className="text-muted-foreground">{t("datePaid")}</p>
+                            <p className="font-medium">
+                              {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+                <div className="hidden md:block w-full min-w-0 overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t("period")}</TableHead>
+                        <TableHead>{t("amount")}</TableHead>
+                        <TableHead>{t("method")}</TableHead>
+                        <TableHead>{t("status")}</TableHead>
+                        <TableHead>{t("datePaid")}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sortedPayments.map((p: any) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-medium">{p.period || "—"}</TableCell>
+                          <TableCell>€{p.amount || 0}</TableCell>
+                          <TableCell className="capitalize">
+                            {paymentMethodLabel(p.method)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
+                              className={
+                                normalizedPaymentPaid(p.status)
+                                  ? "bg-green-100 text-green-800 normal-case"
+                                  : normalizedPaymentPending(p.status)
+                                    ? "bg-yellow-100 text-yellow-800 normal-case"
+                                    : ""
+                              }
+                            >
+                              {normalizedPaymentPaid(p.status)
+                                ? t("paid")
+                                : normalizedPaymentPending(p.status)
+                                  ? t("pending")
+                                  : String(p.status ?? "—")}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <Banknote className="h-8 w-8 mx-auto mb-2 opacity-20" />

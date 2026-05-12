@@ -392,12 +392,12 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       {/* Payment History */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <CardTitle>{t("paymentHistory")}</CardTitle>
               <CardDescription>{t("recordPayments")}</CardDescription>
             </div>
-            <Button size="sm" className="gap-1" onClick={() => {
+            <Button size="sm" className="gap-1 shrink-0 w-full sm:w-auto" onClick={() => {
               if (!showAddPayment) {
                 const billingAmount = monthlyRate || "";
                 setNewPayment({
@@ -471,7 +471,7 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
           {sortedPayments.length > 0 ? (
             <div className="space-y-2">
               {sortedPayments.map((p: any) => (
-                <div key={p.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div key={p.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 border rounded-lg min-w-0">
                   {editingPaymentId === p.id ? (
                     <div className="w-full space-y-3">
                       <div className="grid sm:grid-cols-2 gap-3">
@@ -535,17 +535,17 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                     </div>
                   ) : (
                     <>
-                      <div className="flex items-center gap-3">
-                        <Banknote className="h-4 w-4 text-primary shrink-0" />
-                        <div>
-                          <p className="text-sm font-medium">{p.period}</p>
-                          <p className="text-xs text-muted-foreground capitalize">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        <Banknote className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium break-words">{p.period}</p>
+                          <p className="text-xs text-muted-foreground capitalize break-words">
                             {p.method === "mbway" ? t("mbway") : p.method === "bank_transfer" ? t("bankTransfer") : (p.method || "—")}
                             {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString()}` : ""}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2 justify-end sm:shrink-0">
                         <span className="text-sm font-bold">€{p.amount}</span>
                         <Badge
                           variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
@@ -1493,20 +1493,20 @@ export default function StudentDetailPage({ id }: { id: string }) {
         )}
 
         <Tabs value={studentDetailTab} onValueChange={handleStudentDetailTabChange} className="space-y-6">
-          <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1">
-            <TabsTrigger value="management" className="text-xs sm:text-sm">
+          <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1 p-1">
+            <TabsTrigger value="management" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
               {t("coachingManagement")}
             </TabsTrigger>
-            <TabsTrigger value="billing" className="text-xs sm:text-sm">
+            <TabsTrigger value="billing" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
               {t("billing")}
             </TabsTrigger>
-            <TabsTrigger value="workoutHistory" className="text-xs sm:text-sm">
+            <TabsTrigger value="workoutHistory" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
               {t("workoutHistory")}
             </TabsTrigger>
-            <TabsTrigger value="milestones" className="text-xs sm:text-sm">
+            <TabsTrigger value="milestones" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
               {t("milestones")}
             </TabsTrigger>
-            <TabsTrigger value="progress" className="text-xs sm:text-sm">
+            <TabsTrigger value="progress" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
               {t("progress")}
             </TabsTrigger>
           </TabsList>

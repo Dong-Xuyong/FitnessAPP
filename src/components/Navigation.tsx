@@ -357,7 +357,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         </Sheet>
 
         {/* Main Content */}
-        <div className={cn("flex-1 flex flex-col transition-all duration-300 ease-in-out", mainMargin)}>
+        <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", mainMargin)}>
           {/* Header */}
           <header className="h-16 border-b bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-4 md:px-6">
             <div className="flex items-center gap-3">

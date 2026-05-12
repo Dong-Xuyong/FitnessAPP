@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { ProfilePhotoCropDialog } from "@/components/ProfilePhotoCropDialog";
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,11 +29,14 @@ export default function StudentProfilePage() {
   const { toast } = useToast();
   const { t } = useI18n();
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const cropObjectUrlRef = useRef<string | null>(null);
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [trainerId, setTrainerId] = useState<string | null>(null);
+  const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -117,12 +121,60 @@ export default function StudentProfilePage() {
     };
   }, [db, user?.uid]);
 
-  const handlePhotoFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const clearCropObjectUrl = useCallback(() => {
+    if (cropObjectUrlRef.current) {
+      URL.revokeObjectURL(cropObjectUrlRef.current);
+      cropObjectUrlRef.current = null;
+    }
+    setCropImageSrc(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (cropObjectUrlRef.current) {
+        URL.revokeObjectURL(cropObjectUrlRef.current);
+        cropObjectUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  const commitProfilePhotoFile = useCallback(
+    async (file: File) => {
+      if (!user?.uid || !db) throw new Error("NO_USER");
+      const url = await uploadStudentProfilePhoto(firebaseApp, user.uid, file);
+      setFormData((prev) => ({ ...prev, photoUrl: url }));
+
+      const globalRef = doc(db, "students", user.uid);
+      await setDoc(globalRef, { photoUrl: url }, { merge: true });
+      if (trainerId) {
+        await setDoc(doc(db, "personalTrainers", trainerId, "students", user.uid), { photoUrl: url }, {
+          merge: true,
+        });
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(STUDENT_PROFILE_PHOTO_UPDATED));
+      }
+    },
+    [firebaseApp, user, db, trainerId]
+  );
+
+  const handlePhotoDialogOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        clearCropObjectUrl();
+      }
+      setPhotoDialogOpen(open);
+    },
+    [clearCropObjectUrl]
+  );
+
+  const handleCropFileChosen = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       const input = e.currentTarget;
       const file = input.files?.[0];
       input.value = "";
-      if (!file || !user?.uid || !db) return;
+      if (!file) return;
 
       if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
         toast({
@@ -133,27 +185,27 @@ export default function StudentProfilePage() {
         return;
       }
 
+      if (cropObjectUrlRef.current) {
+        URL.revokeObjectURL(cropObjectUrlRef.current);
+      }
+      const url = URL.createObjectURL(file);
+      cropObjectUrlRef.current = url;
+      setCropImageSrc(url);
+    },
+    [toast, t]
+  );
+
+  const handleCroppedPhotoConfirm = useCallback(
+    async (file: File) => {
       setIsUploadingPhoto(true);
       try {
-        const url = await uploadStudentProfilePhoto(firebaseApp, user.uid, file);
-        setFormData((prev) => ({ ...prev, photoUrl: url }));
-
-        const globalRef = doc(db, "students", user.uid);
-        await setDoc(globalRef, { photoUrl: url }, { merge: true });
-        if (trainerId) {
-          await setDoc(doc(db, "personalTrainers", trainerId, "students", user.uid), { photoUrl: url }, {
-            merge: true,
-          });
-        }
-
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent(STUDENT_PROFILE_PHOTO_UPDATED));
-        }
-
+        await commitProfilePhotoFile(file);
         toast({
           title: t("profileUpdated"),
           description: t("profilePhotoUploaded"),
         });
+        clearCropObjectUrl();
+        setPhotoDialogOpen(false);
       } catch (err) {
         console.error("Profile photo upload failed", err);
         toast({
@@ -165,7 +217,7 @@ export default function StudentProfilePage() {
         setIsUploadingPhoto(false);
       }
     },
-    [firebaseApp, user, db, trainerId, toast, t]
+    [commitProfilePhotoFile, toast, t, clearCropObjectUrl]
   );
 
   const handleSave = async (e: React.FormEvent) => {
@@ -274,18 +326,19 @@ export default function StudentProfilePage() {
                   className="sr-only"
                   aria-hidden
                   tabIndex={-1}
-                  onChange={handlePhotoFileChange}
+                  onChange={handleCropFileChosen}
                 />
                 <button
                   type="button"
                   className="relative group rounded-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isUploadingPhoto}
                   aria-label={t("uploadProfilePhoto")}
-                  onClick={() => photoInputRef.current?.click()}
+                  onClick={() => setPhotoDialogOpen(true)}
                 >
-                  <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg">
+                  <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg bg-muted/40">
                     <AvatarImage
                       key={formData.photoUrl || "no-photo"}
+                      className="object-contain object-center"
                       src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`}
                     />
                     <AvatarFallback className="text-xl font-bold">{formData.name?.[0] || "U"}</AvatarFallback>
@@ -421,6 +474,15 @@ export default function StudentProfilePage() {
             </CardFooter>
           </Card>
         </form>
+
+        <ProfilePhotoCropDialog
+          open={photoDialogOpen}
+          onOpenChange={handlePhotoDialogOpenChange}
+          imageSrc={cropImageSrc}
+          onPickFile={() => photoInputRef.current?.click()}
+          isSaving={isUploadingPhoto}
+          onConfirm={handleCroppedPhotoConfirm}
+        />
       </div>
     </StudentNavigation>
   );
