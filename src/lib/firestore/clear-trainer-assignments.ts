@@ -3,6 +3,49 @@ import type { Firestore } from "firebase/firestore";
 
 const MAX_BATCH_OPS = 450;
 
+/**
+ * Removes denormalized `workoutPlanId` / `workoutTitle` from each student on every session slot.
+ * Keeps bookings (names, attendance, session spans). Call after deleting assigned plans so UI matches Firestore.
+ */
+export async function stripAssignedWorkoutFromSessionSlots(db: Firestore, trainerId: string): Promise<number> {
+  const snap = await getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots"));
+  let batch = writeBatch(db);
+  let ops = 0;
+  let strippedDocCount = 0;
+
+  const commit = async () => {
+    if (ops === 0) return;
+    await batch.commit();
+    batch = writeBatch(db);
+    ops = 0;
+  };
+
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const raw = data.students;
+    if (!Array.isArray(raw) || raw.length === 0) continue;
+
+    let changed = false;
+    const nextStudents = raw.map((st: unknown) => {
+      const row = st as Record<string, unknown>;
+      const hasPlan = String(row.workoutPlanId || "").trim() !== "";
+      const hasTitle = String(row.workoutTitle || "").trim() !== "";
+      if (!hasPlan && !hasTitle) return row;
+      changed = true;
+      const { workoutPlanId: _pid, workoutTitle: _title, ...rest } = row;
+      return rest;
+    });
+
+    if (!changed) continue;
+    batch.update(d.ref, { students: nextStudents });
+    ops++;
+    strippedDocCount++;
+    if (ops >= MAX_BATCH_OPS) await commit();
+  }
+  await commit();
+  return strippedDocCount;
+}
+
 export type RosterStudentLike = {
   id: string;
   userId?: string;
@@ -15,14 +58,18 @@ export type RosterStudentLike = {
  *    for each roster student (all candidate path ids: roster id, auth uid, portal id from email).
  * 2. Every document in `personalTrainers/{trainerId}/weekProgramAssignments` (assignment calendar rows).
  *
- * Does not modify `sessionSlots` (calendar registrations / bookings stay as-is).
+ * Also clears denormalized plan fields on `sessionSlots` student rows (see `stripAssignedWorkoutFromSessionSlots`).
  */
 export async function clearAllTrainerWorkoutPlans(
   db: Firestore,
   trainerId: string,
   rosterStudents: RosterStudentLike[] | null | undefined,
   portalStudentIdByEmail: Map<string, string>
-): Promise<{ deletedPlanCount: number; deletedWeekAssignmentCount: number }> {
+): Promise<{
+  deletedPlanCount: number;
+  deletedWeekAssignmentCount: number;
+  sessionSlotsStrippedCount: number;
+}> {
   let deletedPlanCount = 0;
   let deletedWeekAssignmentCount = 0;
   let batch = writeBatch(db);
@@ -70,5 +117,7 @@ export async function clearAllTrainerWorkoutPlans(
   }
   await commitBatch();
 
-  return { deletedPlanCount, deletedWeekAssignmentCount };
+  const sessionSlotsStrippedCount = await stripAssignedWorkoutFromSessionSlots(db, trainerId);
+
+  return { deletedPlanCount, deletedWeekAssignmentCount, sessionSlotsStrippedCount };
 }

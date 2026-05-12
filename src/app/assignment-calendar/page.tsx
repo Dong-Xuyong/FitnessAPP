@@ -876,12 +876,20 @@ export default function AssignmentCalendarPage() {
       });
       setBulkClearOpen(false);
       setBulkClearConfirm("");
-      const [progSnap, waSnap] = await Promise.all([
+      const [progSnap, waSnap, slotsSnap] = await Promise.all([
         getDocs(collection(db, "personalTrainers", user.uid, "personalTrainingPrograms")),
         getDocs(collection(db, "personalTrainers", user.uid, "weekProgramAssignments")),
+        getDocs(collection(db, "personalTrainers", user.uid, "sessionSlots")),
       ]);
       setPrograms(progSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setWeekAssignments(waSnap.docs.map((d) => ({ id: d.id, ...d.data() } as WeekAssignment)));
+      const newSlots = slotsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as SessionSlot));
+      setSessionSlots(newSlots);
+      setManagingSlot((prev) => {
+        if (!prev?.slot) return prev;
+        const updated = newSlots.find((s) => s.id === prev.slot!.id);
+        return updated ? { ...prev, slot: updated } : prev;
+      });
       setPlanMetaRefreshTick((n) => n + 1);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : t("bulkClearPlansFailed");
