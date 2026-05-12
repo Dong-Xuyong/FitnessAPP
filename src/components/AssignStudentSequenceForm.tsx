@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Firestore } from "firebase/firestore";
 import { doc, updateDoc } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DialogFooter } from "@/components/ui/dialog";
@@ -14,6 +13,8 @@ import type { TrainingProgramDocument } from "@/lib/types";
 import { writeStudentSequencePlans, sequenceStepLabel } from "@/lib/workout-plan-sequence";
 import { ChevronDown, ChevronUp, Loader2, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const MAX_SEQUENCE_REPEAT_CYCLES = 5;
 
 export type AssignableProgramRow = TrainingProgramDocument & { id: string };
 
@@ -81,6 +82,22 @@ export function AssignStudentSequenceForm({
     else setInternalRepeatCycles(n);
   };
 
+  const repeatCyclesClamped = Math.min(
+    MAX_SEQUENCE_REPEAT_CYCLES,
+    Math.max(1, Math.floor(Number(repeatCycles)) || 1)
+  );
+
+  useEffect(() => {
+    if (repeatCycles > MAX_SEQUENCE_REPEAT_CYCLES) {
+      setRepeatCycles(MAX_SEQUENCE_REPEAT_CYCLES);
+    }
+  }, [repeatCycles]);
+
+  const repeatCycleOptions = useMemo(
+    () => Array.from({ length: MAX_SEQUENCE_REPEAT_CYCLES }, (_, i) => i + 1),
+    []
+  );
+
   const addProgram = () => {
     if (!addPick) return;
     setOrderedProgramIds([...orderedProgramIds, addPick]);
@@ -114,7 +131,7 @@ export function AssignStudentSequenceForm({
       toast({ variant: "destructive", title: t("sequenceAssignNeedTwo") });
       return;
     }
-    const cycles = Math.min(52, Math.max(1, Math.floor(Number(repeatCycles)) || 1));
+    const cycles = Math.min(MAX_SEQUENCE_REPEAT_CYCLES, Math.max(1, Math.floor(Number(repeatCycles)) || 1));
     try {
       await onSaveTemplate({ orderedIds: orderedProgramIds, cycles });
     } catch {
@@ -131,7 +148,7 @@ export function AssignStudentSequenceForm({
       toast({ variant: "destructive", title: t("sequenceAssignNeedTwo") });
       return;
     }
-    const cycles = Math.min(52, Math.max(1, Math.floor(Number(repeatCycles)) || 1));
+    const cycles = Math.min(MAX_SEQUENCE_REPEAT_CYCLES, Math.max(1, Math.floor(Number(repeatCycles)) || 1));
     const programsInOrder = orderedProgramIds
       .map((pid) => assignablePrograms.find((p) => p.id === pid))
       .filter(Boolean) as TrainingProgramDocument[];
@@ -164,18 +181,25 @@ export function AssignStudentSequenceForm({
     <div className={cn("space-y-4", variant === "embedded" ? "py-1" : "py-2")}>
       <div className="space-y-2">
         <Label htmlFor="assign-seq-repeat">{t("sequenceRepeatCycles")}</Label>
-        <Input
-          id="assign-seq-repeat"
-          type="number"
-          min={1}
-          max={52}
-          value={repeatCycles}
-          onChange={(e) => {
-            const n = parseInt(e.target.value, 10);
-            setRepeatCycles(Number.isFinite(n) ? Math.min(52, Math.max(1, n)) : 1);
+        <Select
+          value={String(repeatCyclesClamped)}
+          onValueChange={(v) => {
+            const n = parseInt(v, 10);
+            setRepeatCycles(Number.isFinite(n) ? Math.min(MAX_SEQUENCE_REPEAT_CYCLES, Math.max(1, n)) : 1);
           }}
           disabled={disabled || isAssigning || isSavingTemplate}
-        />
+        >
+          <SelectTrigger id="assign-seq-repeat" className="h-10 w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {repeatCycleOptions.map((n) => (
+              <SelectItem key={n} value={String(n)}>
+                {n}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <div className="space-y-2">
         <Label>{t("sequenceProgramsInOrder")}</Label>

@@ -49,6 +49,7 @@ import {
   type EditWorkoutSessionDialogSession,
 } from "@/components/EditWorkoutSessionDialog";
 import { clearAllTrainerWorkoutPlans } from "@/lib/firestore/clear-trainer-assignments";
+import { cn } from "@/lib/utils";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -92,9 +93,84 @@ type DayBookedStudent = {
   unlinkedSlotTitle?: string;
   firestoreStudentId: string;
   times: string[];
+  /** Session duration for the booked slot (used for UI hints like 30/60 min). */
+  sessionDurationMin?: number;
+  /** Aggregated coach attendance across same-day slot rows for this student. */
+  sessionAttendance?: SessionAttendanceStatus;
 };
 
 type CalendarRosterBucket = "noPlan" | "active" | "completed";
+
+function mergeDayBookedAttendance(
+  existing: SessionAttendanceStatus | undefined,
+  incoming: SessionAttendanceStatus | undefined
+): SessionAttendanceStatus {
+  const a = normalizeAttendance(existing);
+  const b = normalizeAttendance(incoming);
+  if (a === "absent" || b === "absent") return "absent";
+  if (a === "pending" || b === "pending") return "pending";
+  return "present";
+}
+
+function attendanceAvatarClassName(att: SessionAttendanceStatus): string {
+  switch (att) {
+    case "present":
+      return cn(
+        "h-7 w-7 border-4 border-emerald-700 dark:border-emerald-400",
+        "ring-[3px] ring-emerald-600 dark:ring-emerald-500 ring-offset-2 ring-offset-background"
+      );
+    case "absent":
+      return cn(
+        "h-7 w-7 border-4 border-destructive",
+        "ring-[3px] ring-destructive ring-offset-2 ring-offset-background"
+      );
+    default:
+      return cn(
+        "h-7 w-7 border-4 border-amber-600 dark:border-amber-500",
+        "ring-[3px] ring-amber-500 dark:ring-amber-400 ring-offset-2 ring-offset-background"
+      );
+  }
+}
+
+function attendanceBadgeProps(
+  att: SessionAttendanceStatus,
+  compact: boolean
+): { variant: "destructive" | "outline"; className: string } {
+  const size = compact ? "text-[9px] h-4 px-1.5" : "text-[10px] h-5 px-2";
+  if (att === "present") {
+    return {
+      variant: "outline",
+      className: cn(
+        "border-2 border-emerald-900/50 dark:border-emerald-200/70 bg-emerald-600 text-white shadow-none hover:bg-emerald-700 dark:hover:bg-emerald-500",
+        size
+      ),
+    };
+  }
+  if (att === "absent") {
+    return {
+      variant: "destructive",
+      className: cn("border-2 border-destructive-foreground/30 shadow-none hover:bg-destructive/90", size),
+    };
+  }
+  return {
+    variant: "outline",
+    className: cn(
+      "border-2 border-amber-800 dark:border-amber-300 bg-amber-500 text-amber-950 shadow-none hover:bg-amber-600 dark:bg-amber-600 dark:text-white dark:hover:bg-amber-500",
+      size
+    ),
+  };
+}
+
+function attendanceRosterRowAccentClassName(att: SessionAttendanceStatus): string {
+  switch (normalizeAttendance(att)) {
+    case "present":
+      return "border-l-4 border-l-emerald-600 dark:border-l-emerald-500";
+    case "absent":
+      return "border-l-4 border-l-destructive";
+    default:
+      return "border-l-4 border-l-amber-500 dark:border-l-amber-400";
+  }
+}
 
 type RosterPlanDetailEntry =
   | { status: "loading" }
@@ -164,6 +240,11 @@ type CalendarDayRosterRowProps = {
   rosterStudentsSorted: Array<{ id: string } & Record<string, unknown>>;
   unlockedProgramByFirestoreId: Record<string, { id: string; title: string }>;
   rosterPlanMetaByKey: Record<string, { title: string; isCompleted: boolean }>;
+  sessionDayInferredPlanIdByFid: Record<string, string>;
+  /** `${fid}__${expandPlanId}` → same-day session title (session-log picker; active fallbacks). */
+  sessionRosterSessionTitleByExpandKey: Record<string, string>;
+  /** `fid` → newest same-day session `workoutTitle` (by `completedAt`); completed roster subtitle. */
+  sessionLatestSameDayWorkoutTitleByFid: Record<string, string>;
   weekProgramSummaryByStudentId: Map<string, string>;
   expandedRosterPlanKey: string | null;
   setExpandedRosterPlanKey: Dispatch<SetStateAction<string | null>>;
@@ -182,6 +263,9 @@ function CalendarDayRosterRow({
   rosterStudentsSorted,
   unlockedProgramByFirestoreId,
   rosterPlanMetaByKey,
+  sessionDayInferredPlanIdByFid,
+  sessionRosterSessionTitleByExpandKey,
+  sessionLatestSameDayWorkoutTitleByFid,
   weekProgramSummaryByStudentId,
   expandedRosterPlanKey,
   setExpandedRosterPlanKey,
@@ -191,12 +275,25 @@ function CalendarDayRosterRow({
   t,
 }: CalendarDayRosterRowProps) {
   const fid = row.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, row.studentId);
+  const hasDayLatestWorkoutTitle =
+    bucket === "completed" &&
+    Object.prototype.hasOwnProperty.call(sessionLatestSameDayWorkoutTitleByFid, fid);
+  const completedDayLatestTitle =
+    hasDayLatestWorkoutTitle
+      ? String(sessionLatestSameDayWorkoutTitleByFid[fid] ?? "").trim() || t("calendarRosterUntitledSession")
+      : "";
   const slotPlanId = String(row.workoutPlanId || "").trim();
   const unlockedPick =
     unlockedProgramByFirestoreId[fid] ||
     (fid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
   const unlockedId = String(unlockedPick?.id || "").trim();
-  const displayPlanId = slotPlanId || unlockedId;
+  const inferredIdRaw =
+    bucket === "completed" ? String(sessionDayInferredPlanIdByFid[fid] || "").trim() : "";
+  const inferredMetaKey = inferredIdRaw ? `${fid}__${inferredIdRaw}` : "";
+  const hasInferredMeta =
+    !!inferredMetaKey && Object.prototype.hasOwnProperty.call(rosterPlanMetaByKey, inferredMetaKey);
+  const inferredMeta = inferredMetaKey ? rosterPlanMetaByKey[inferredMetaKey] : undefined;
+  const displayPlanId = slotPlanId || unlockedId || inferredIdRaw;
   const unlockedTitle = unlockedPick?.title || "";
   const weekProgramLine =
     weekProgramSummaryByStudentId.get(fid) ||
@@ -215,22 +312,88 @@ function CalendarDayRosterRow({
 
   const expandPlanId =
     bucket === "completed" && slotPlanId && slotMeta?.isCompleted ? slotPlanId : displayPlanId;
+  const rosterExpandKey = expandPlanId ? `${fid}__${expandPlanId}` : "";
+  const prefetchedSessionTitle =
+    rosterExpandKey ? String(sessionRosterSessionTitleByExpandKey[rosterExpandKey] || "").trim() : "";
+  const sessionLogForSubtitle = rosterExpandKey ? rosterSessionLogByKey[rosterExpandKey] : undefined;
+  const sessionLogTitleForSubtitle =
+    sessionLogForSubtitle?.status === "ready"
+      ? String(sessionLogForSubtitle.title || "").trim() || t("calendarRosterUntitledSession")
+      : "";
 
   let programLabel: string;
   if (!displayPlanId) {
-    programLabel = fallbackLine || t("calendarDayNoProgramLinked");
+    if (bucket === "completed") {
+      if (completedDayLatestTitle) {
+        programLabel = completedDayLatestTitle;
+      } else if (!slotPlanId && !unlockedId) {
+        programLabel = t("calendarRosterCompletedDayNoPlanId");
+      } else {
+        programLabel = fallbackLine || t("calendarDayNoProgramLinked");
+      }
+    } else {
+      programLabel = fallbackLine || t("calendarDayNoProgramLinked");
+    }
   } else if (slotPlanId) {
     if (!hasSlotMeta) {
       programLabel = t("calendarDayPlanResolving");
     } else {
       const slotTitle = String(slotMeta?.title || "").trim();
-      programLabel = slotTitle || t("calendarRosterSlotPlanNotOnProfile");
+      if (bucket === "completed") {
+        if (completedDayLatestTitle) {
+          programLabel = completedDayLatestTitle;
+        } else if (sessionLogTitleForSubtitle) {
+          programLabel = sessionLogTitleForSubtitle;
+        } else if (prefetchedSessionTitle) {
+          programLabel = prefetchedSessionTitle;
+        } else if (slotTitle) {
+          programLabel = slotTitle;
+        } else {
+          programLabel = t("calendarRosterSlotPlanNotOnProfile");
+        }
+      } else if (slotTitle) {
+        programLabel = slotTitle;
+      } else if (sessionLogTitleForSubtitle) {
+        programLabel = sessionLogTitleForSubtitle;
+      } else if (prefetchedSessionTitle) {
+        programLabel = prefetchedSessionTitle;
+      } else {
+        programLabel = t("calendarRosterSlotPlanNotOnProfile");
+      }
     }
-  } else if (!hasUnlockedMeta) {
-    programLabel = fallbackLine || t("calendarDayPlanResolving");
+  } else if (unlockedId) {
+    if (!hasUnlockedMeta) {
+      programLabel = fallbackLine || t("calendarDayPlanResolving");
+    } else {
+      const unlockedResolved = String(unlockedMeta?.title || "").trim();
+      if (bucket === "completed" && completedDayLatestTitle) {
+        programLabel = completedDayLatestTitle;
+      } else {
+        programLabel = unlockedResolved || fallbackLine || t("calendarDayNoProgramLinked");
+      }
+    }
   } else {
-    const unlockedResolved = String(unlockedMeta?.title || "").trim();
-    programLabel = unlockedResolved || fallbackLine || t("calendarDayNoProgramLinked");
+    if (!hasInferredMeta) {
+      programLabel = fallbackLine || t("calendarDayPlanResolving");
+    } else {
+      const inferredResolved = String(inferredMeta?.title || "").trim();
+      if (bucket === "completed") {
+        programLabel =
+          completedDayLatestTitle ||
+          sessionLogTitleForSubtitle ||
+          prefetchedSessionTitle ||
+          inferredResolved ||
+          fallbackLine ||
+          t("calendarRosterSlotPlanNotOnProfile");
+      } else {
+        programLabel =
+          inferredResolved ||
+          sessionLogTitleForSubtitle ||
+          prefetchedSessionTitle ||
+          fallbackLine ||
+          t("calendarRosterSlotPlanNotOnProfile");
+      }
+    }
   }
 
   const nextProgramLine =
@@ -253,18 +416,29 @@ function CalendarDayRosterRow({
     ? hasSlotMeta
       ? String(slotMeta?.title || "").trim()
       : ""
-    : hasUnlockedMeta
-      ? String(unlockedMeta?.title || "").trim()
-      : "";
+    : unlockedId
+      ? hasUnlockedMeta
+        ? String(unlockedMeta?.title || "").trim()
+        : ""
+      : inferredIdRaw
+        ? hasInferredMeta
+          ? String(inferredMeta?.title || "").trim()
+          : ""
+        : "";
   const hasProgramContext =
     Boolean(displayPlanId) &&
     (Boolean(resolvedTitleForContext) ||
       Boolean(fallbackLine) ||
       (Boolean(slotPlanId) && !hasSlotMeta) ||
-      (Boolean(unlockedId) && !hasUnlockedMeta && !slotPlanId));
+      (Boolean(unlockedId) && !hasUnlockedMeta && !slotPlanId) ||
+      (Boolean(inferredIdRaw) && !hasInferredMeta && !slotPlanId && !unlockedId));
   const defaultProfileHref =
     hasProgramContext &&
-    (resolvedTitleForContext || fallbackLine || (Boolean(slotPlanId) && !hasSlotMeta) || (Boolean(unlockedId) && !hasUnlockedMeta && !slotPlanId))
+    (resolvedTitleForContext ||
+      fallbackLine ||
+      (Boolean(slotPlanId) && !hasSlotMeta) ||
+      (Boolean(unlockedId) && !hasUnlockedMeta && !slotPlanId) ||
+      (Boolean(inferredIdRaw) && !hasInferredMeta && !slotPlanId && !unlockedId))
       ? `/students/${studentProfileId}`
       : `/students/${studentProfileId}?tab=management`;
   const profileHref =
@@ -274,16 +448,21 @@ function CalendarDayRosterRow({
   const avatarSrc =
     (rosterMatch?.photoUrl as string) ||
     `https://picsum.photos/seed/${encodeURIComponent(rosterMatch?.id ?? row.studentId)}/100/100`;
-  const rosterExpandKey = expandPlanId ? `${fid}__${expandPlanId}` : "";
   const isRosterExpanded = !!rosterExpandKey && expandedRosterPlanKey === rosterExpandKey;
   const rosterDetail = rosterExpandKey ? rosterPlanDetailByKey[rosterExpandKey] : undefined;
-  const sessionLog = rosterExpandKey ? rosterSessionLogByKey[rosterExpandKey] : undefined;
+  const sessionLog = sessionLogForSubtitle;
 
   const coachSessionHrefForPlan = (plan: string) => {
     const pid = String(plan || "").trim();
     if (!pid) return "";
     return `/students/${fid}/workouts/${encodeURIComponent(pid)}/coach-session`;
   };
+
+  const durMin = row.sessionDurationMin;
+  const sessionDurationSuffix =
+    durMin != null && Number.isFinite(durMin) && durMin > 0
+      ? ` ${t("calendarRosterSessionDurationSuffix").replace("{minutes}", String(Math.round(durMin)))}`
+      : "";
 
   return (
     <Collapsible
@@ -292,7 +471,10 @@ function CalendarDayRosterRow({
         if (!expandPlanId || !rosterExpandKey) return;
         setExpandedRosterPlanKey(next ? rosterExpandKey : null);
       }}
-      className="rounded-lg border bg-background transition-colors hover:bg-muted/40 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ring-offset-background"
+      className={cn(
+        "rounded-lg border bg-background transition-colors hover:bg-muted/40 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ring-offset-background",
+        attendanceRosterRowAccentClassName(normalizeAttendance(row.sessionAttendance))
+      )}
     >
       <div className="flex items-start gap-2 px-3 py-2.5">
         <Link
@@ -317,6 +499,7 @@ function CalendarDayRosterRow({
             {row.times.length > 0 ? (
               <p className="text-xs text-muted-foreground/80 mt-0.5 tabular-nums">
                 {t("calendarDayBookedTimes")}: {row.times.join(", ")}
+                {sessionDurationSuffix}
               </p>
             ) : null}
           </div>
@@ -383,11 +566,6 @@ function CalendarDayRosterRow({
                       — {sessionLog.title.trim() ? sessionLog.title : t("calendarRosterUntitledSession")}
                     </span>
                   </p>
-                  {sessionLog.sessionWorkoutPlanId && sessionLog.sessionWorkoutPlanId !== expandPlanId ? (
-                    <p className="text-xs text-amber-800 dark:text-amber-500/95 leading-snug">
-                      {t("calendarRosterSessionDifferentPlanHint")}
-                    </p>
-                  ) : null}
                 </div>
                 {onRequestEditRosterSession ? (
                   <Button
@@ -598,6 +776,26 @@ function addMin(time: string, minutes: number): string {
   return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 }
 
+function rosterTimeLabelToMinutes(label: string): number | null {
+  const s = String(label || "").trim();
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/** Earliest booked slot start in `row.times` for roster ordering (minutes since midnight). */
+function earliestRosterSlotMinutes(row: DayBookedStudent): number {
+  let best = Number.MAX_SAFE_INTEGER;
+  for (const t of row.times) {
+    const mm = rosterTimeLabelToMinutes(t);
+    if (mm != null && mm < best) best = mm;
+  }
+  return best;
+}
+
 function slotDocId(date: string, time: string): string {
   return `${date}_${time.replace(":", "")}`;
 }
@@ -800,6 +998,16 @@ export default function AssignmentCalendarPage() {
   );
   /** `fid__slotPlanId` → same-day completed session with `workoutPlanId` matching the slot plan (stale plan meta). */
   const [sessionCompletedSlotPlanByKey, setSessionCompletedSlotPlanByKey] = useState<Record<string, boolean>>({});
+  /** `fid` → `workoutPlanId` from latest same-day completed session (roster expand when booking has no plan). */
+  const [sessionDayInferredPlanIdByFid, setSessionDayInferredPlanIdByFid] = useState<Record<string, string>>({});
+  /** `${fid}__${expandPlanId}` → same-day session title (matches session-log picker). */
+  const [sessionRosterSessionTitleByExpandKey, setSessionRosterSessionTitleByExpandKey] = useState<
+    Record<string, string>
+  >({});
+  /** Newest same-day `workoutSessions.workoutTitle` per `fid` (by `completedAt`); completed roster subtitle. */
+  const [sessionLatestSameDayWorkoutTitleByFid, setSessionLatestSameDayWorkoutTitleByFid] = useState<
+    Record<string, string>
+  >({});
   /** Primary unlocked active plan `{ id, title }` per Firestore `students/{id}` id (roster when slot has no plan). */
   const [unlockedProgramByFirestoreId, setUnlockedProgramByFirestoreId] = useState<
     Record<string, { id: string; title: string }>
@@ -1064,6 +1272,7 @@ export default function AssignmentCalendarPage() {
         const timeLabel = String(st.sessionStart || slot.startTime || "");
         const title = String(st.workoutTitle || "").trim();
         const pid = String(st.workoutPlanId || "").trim();
+        const durationMin = st.sessionDurationMin ?? slotDurationMin;
         const firestoreStudentId = resolveFirestoreStudentId(rosterStudentsSorted, st.studentId);
         const prev = map.get(st.studentId);
         if (!prev) {
@@ -1075,6 +1284,8 @@ export default function AssignmentCalendarPage() {
             unlinkedSlotTitle: !pid && title ? title : undefined,
             firestoreStudentId,
             times: timeLabel ? [timeLabel] : [],
+            sessionDurationMin: durationMin,
+            sessionAttendance: normalizeAttendance(st.sessionAttendance),
           });
         } else {
           if (timeLabel && !prev.times.includes(timeLabel)) prev.times.push(timeLabel);
@@ -1089,12 +1300,18 @@ export default function AssignmentCalendarPage() {
           const nm = String(st.studentName || "").trim();
           if (nm) prev.studentName = nm;
           prev.firestoreStudentId = resolveFirestoreStudentId(rosterStudentsSorted, st.studentId);
+          if (prev.sessionDurationMin == null) prev.sessionDurationMin = durationMin;
+          else prev.sessionDurationMin = Math.max(prev.sessionDurationMin, durationMin);
+          prev.sessionAttendance = mergeDayBookedAttendance(prev.sessionAttendance, st.sessionAttendance);
         }
       }
     }
-    return [...map.values()].sort((a, b) =>
-      a.studentName.localeCompare(b.studentName, undefined, { sensitivity: "base" })
-    );
+    return [...map.values()].sort((a, b) => {
+      const ta = earliestRosterSlotMinutes(a);
+      const tb = earliestRosterSlotMinutes(b);
+      if (ta !== tb) return ta - tb;
+      return a.studentName.localeCompare(b.studentName, undefined, { sensitivity: "base" });
+    });
   }, [sessionSlots, selectedDateStr, isFilterActive, filterStudentId, rosterStudentsSorted]);
 
   const selectedCalendarDayLabel = useMemo(
@@ -1315,6 +1532,16 @@ export default function AssignmentCalendarPage() {
         if (!keysToFetch.has(uKey)) keysToFetch.set(uKey, { fid, planId: unlockedId });
       }
     }
+    const rowFids = new Set(
+      rows.map((r) => r.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, r.studentId))
+    );
+    for (const [fid, inferredPlanId] of Object.entries(sessionDayInferredPlanIdByFid)) {
+      if (!rowFids.has(fid)) continue;
+      const pid = String(inferredPlanId || "").trim();
+      if (!pid) continue;
+      const ik = `${fid}__${pid}`;
+      if (!keysToFetch.has(ik)) keysToFetch.set(ik, { fid, planId: pid });
+    }
     if (keysToFetch.size === 0) {
       setRosterPlanMetaByKey({});
       return;
@@ -1349,7 +1576,15 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, unlockedProgramByFirestoreId, planMetaRefreshTick]);
+  }, [
+    db,
+    user,
+    studentsBookedOnSelectedDay,
+    rosterStudentsSorted,
+    unlockedProgramByFirestoreId,
+    sessionDayInferredPlanIdByFid,
+    planMetaRefreshTick,
+  ]);
 
   /** Same-day `workoutSessions` with `completedAt` → bucket flags (any session per fid; slot-plan match for stale meta). */
   useEffect(() => {
@@ -1359,6 +1594,9 @@ export default function AssignmentCalendarPage() {
     if (rows.length === 0) {
       setSessionCompletedOnSelectedDayByFid({});
       setSessionCompletedSlotPlanByKey({});
+      setSessionDayInferredPlanIdByFid({});
+      setSessionRosterSessionTitleByExpandKey({});
+      setSessionLatestSameDayWorkoutTitleByFid({});
       return;
     }
     const fids = [
@@ -1375,40 +1613,132 @@ export default function AssignmentCalendarPage() {
       slotKeysForFid.get(fid)!.add(`${fid}__${slot}`);
     }
     (async () => {
-      const dayByFid: Record<string, boolean> = {};
-      const slotByKey: Record<string, boolean> = {};
-      await Promise.all(
+      const partials = await Promise.all(
         fids.map(async (fid) => {
+          const titlesByExpandKey: Record<string, string> = {};
+          const dayByFidPart: Record<string, boolean> = {};
+          const slotByKeyPart: Record<string, boolean> = {};
+          const inferredByFidPart: Record<string, string> = {};
+          const latestSameDayTitleByFidPart: Record<string, string> = {};
           try {
+            if (cancelled) {
+              return {
+                titlesByExpandKey,
+                dayByFid: dayByFidPart,
+                slotByKey: slotByKeyPart,
+                inferredByFid: inferredByFidPart,
+                latestSameDayTitleByFid: latestSameDayTitleByFidPart,
+              };
+            }
             const snap = await getDocs(
               collection(db, "personalTrainers", user.uid, "students", fid, "workoutSessions")
             );
-            if (cancelled) return;
+            if (cancelled) {
+              return {
+                titlesByExpandKey,
+                dayByFid: dayByFidPart,
+                slotByKey: slotByKeyPart,
+                inferredByFid: inferredByFidPart,
+                latestSameDayTitleByFid: latestSameDayTitleByFidPart,
+              };
+            }
             const slotsToMatch = slotKeysForFid.get(fid);
+            const sameDayCands: Array<{ t: number; wp: string; title: string }> = [];
             snap.forEach((docSnap) => {
               const data = docSnap.data() as Record<string, unknown>;
               const dayStr = sessionCompletionCalendarDay(data);
               if (!dayStr || dayStr !== selectedDateStr) return;
-              dayByFid[fid] = true;
+              dayByFidPart[fid] = true;
               const wp = String(data.workoutPlanId || "").trim();
+              const title = String(data.workoutTitle || "").trim();
               if (wp && slotsToMatch?.has(`${fid}__${wp}`)) {
-                slotByKey[`${fid}__${wp}`] = true;
+                slotByKeyPart[`${fid}__${wp}`] = true;
               }
+              const t = firestoreScalarToDate(data.completedAt)?.getTime() ?? 0;
+              sameDayCands.push({ t, wp, title });
             });
+            sameDayCands.sort((a, b) => b.t - a.t);
+            const newestSameDay = sameDayCands[0];
+            if (newestSameDay) {
+              latestSameDayTitleByFidPart[fid] = newestSameDay.title
+                ? String(newestSameDay.title).trim()
+                : "";
+            }
+            const inferredWp = sameDayCands.find((c) => c.wp)?.wp;
+            if (inferredWp) inferredByFidPart[fid] = inferredWp;
+
+            if (sameDayCands.length > 0) {
+              const planIds = new Set<string>();
+              for (const c of sameDayCands) {
+                if (c.wp) planIds.add(c.wp);
+              }
+              const inferredPid = String(inferredByFidPart[fid] || "").trim();
+              if (inferredPid) planIds.add(inferredPid);
+              for (const row of rows) {
+                const rfid = row.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, row.studentId);
+                if (rfid !== fid) continue;
+                const sp = String(row.workoutPlanId || "").trim();
+                if (sp) planIds.add(sp);
+                const unlockedPickRow =
+                  unlockedProgramByFirestoreId[rfid] ||
+                  (rfid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
+                const uid = String(unlockedPickRow?.id || "").trim();
+                if (uid) planIds.add(uid);
+              }
+              for (const planId of planIds) {
+                const planMatches = sameDayCands.filter((c) => c.wp === planId);
+                const pick = planMatches[0] ?? sameDayCands[0];
+                const tit = pick?.title ? String(pick.title).trim() : "";
+                if (tit) titlesByExpandKey[`${fid}__${planId}`] = tit;
+              }
+            }
           } catch {
             /* skip */
           }
+          return {
+            titlesByExpandKey,
+            dayByFid: dayByFidPart,
+            slotByKey: slotByKeyPart,
+            inferredByFid: inferredByFidPart,
+            latestSameDayTitleByFid: latestSameDayTitleByFidPart,
+          };
         })
       );
+
+      const mergedTitles: Record<string, string> = {};
+      const mergedDay: Record<string, boolean> = {};
+      const mergedSlot: Record<string, boolean> = {};
+      const mergedInferred: Record<string, string> = {};
+      const mergedLatestSameDayTitle: Record<string, string> = {};
+      for (const part of partials) {
+        Object.assign(mergedTitles, part.titlesByExpandKey);
+        Object.assign(mergedDay, part.dayByFid);
+        Object.assign(mergedSlot, part.slotByKey);
+        Object.assign(mergedInferred, part.inferredByFid);
+        Object.assign(mergedLatestSameDayTitle, part.latestSameDayTitleByFid);
+      }
+
       if (!cancelled) {
-        setSessionCompletedOnSelectedDayByFid(dayByFid);
-        setSessionCompletedSlotPlanByKey(slotByKey);
+        setSessionCompletedOnSelectedDayByFid(mergedDay);
+        setSessionCompletedSlotPlanByKey(mergedSlot);
+        setSessionDayInferredPlanIdByFid(mergedInferred);
+        setSessionRosterSessionTitleByExpandKey(mergedTitles);
+        setSessionLatestSameDayWorkoutTitleByFid(mergedLatestSameDayTitle);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [db, user, selectedDateStr, studentsBookedOnSelectedDay, rosterStudentsSorted, planMetaRefreshTick]);
+  }, [
+    db,
+    user,
+    selectedDateStr,
+    studentsBookedOnSelectedDay,
+    rosterStudentsSorted,
+    unlockedProgramByFirestoreId,
+    planMetaRefreshTick,
+    sessionLogRefreshTick,
+  ]);
 
   const calendarRosterBuckets = useMemo(() => {
     const noPlan: DayBookedStudent[] = [];
@@ -1422,7 +1752,11 @@ export default function AssignmentCalendarPage() {
         (fid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
       const unlockedId = String(unlockedPick?.id || "").trim();
       if (!slotPlanId && !unlockedId) {
-        noPlan.push(row);
+        if (sessionCompletedOnSelectedDayByFid[fid]) {
+          completed.push(row);
+        } else {
+          noPlan.push(row);
+        }
         continue;
       }
 
@@ -2426,10 +2760,7 @@ export default function AssignmentCalendarPage() {
                                   Presença
                                 </span>
                                 <Badge
-                                  variant={
-                                    att === "present" ? "default" : att === "absent" ? "destructive" : "secondary"
-                                  }
-                                  className="text-[10px] h-5 px-2"
+                                  {...attendanceBadgeProps(att, false)}
                                 >
                                   {att === "present" ? "Presente" : att === "absent" ? "Falta" : "Pendente"}
                                 </Badge>
@@ -2441,8 +2772,8 @@ export default function AssignmentCalendarPage() {
                                 <Button
                                   type="button"
                                   size="sm"
-                                  variant="outline"
-                                  className="h-7 text-[10px]"
+                                  variant="default"
+                                  className="h-7 text-[10px] border-2 border-emerald-900/40 bg-emerald-600 text-white shadow-none hover:bg-emerald-700 dark:border-emerald-200/50 dark:bg-emerald-600 dark:hover:bg-emerald-500"
                                   disabled={futureSession || savingAtt}
                                   onClick={() => handleSessionAttendanceSave(st, "present")}
                                 >
@@ -2451,8 +2782,8 @@ export default function AssignmentCalendarPage() {
                                 <Button
                                   type="button"
                                   size="sm"
-                                  variant="outline"
-                                  className="h-7 text-[10px] border-destructive/40 text-destructive hover:bg-destructive/10"
+                                  variant="destructive"
+                                  className="h-7 text-[10px] border-2 border-destructive-foreground/35 shadow-none"
                                   disabled={futureSession || savingAtt}
                                   onClick={() => handleSessionAttendanceSave(st, "absent")}
                                 >
@@ -2461,8 +2792,8 @@ export default function AssignmentCalendarPage() {
                                 <Button
                                   type="button"
                                   size="sm"
-                                  variant="ghost"
-                                  className="h-7 text-[10px]"
+                                  variant="default"
+                                  className="h-7 text-[10px] border-2 border-amber-900/40 bg-amber-500 text-amber-950 shadow-none hover:bg-amber-600 dark:border-amber-200/50 dark:bg-amber-600 dark:text-white dark:hover:bg-amber-500"
                                   disabled={futureSession || savingAtt}
                                   onClick={() => handleSessionAttendanceSave(st, "pending")}
                                 >
@@ -2906,14 +3237,10 @@ export default function AssignmentCalendarPage() {
                               </p>
                               {myEntry && (
                                 <Badge
-                                  variant={
-                                    normalizeAttendance(myEntry.sessionAttendance) === "present"
-                                      ? "default"
-                                      : normalizeAttendance(myEntry.sessionAttendance) === "absent"
-                                        ? "destructive"
-                                        : "secondary"
-                                  }
-                                  className="text-[9px] h-4 px-1.5"
+                                  {...attendanceBadgeProps(
+                                    normalizeAttendance(myEntry.sessionAttendance),
+                                    true
+                                  )}
                                 >
                                   {normalizeAttendance(myEntry.sessionAttendance) === "present"
                                     ? "Presente"
@@ -2992,13 +3319,14 @@ export default function AssignmentCalendarPage() {
                               {slot!.students.map((st) => {
                                 const src = rosterPhotoUrlForSlotStudent(rosterStudentsSorted, st.studentId);
                                 const initial = st.studentName.trim().charAt(0).toUpperCase() || "?";
+                                const stAtt = normalizeAttendance(st.sessionAttendance);
                                 return (
                                   <span
                                     key={st.studentId}
                                     title={st.studentName}
                                     className="relative inline-flex shrink-0"
                                   >
-                                    <Avatar className="h-7 w-7 border border-border/50 ring-2 ring-background">
+                                    <Avatar className={attendanceAvatarClassName(stAtt)}>
                                       <AvatarImage src={src} alt="" />
                                       <AvatarFallback className="text-[9px]">{initial}</AvatarFallback>
                                     </Avatar>
@@ -3157,6 +3485,9 @@ export default function AssignmentCalendarPage() {
                           rosterStudentsSorted={rosterStudentsSorted}
                           unlockedProgramByFirestoreId={unlockedProgramByFirestoreId}
                           rosterPlanMetaByKey={rosterPlanMetaByKey}
+                          sessionDayInferredPlanIdByFid={sessionDayInferredPlanIdByFid}
+                          sessionRosterSessionTitleByExpandKey={sessionRosterSessionTitleByExpandKey}
+                          sessionLatestSameDayWorkoutTitleByFid={sessionLatestSameDayWorkoutTitleByFid}
                           weekProgramSummaryByStudentId={weekProgramSummaryByStudentId}
                           expandedRosterPlanKey={expandedRosterPlanKey}
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
@@ -3182,6 +3513,9 @@ export default function AssignmentCalendarPage() {
                           rosterStudentsSorted={rosterStudentsSorted}
                           unlockedProgramByFirestoreId={unlockedProgramByFirestoreId}
                           rosterPlanMetaByKey={rosterPlanMetaByKey}
+                          sessionDayInferredPlanIdByFid={sessionDayInferredPlanIdByFid}
+                          sessionRosterSessionTitleByExpandKey={sessionRosterSessionTitleByExpandKey}
+                          sessionLatestSameDayWorkoutTitleByFid={sessionLatestSameDayWorkoutTitleByFid}
                           weekProgramSummaryByStudentId={weekProgramSummaryByStudentId}
                           expandedRosterPlanKey={expandedRosterPlanKey}
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
@@ -3207,6 +3541,9 @@ export default function AssignmentCalendarPage() {
                           rosterStudentsSorted={rosterStudentsSorted}
                           unlockedProgramByFirestoreId={unlockedProgramByFirestoreId}
                           rosterPlanMetaByKey={rosterPlanMetaByKey}
+                          sessionDayInferredPlanIdByFid={sessionDayInferredPlanIdByFid}
+                          sessionRosterSessionTitleByExpandKey={sessionRosterSessionTitleByExpandKey}
+                          sessionLatestSameDayWorkoutTitleByFid={sessionLatestSameDayWorkoutTitleByFid}
                           weekProgramSummaryByStudentId={weekProgramSummaryByStudentId}
                           expandedRosterPlanKey={expandedRosterPlanKey}
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}

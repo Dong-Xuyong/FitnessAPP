@@ -1,7 +1,5 @@
 "use client";
-import { useEffect } from "react";
 
-// #region agent log — debug-c5653c H3
 export default function Error({
   error,
   reset,
@@ -9,10 +7,6 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error("[debug-c5653c H3] app error boundary:", error?.message, error?.digest, error?.stack);
-  }, [error]);
-
   return (
     <div style={{ fontFamily: "sans-serif", padding: "2rem" }}>
       <h2>Something went wrong</h2>
@@ -21,4 +15,3 @@ export default function Error({
     </div>
   );
 }
-// #endregion

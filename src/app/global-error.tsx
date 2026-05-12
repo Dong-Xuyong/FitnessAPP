@@ -1,7 +1,5 @@
 "use client";
-import { useEffect } from "react";
 
-// #region agent log — debug-c5653c H3
 export default function GlobalError({
   error,
   reset,
@@ -9,10 +7,6 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error("[debug-c5653c H3] global-error boundary:", error?.message, error?.digest, error?.stack);
-  }, [error]);
-
   return (
     <html lang="en">
       <body style={{ fontFamily: "sans-serif", padding: "2rem" }}>
@@ -23,4 +17,3 @@ export default function GlobalError({
     </html>
   );
 }
-// #endregion

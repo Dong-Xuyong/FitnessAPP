@@ -94,8 +94,12 @@ const translations = {
     calendarDayRosterTitle: "Students booked this day",
     calendarDayRosterEmpty: "No students booked on this date.",
     calendarDayNoProgramLinked: "No workout linked to booking",
+    calendarRosterCompletedDayNoPlanId:
+      "Workout logged for this day (no plan linked to booking).",
+    calendarRosterLatestTrainingHint: "Latest training: {title} · {duration} min",
     calendarDayPlanResolving: "Loading workout…",
     calendarDayBookedTimes: "Times",
+    calendarRosterSessionDurationSuffix: "· {minutes} min",
     calendarRosterExpandDetails: "Show workout details",
     calendarRosterPlanDetailsTitle: "Plan details",
     calendarRosterOpenManagement: "Open on student profile",
@@ -116,8 +120,6 @@ const translations = {
     calendarRosterSessionLogCoachHint:
       "Use Log or edit session to enter the weights and reps the athlete actually did.",
     calendarRosterLogOrEditSession: "Log or edit session",
-    calendarRosterSessionDifferentPlanHint:
-      "Showing the last workout logged this day. It may belong to a different plan than this booking row—use Log or edit session to open that plan.",
     coachWorkoutSessionTitle: "Log workout (coach)",
     coachWorkoutSessionBack: "Back to student",
     coachWorkoutSessionSubtitle: "Session is saved to this student’s history.",
@@ -872,8 +874,12 @@ const translations = {
     calendarDayRosterTitle: "Alunos neste dia",
     calendarDayRosterEmpty: "Nenhum aluno reservado nesta data.",
     calendarDayNoProgramLinked: "Sem treino associado à reserva",
+    calendarRosterCompletedDayNoPlanId:
+      "Treino registado neste dia (sem plano na reserva).",
+    calendarRosterLatestTrainingHint: "Último treino: {title} · {duration} min",
     calendarDayPlanResolving: "A carregar treino…",
     calendarDayBookedTimes: "Horários",
+    calendarRosterSessionDurationSuffix: "· {minutes} min",
     calendarRosterExpandDetails: "Ver detalhes do treino",
     calendarRosterPlanDetailsTitle: "Detalhes do plano",
     calendarRosterOpenManagement: "Abrir na ficha",
@@ -894,8 +900,6 @@ const translations = {
     calendarRosterSessionLogCoachHint:
       "Use Registar ou corrigir treino para introduzir as cargas e repetições que o aluno fez.",
     calendarRosterLogOrEditSession: "Registar ou corrigir treino",
-    calendarRosterSessionDifferentPlanHint:
-      "A mostrar o último treino registado neste dia. Pode ser de outro plano que o da reserva—use Registar ou corrigir treino para abrir esse plano.",
     coachWorkoutSessionTitle: "Registar treino (treinador)",
     coachWorkoutSessionBack: "Voltar ao aluno",
     coachWorkoutSessionSubtitle: "A sessão fica no histórico deste aluno.",
