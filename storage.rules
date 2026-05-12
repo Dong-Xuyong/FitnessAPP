@@ -1,0 +1,15 @@
+rules_version = '2';
+// Deploy: enable Cloud Storage in Firebase Console, then run:
+//   firebase deploy --only storage
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Student profile images; download URLs from getDownloadURL work without re-checking read rules.
+    match /students/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      // Own-folder writes only; size cap. (Avoid strict contentType — some clients omit it on resumable uploads.)
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024;
+    }
+  }
+}

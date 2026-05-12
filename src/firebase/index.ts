@@ -2,8 +2,30 @@
 
 import { firebaseConfig } from '@/firebase/config';
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore'
+
+const appCheckInitializedApps = new Set<string>();
+
+function initAppCheck(firebaseApp: FirebaseApp) {
+  if (typeof window === "undefined") return;
+  const appName = firebaseApp.name;
+  if (appCheckInitializedApps.has(appName)) return;
+
+  const recaptchaSiteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY?.trim();
+  if (!recaptchaSiteKey) return;
+
+  try {
+    initializeAppCheck(firebaseApp, {
+      provider: new ReCaptchaV3Provider(recaptchaSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+    appCheckInitializedApps.add(appName);
+  } catch {
+    // App Check optional in dev if misconfigured
+  }
+}
 
 // IMPORTANT: DO NOT MODIFY THIS FUNCTION
 export function initializeFirebase() {
@@ -33,6 +55,7 @@ export function initializeFirebase() {
 }
 
 export function getSdks(firebaseApp: FirebaseApp) {
+  initAppCheck(firebaseApp);
   return {
     firebaseApp,
     auth: getAuth(firebaseApp),
@@ -40,6 +63,7 @@ export function getSdks(firebaseApp: FirebaseApp) {
   };
 }
 
+export { getFirebaseStorage } from './storage';
 export * from './provider';
 export * from './client-provider';
 export * from './firestore/use-collection';

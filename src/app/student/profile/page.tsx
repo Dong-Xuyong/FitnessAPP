@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useUser, useFirestore, updateDocumentNonBlocking } from "@/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { useUser, useFirestore, updateDocumentNonBlocking, useFirebaseApp } from "@/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, UserCircle, Camera } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
+import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
+import { uploadStudentProfilePhoto } from "@/lib/upload-student-profile-photo";
 
 const ALLOWED_GOALS = new Set(["muscle_gain", "weight_loss", "endurance", "general"]);
 const ALLOWED_SEX = new Set(["male", "female", "other"]);
@@ -22,13 +24,16 @@ const ALLOWED_SEX = new Set(["male", "female", "other"]);
 export default function StudentProfilePage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
+  const firebaseApp = useFirebaseApp();
   const { toast } = useToast();
   const { t } = useI18n();
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [trainerId, setTrainerId] = useState<string | null>(null);
-  
+
   const [formData, setFormData] = useState({
     name: "",
     photoUrl: "",
@@ -52,17 +57,18 @@ export default function StudentProfilePage() {
   };
 
   useEffect(() => {
-    if (!db || !user?.uid) {
+    if (!db || !user) {
       setIsLoadingProfile(false);
       return;
     }
 
+    const authUser = user;
     let cancelled = false;
+    setIsLoadingProfile(true);
 
     async function fetchProfile() {
-      setIsLoadingProfile(true);
       try {
-        const globalDocRef = doc(db, "students", user.uid);
+        const globalDocRef = doc(db, "students", authUser.uid);
         const globalDocSnap = await getDoc(globalDocRef);
 
         if (cancelled) return;
@@ -79,8 +85,8 @@ export default function StudentProfilePage() {
               : "muscle_gain";
           setTrainerId(data.trainerId || null);
           setFormData({
-            name: data.name || user.displayName || "",
-            photoUrl: data.photoUrl || user.photoURL || "",
+            name: data.name || authUser.displayName || "",
+            photoUrl: data.photoUrl || authUser.photoURL || "",
             age: data.age?.toString() || "",
             sex,
             weightKg: data.weightKg?.toString() || "",
@@ -94,8 +100,8 @@ export default function StudentProfilePage() {
           setTrainerId(null);
           setFormData((prev) => ({
             ...prev,
-            name: user!.displayName || "",
-            photoUrl: user!.photoURL || "",
+            name: authUser.displayName || "",
+            photoUrl: authUser.photoURL || "",
           }));
         }
       } catch (e) {
@@ -110,6 +116,57 @@ export default function StudentProfilePage() {
       cancelled = true;
     };
   }, [db, user?.uid]);
+
+  const handlePhotoFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file || !user?.uid || !db) return;
+
+      if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+        toast({
+          variant: "destructive",
+          title: t("error"),
+          description: t("profilePhotoInvalidFile"),
+        });
+        return;
+      }
+
+      setIsUploadingPhoto(true);
+      try {
+        const url = await uploadStudentProfilePhoto(firebaseApp, user.uid, file);
+        setFormData((prev) => ({ ...prev, photoUrl: url }));
+
+        const globalRef = doc(db, "students", user.uid);
+        await setDoc(globalRef, { photoUrl: url }, { merge: true });
+        if (trainerId) {
+          await setDoc(doc(db, "personalTrainers", trainerId, "students", user.uid), { photoUrl: url }, {
+            merge: true,
+          });
+        }
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(STUDENT_PROFILE_PHOTO_UPDATED));
+        }
+
+        toast({
+          title: t("profileUpdated"),
+          description: t("profilePhotoUploaded"),
+        });
+      } catch (err) {
+        console.error("Profile photo upload failed", err);
+        toast({
+          variant: "destructive",
+          title: t("error"),
+          description: t("profilePhotoUploadFailed"),
+        });
+      } finally {
+        setIsUploadingPhoto(false);
+      }
+    },
+    [firebaseApp, user, db, trainerId, toast, t]
+  );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,7 +218,7 @@ export default function StudentProfilePage() {
     }
   };
 
-  if (isUserLoading || isLoadingProfile) {
+  if (isUserLoading || (user && isLoadingProfile)) {
     return (
       <StudentNavigation>
         <div className="flex items-center justify-center h-[60vh]">
@@ -210,24 +267,41 @@ export default function StudentProfilePage() {
             </CardHeader>
             <CardContent className="space-y-6 -mt-8 relative z-10">
               <div className="flex flex-col items-center gap-4 mb-6">
-                <div className="relative group">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  aria-hidden
+                  tabIndex={-1}
+                  onChange={handlePhotoFileChange}
+                />
+                <button
+                  type="button"
+                  className="relative group rounded-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isUploadingPhoto}
+                  aria-label={t("uploadProfilePhoto")}
+                  onClick={() => photoInputRef.current?.click()}
+                >
                   <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg">
-                    <AvatarImage src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`} />
+                    <AvatarImage
+                      key={formData.photoUrl || "no-photo"}
+                      src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`}
+                    />
                     <AvatarFallback className="text-xl font-bold">{formData.name?.[0] || "U"}</AvatarFallback>
                   </Avatar>
-                  <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Camera className="h-6 w-6 text-white" />
+                  <div
+                    className={`pointer-events-none absolute inset-0 bg-black/40 rounded-full flex items-center justify-center transition-opacity ${
+                      isUploadingPhoto ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    {isUploadingPhoto ? (
+                      <Loader2 className="h-6 w-6 text-white animate-spin" />
+                    ) : (
+                      <Camera className="h-6 w-6 text-white" />
+                    )}
                   </div>
-                </div>
-                <div className="w-full max-w-sm space-y-2">
-                  <Label htmlFor="photoUrl">{t("profilePhotoUrl")}</Label>
-                  <Input 
-                    id="photoUrl" 
-                    placeholder="https://example.com/photo.jpg" 
-                    value={formData.photoUrl} 
-                    onChange={(e) => setFormData({...formData, photoUrl: e.target.value})} 
-                  />
-                </div>
+                </button>
               </div>
 
               <div className="space-y-2">

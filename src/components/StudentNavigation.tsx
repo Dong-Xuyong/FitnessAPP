@@ -27,9 +27,10 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc, getDoc } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useStudentPaymentReminder } from "@/hooks/use-student-payment-reminder";
+import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
 
 const navItems = [
   { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
@@ -59,39 +60,47 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const [isBlocked, setIsBlocked] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  useEffect(() => {
+  const fetchStudentProfile = useCallback(async () => {
     if (!db || !user?.uid) return;
     const uid = user.uid;
 
-    async function fetchStudentProfile() {
-      try {
-        // Single read of global student doc — rules allow isOwner(studentId).
-        // Do not query trainer subcollections by email; Firestore rules reject those queries.
-        const ref = doc(db, "students", uid);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          const d = snap.data();
-          setIsBlocked(d.blocked === true);
-          const fromName = splitName(typeof d.name === "string" ? d.name : undefined);
-          const firstName =
-            fromName.firstName ||
-            (typeof d.firstName === "string" ? d.firstName : undefined);
-          setProfile({
-            fullName: fromName.fullName || (typeof d.name === "string" ? d.name : undefined),
-            firstName,
-            photoUrl: typeof d.photoUrl === "string" ? d.photoUrl : undefined,
-          });
-        } else {
-          setProfile(null);
-        }
-      } catch (e) {
-        console.error("Error fetching profile for navigation", e);
+    try {
+      // Single read of global student doc — rules allow isOwner(studentId).
+      // Do not query trainer subcollections by email; Firestore rules reject those queries.
+      const ref = doc(db, "students", uid);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const d = snap.data();
+        setIsBlocked(d.blocked === true);
+        const fromName = splitName(typeof d.name === "string" ? d.name : undefined);
+        const firstName =
+          fromName.firstName ||
+          (typeof d.firstName === "string" ? d.firstName : undefined);
+        setProfile({
+          fullName: fromName.fullName || (typeof d.name === "string" ? d.name : undefined),
+          firstName,
+          photoUrl: typeof d.photoUrl === "string" ? d.photoUrl : undefined,
+        });
+      } else {
         setProfile(null);
       }
+    } catch (e) {
+      console.error("Error fetching profile for navigation", e);
+      setProfile(null);
     }
+  }, [db, user?.uid]);
 
-    fetchStudentProfile();
-  }, [db, user?.uid, pathname]);
+  useEffect(() => {
+    void fetchStudentProfile();
+  }, [fetchStudentProfile, pathname]);
+
+  useEffect(() => {
+    const onPhotoUpdated = () => {
+      void fetchStudentProfile();
+    };
+    window.addEventListener(STUDENT_PROFILE_PHOTO_UPDATED, onPhotoUpdated);
+    return () => window.removeEventListener(STUDENT_PROFILE_PHOTO_UPDATED, onPhotoUpdated);
+  }, [fetchStudentProfile]);
 
   const navLinkActive = (item: (typeof navItems)[number]) => pathname === item.href;
 
@@ -139,7 +148,10 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
         <div className="p-4 border-t mt-auto shrink-0">
           <div className="flex items-center gap-3 px-4 py-2 mb-4">
             <Avatar className="h-8 w-8 ring-2 ring-accent/10">
-              <AvatarImage src={profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || 's1'}/100/100`} />
+              <AvatarImage
+                key={profile?.photoUrl || user?.photoURL || "nav-avatar"}
+                src={profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || 's1'}/100/100`}
+              />
               <AvatarFallback>{profile?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
             </Avatar>
             <div className="overflow-hidden">
