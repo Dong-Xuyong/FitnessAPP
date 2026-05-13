@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -177,7 +176,6 @@ export default function StudentExercisesPage() {
   }, [exerciseAttempts]);
 
   return (
-    <StudentNavigation>
       <div className="space-y-4">
         <header>
           <h1 className="text-2xl md:text-3xl font-bold font-headline">{t("exercises")}</h1>
@@ -335,6 +333,5 @@ export default function StudentExercisesPage() {
           </div>
         ) : null}
       </div>
-    </StudentNavigation>
   );
 }

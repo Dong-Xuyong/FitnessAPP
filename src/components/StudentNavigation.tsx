@@ -2,7 +2,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -18,12 +17,15 @@ import {
   Globe,
   ShieldBan,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc, getDoc } from "firebase/firestore";
@@ -48,6 +50,71 @@ function splitName(rawName?: string): { firstName?: string; fullName?: string } 
   return { firstName: first, fullName: value };
 }
 
+function StudentSidebarIdentity({
+  profile,
+  user,
+  layout = "vertical",
+  collapsed = false,
+  onNavigate,
+}: {
+  profile: { firstName?: string; fullName?: string; photoUrl?: string } | null;
+  user: ReturnType<typeof useUser>["user"];
+  layout?: "vertical" | "horizontal";
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
+  const displayName = profile?.fullName || profile?.firstName || user?.displayName || "Student";
+  const avatarSrc =
+    profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || "s1"}/100/100`;
+  const fallback = profile?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "U";
+
+  if (collapsed && layout === "vertical") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            href="/student/dashboard"
+            onClick={onNavigate}
+            className="flex justify-center rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5"
+          >
+            <Avatar className="h-10 w-10 shrink-0 ring-2 ring-accent/10">
+              <AvatarImage src={avatarSrc} alt="" />
+              <AvatarFallback className="text-sm">{fallback}</AvatarFallback>
+            </Avatar>
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-[220px]">
+          <p className="font-medium">{displayName}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  const wrapClass =
+    layout === "vertical"
+      ? "flex flex-col items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5"
+      : "flex flex-row items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5";
+
+  const textAlign = layout === "vertical" ? "text-center" : "text-left";
+
+  return (
+    <Link href="/student/dashboard" className={wrapClass} onClick={onNavigate}>
+      <Avatar
+        className={cn(
+          "shrink-0 ring-2 ring-accent/10",
+          layout === "vertical" ? "h-16 w-16" : "h-12 w-12"
+        )}
+      >
+        <AvatarImage src={avatarSrc} alt="" />
+        <AvatarFallback className={layout === "vertical" ? "text-lg" : "text-sm"}>{fallback}</AvatarFallback>
+      </Avatar>
+      <div className={cn("min-w-0", layout === "horizontal" && "flex-1", textAlign)}>
+        <p className="text-sm font-semibold leading-snug truncate">{displayName}</p>
+      </div>
+    </Link>
+  );
+}
+
 export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -59,6 +126,10 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<{ firstName?: string; fullName?: string; photoUrl?: string } | null>(null);
   const [isBlocked, setIsBlocked] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+
+  const sidebarWidth = desktopSidebarCollapsed ? "w-[70px]" : "w-64";
+  const mainMargin = desktopSidebarCollapsed ? "md:ml-[70px]" : "md:ml-64";
 
   const fetchStudentProfile = useCallback(async () => {
     if (!db || !user?.uid) return;
@@ -92,7 +163,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void fetchStudentProfile();
-  }, [fetchStudentProfile, pathname]);
+  }, [fetchStudentProfile]);
 
   useEffect(() => {
     const onPhotoUpdated = () => {
@@ -112,84 +183,107 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <aside className="w-64 border-r bg-card hidden md:flex flex-col fixed inset-y-0 overflow-hidden">
-        <div className="p-6">
-          <Link href="/student/dashboard" className="block">
-          <Image
-            src="/sergio-oliveira-logo.png"
-            alt="Sergio Oliveira Personal Trainer"
-            width={130}
-            height={73}
-            priority
-            className="h-auto w-full max-w-[110px] rounded-md"
-          />
-          </Link>
-        </div>
+    <TooltipProvider delayDuration={0}>
+      <div className="flex min-h-screen bg-background">
+        <aside
+          className={cn(
+            "border-r bg-card hidden md:flex flex-col fixed inset-y-0 transition-all duration-300 ease-in-out z-40",
+            sidebarWidth
+          )}
+        >
+          <div className={cn("border-b shrink-0", desktopSidebarCollapsed ? "p-2" : "p-6 pb-4")}>
+            <StudentSidebarIdentity
+              profile={profile}
+              user={user}
+              layout="vertical"
+              collapsed={desktopSidebarCollapsed}
+            />
+          </div>
 
-        <nav className="flex-1 px-4 space-y-1 overflow-y-auto min-h-0">
-          {navItems.map((item) => (
-            <Link
-              key={item.key}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors",
-                navLinkActive(item)
+          <nav className={cn("flex-1 space-y-1 overflow-y-auto min-h-0", desktopSidebarCollapsed ? "px-2" : "px-4")}>
+            {navItems.map((item) => {
+              const isActive = navLinkActive(item);
+              const linkClass = cn(
+                "flex items-center gap-3 rounded-md text-sm font-medium transition-colors",
+                desktopSidebarCollapsed ? "justify-center px-3 py-3" : "px-4 py-3",
+                isActive
                   ? "bg-accent/10 text-accent"
                   : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
-              )}
-            >
-              <item.icon className="h-5 w-5" />
-              {t(item.key)}
-            </Link>
-          ))}
-        </nav>
+              );
 
-        <div className="p-4 border-t mt-auto shrink-0">
-          <div className="flex items-center gap-3 px-4 py-2 mb-4">
-            <Avatar className="h-8 w-8 ring-2 ring-accent/10">
-              <AvatarImage
-                key={profile?.photoUrl || user?.photoURL || "nav-avatar"}
-                src={profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || 's1'}/100/100`}
-              />
-              <AvatarFallback>{profile?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
-            </Avatar>
-            <div className="overflow-hidden">
-              <p className="text-sm font-medium leading-none truncate">
-                {profile?.fullName || profile?.firstName || user?.displayName || "Student"}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">{user?.email || "Account"}</p>
-            </div>
+              if (desktopSidebarCollapsed) {
+                return (
+                  <Tooltip key={item.key}>
+                    <TooltipTrigger asChild>
+                      <Link href={item.href} className={linkClass}>
+                        <item.icon className="h-5 w-5 shrink-0" />
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">{t(item.key)}</TooltipContent>
+                  </Tooltip>
+                );
+              }
+
+              return (
+                <Link key={item.key} href={item.href} className={linkClass}>
+                  <item.icon className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t(item.key)}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className={cn("border-t mt-auto shrink-0 space-y-1", desktopSidebarCollapsed ? "p-2" : "p-4")}>
+            {desktopSidebarCollapsed ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-full text-muted-foreground"
+                    onClick={handleSignOut}
+                  >
+                    <LogOut className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{t("logout")}</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 text-muted-foreground"
+                onClick={handleSignOut}
+              >
+                <LogOut className="h-5 w-5" />
+                {t("logout")}
+              </Button>
+            )}
           </div>
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start gap-3 text-muted-foreground" 
-            onClick={handleSignOut}
-          >
-            <LogOut className="h-5 w-5" />
-            {t("logout")}
-          </Button>
-        </div>
-      </aside>
 
-      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <button
+            type="button"
+            onClick={() => setDesktopSidebarCollapsed((prev) => !prev)}
+            className="absolute -right-3 top-16 z-50 flex h-6 w-6 items-center justify-center rounded-full border bg-card shadow-md hover:bg-accent/10 transition-colors"
+            aria-label={desktopSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {desktopSidebarCollapsed ? (
+              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+            ) : (
+              <ChevronLeft className="h-3 w-3 text-muted-foreground" />
+            )}
+          </button>
+        </aside>
+
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="w-72 p-0 flex flex-col h-full">
           <SheetTitle className="sr-only">Student navigation</SheetTitle>
-          <div className="p-6 border-b">
-            <Link
-              href="/student/dashboard"
-              className="block"
-              onClick={() => setMobileOpen(false)}
-            >
-              <Image
-                src="/sergio-oliveira-logo.png"
-                alt="Sergio Oliveira Personal Trainer"
-                width={130}
-                height={73}
-                priority
-                className="h-auto w-full max-w-[110px] rounded-md"
-              />
-            </Link>
+          <div className="p-6 border-b shrink-0">
+            <StudentSidebarIdentity
+              profile={profile}
+              user={user}
+              layout="horizontal"
+              onNavigate={() => setMobileOpen(false)}
+            />
           </div>
           <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
             {navItems.map((item) => (
@@ -225,7 +319,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
         </SheetContent>
       </Sheet>
 
-      <div className="flex-1 md:ml-64 flex flex-col min-w-0 w-full">
+        <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", mainMargin)}>
         <header className="h-16 border-b bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">
             <Button
@@ -327,7 +421,8 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             children
           )}
         </main>
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

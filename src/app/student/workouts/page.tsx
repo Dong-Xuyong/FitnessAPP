@@ -3,8 +3,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useI18n } from "@/lib/i18n";
-import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
@@ -17,7 +17,8 @@ import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
 import { doc, getDoc, collection, getDocs, updateDoc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
-import type { SessionAttendanceStatus } from "@/lib/session-attendance-streak";
+import { studentHasCoachPresentAccessForPlan, type SessionSlotAttendance } from "@/lib/session-attendance-streak";
+import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ type Availability = Record<string, DaySchedule>;
 type SlotStudent = {
   studentId: string;
   studentName: string;
+  /** Denormalized profile image for peers (Firestore rules block roster reads for other students). */
+  studentPhotoUrl?: string;
   workoutPlanId?: string;
   workoutTitle?: string;
   sessionStart?: string;
@@ -121,6 +124,24 @@ function getSlotStartDate(dateStr: string, time: string): Date {
   return new Date(`${dateStr}T${time}:00`);
 }
 
+function slotStudentAvatarSrc(st: SlotStudent): string {
+  const u = st.studentPhotoUrl?.trim();
+  if (u) return u;
+  return slotStudentPlaceholderPhotoUrl(st.studentId);
+}
+
+function initialsFromStudentName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const a = parts[0]![0];
+    const b = parts[parts.length - 1]![0];
+    return `${a}${b}`.toUpperCase();
+  }
+  const one = parts[0] || "";
+  if (one.length >= 2) return one.slice(0, 2).toUpperCase();
+  return (one[0] || "?").toUpperCase();
+}
+
 /** Monday of the week that contains dateStr (YYYY-MM-DD). */
 function getWeekStart(dateStr: string): string {
   const d = new Date(dateStr.substring(0, 10) + "T12:00:00");
@@ -178,6 +199,7 @@ export default function StudentWorkoutsPage() {
   const [trainerId, setTrainerId]       = useState("");
   const [rosterDocId, setRosterDocId]   = useState("");
   const [studentName, setStudentName]   = useState("");
+  const [myPhotoUrl, setMyPhotoUrl]     = useState("");
   const [sessionsPerWeek, setSessionsPerWeek]   = useState<number | null>(null);
   const [sessionDurationMin, setSessionDurationMin] = useState<number>(60);
 
@@ -193,6 +215,8 @@ export default function StudentWorkoutsPage() {
   // Workout plans
   const [workouts, setWorkouts]           = useState<WorkoutPlan[]>([]);
   const [expandedWorkoutId, setExpandedWorkoutId] = useState<string | null>(null);
+  /** Re-evaluate “coach marked present” access periodically without full refetch. */
+  const [presentAccessTick, setPresentAccessTick] = useState(0);
 
   // ── Data fetching ────────────────────────────────────────────────────────────
 
@@ -225,8 +249,11 @@ export default function StudentWorkoutsPage() {
         if (rosterDoc.exists()) {
           const rd = rosterDoc.data();
           setStudentName(`${rd.firstName || ""} ${rd.lastName || ""}`.trim() || "Aluno");
+          setMyPhotoUrl(String(rd.photoUrl || "").trim());
           if (rd.sessionsPerWeek)   setSessionsPerWeek(Number(rd.sessionsPerWeek));
           if (rd.sessionDurationMin) setSessionDurationMin(Number(rd.sessionDurationMin));
+        } else {
+          setMyPhotoUrl("");
         }
 
         // 3. Trainer doc → availability + slot settings
@@ -285,6 +312,11 @@ export default function StudentWorkoutsPage() {
     fetchAll();
     return () => { cancelled = true; };
   }, [db, user?.uid]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setPresentAccessTick((x) => x + 1), 25_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
@@ -379,6 +411,26 @@ export default function StudentWorkoutsPage() {
         return (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0);
       });
   }, [workouts, selectedWeekStart]);
+
+  const planPresentAccess = useMemo(() => {
+    void presentAccessTick;
+    const now = Date.now();
+    const map = new Map<string, boolean>();
+    if (!myId) return map;
+    const slots = sessionSlots as SessionSlotAttendance[];
+    for (const w of weekPlansOrdered) {
+      map.set(
+        w.id,
+        studentHasCoachPresentAccessForPlan(slots, myId, w.id, now, sessionDurationMin)
+      );
+    }
+    return map;
+  }, [myId, sessionSlots, weekPlansOrdered, sessionDurationMin, presentAccessTick]);
+
+  const startableWeekPlans = useMemo(
+    () => weekPlansOrdered.filter((w) => planPresentAccess.get(w.id) === true),
+    [weekPlansOrdered, planPresentAccess]
+  );
 
   // ── Register / unregister ─────────────────────────────────────────────────────
 
@@ -490,12 +542,14 @@ export default function StudentWorkoutsPage() {
           const docId = slotDocId(selectedDateStr, t);
           const slot = slotsByTime.get(t);
           const maxS = slot?.maxStudents ?? defaultMaxStudents;
+          const bookPhotoUrl = (myPhotoUrl || user?.photoURL || "").trim();
           const newStudent: SlotStudent = {
             studentId: myId,
             studentName,
             sessionStart: time,
             sessionDurationMin: totalSessionMin,
             sessionAttendance: "pending",
+            ...(bookPhotoUrl ? { studentPhotoUrl: bookPhotoUrl } : {}),
             ...(matchingPlan ? { workoutPlanId: matchingPlan.id, workoutTitle: matchingPlan.title } : {}),
           };
           const newStudents = [...(slot?.students || []), newStudent];
@@ -520,16 +574,13 @@ export default function StudentWorkoutsPage() {
 
   if (isUserLoading || isLoading) {
     return (
-      <StudentNavigation>
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      </StudentNavigation>
     );
   }
 
   return (
-    <StudentNavigation>
       <div className="space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
@@ -565,9 +616,6 @@ export default function StudentWorkoutsPage() {
               <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-full bg-accent/30 inline-block" /> Inscrito
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-sm bg-primary/20 inline-block" /> Semana com programa
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-full bg-muted border inline-block" /> Indisponível
@@ -607,15 +655,15 @@ export default function StudentWorkoutsPage() {
           <Card className="lg:col-span-3">
             <CardHeader>
               {/* Week selected on calendar — same filter as program list below */}
-              {weekPlansOrdered.length > 0 && (
+              {startableWeekPlans.length > 0 && (
                 <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 mb-2">
                   <Dumbbell className="h-4 w-4 text-primary shrink-0" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Programa desta semana</p>
                     <p className="text-sm font-semibold text-primary">
-                      {weekPlansOrdered.length === 1
-                        ? weekPlansOrdered[0].title
-                        : `${weekPlansOrdered.length} programas nesta semana`}
+                      {startableWeekPlans.length === 1
+                        ? startableWeekPlans[0].title
+                        : `${startableWeekPlans.length} programas nesta semana`}
                     </p>
                   </div>
                 </div>
@@ -735,6 +783,20 @@ export default function StudentWorkoutsPage() {
 
                         {/* Info */}
                         <div className="flex-1 min-w-0">
+                          {!isContinuation && count > 0 && slot && (
+                            <div className="flex -space-x-2 mb-1.5" aria-label="Inscritos neste bloco">
+                              {slot.students.map((st) => (
+                                <span key={st.studentId} title={st.studentName} className="inline-flex shrink-0">
+                                  <Avatar className="h-7 w-7 border-2 border-background">
+                                    <AvatarImage src={slotStudentAvatarSrc(st)} alt="" />
+                                    <AvatarFallback className="text-[9px]">
+                                      {initialsFromStudentName(st.studentName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           {isContinuation ? (
                             <span className="text-xs text-accent/70 italic">↳ continuação da sessão</span>
                           ) : isSessionStart ? (
@@ -809,12 +871,12 @@ export default function StudentWorkoutsPage() {
           </Card>
         </div>
 
-        {/* Assigned workout plans for the week selected on the calendar */}
-        {weekPlansOrdered.length > 0 && (
+        {/* Assigned workout plans for the week selected on the calendar (coach marked present + time window) */}
+        {startableWeekPlans.length > 0 && (
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Programa desta semana</h2>
             <div className="space-y-2">
-              {weekPlansOrdered.map((w) => {
+              {startableWeekPlans.map((w) => {
                 const isExpanded = expandedWorkoutId === w.id;
                 const weekDate = w.weekStart
                   ? new Date(w.weekStart + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })
@@ -875,6 +937,5 @@ export default function StudentWorkoutsPage() {
         )}
 
       </div>
-    </StudentNavigation>
   );
 }

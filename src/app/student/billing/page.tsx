@@ -1,6 +1,5 @@
 "use client";
 
-import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +53,6 @@ export default function StudentBillingPage() {
     method === "mbway" ? "MB WAY" : method === "bank_transfer" ? "Bank Transfer" : method || "—";
 
   return (
-    <StudentNavigation>
       <div className="space-y-6 w-full min-w-0">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("billing")}</h1>
@@ -215,6 +213,5 @@ export default function StudentBillingPage() {
           </CardContent>
         </Card>
       </div>
-    </StudentNavigation>
   );
 }

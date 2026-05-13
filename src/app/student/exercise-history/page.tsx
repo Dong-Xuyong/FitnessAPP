@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -100,7 +99,6 @@ export default function StudentExerciseHistoryPage() {
   }, [entries, search]);
 
   return (
-    <StudentNavigation>
       <div className="space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("exerciseHistory")}</h1>
@@ -149,6 +147,5 @@ export default function StudentExerciseHistoryPage() {
           </CardContent>
         </Card>
       </div>
-    </StudentNavigation>
   );
 }

@@ -192,6 +192,13 @@ const translations = {
     sequenceUnlockedBadge: "Unlocked",
     workoutPlanLockedTitle: "Workout locked",
     workoutPlanLockedDescription: "Complete the previous step in your program sequence to unlock this workout.",
+    studentTrainingRequiresPresentTitle: "Session not unlocked yet",
+    studentTrainingRequiresPresentDescription:
+      "Your coach must mark you present for today’s booked session before you can start this workout. If you just arrived, ask them to mark attendance in the calendar.",
+    coachAttendanceTooEarlyTitle: "Too early to record attendance",
+    coachAttendanceTooEarlyDescription:
+      "You can mark attendance from 15 minutes before the session start time.",
+    coachAttendanceNotYetWindowHint: "from 15 min before start",
     active: "Active",
     portal: "Portal",
 
@@ -982,6 +989,13 @@ const translations = {
     sequenceUnlockedBadge: "Desbloqueado",
     workoutPlanLockedTitle: "Treino bloqueado",
     workoutPlanLockedDescription: "Conclui o passo anterior na sequência do programa para desbloquear este treino.",
+    studentTrainingRequiresPresentTitle: "Sessão ainda não desbloqueada",
+    studentTrainingRequiresPresentDescription:
+      "O teu treinador tem de te marcar presente na sessão reservada antes de poderes iniciar este treino. Se já estás no ginásio, pede-lhe que registe a presença no calendário.",
+    coachAttendanceTooEarlyTitle: "Ainda não podes marcar presença",
+    coachAttendanceTooEarlyDescription:
+      "Só podes registar presença, falta ou pendente a partir de 15 minutos antes do horário de início da sessão.",
+    coachAttendanceNotYetWindowHint: "a partir de 15 min antes do início",
     active: "Ativo",
     portal: "Portal",
 

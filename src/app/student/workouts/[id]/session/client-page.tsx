@@ -1,8 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, use, useRef } from "react";
-import { StudentNavigation } from "@/components/StudentNavigation";
+import { useState, useEffect, useCallback, use, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +23,8 @@ import {
   commitFinishedWorkoutSession,
   exerciseHasLoggedSet,
 } from "@/lib/workout-session-finish";
+import { studentHasCoachPresentAccessForPlan } from "@/lib/session-attendance-streak";
+import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { cn } from "@/lib/utils";
 
 const SESSION_QUERY_LIMIT = 40;
@@ -132,6 +133,8 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   const [sessionMoodRating, setSessionMoodRating] = useState<number | null>(null);
   const [sessionBodyWeightKg, setSessionBodyWeightKg] = useState("");
   const [sessionBodyFatPercent, setSessionBodyFatPercent] = useState("");
+  const [presenceCheckLoading, setPresenceCheckLoading] = useState(true);
+  const [presenceAllowed, setPresenceAllowed] = useState(false);
   const prefilledSignatureRef = useRef<string | null>(null);
   const metricsPrefilledRef = useRef(false);
 
@@ -140,6 +143,8 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
     metricsPrefilledRef.current = false;
     setSessionBodyWeightKg("");
     setSessionBodyFatPercent("");
+    setPresenceCheckLoading(true);
+    setPresenceAllowed(false);
   }, [workoutId]);
 
   useEffect(() => {
@@ -181,6 +186,70 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
       cancelled = true;
     };
   }, [db, user?.uid, workoutId]);
+
+  const runPresenceCheck = useCallback(async () => {
+    if (!db || !user?.uid || !workoutId) return false;
+    const studentDoc = await getDoc(doc(db, "students", user.uid));
+    if (!studentDoc.exists()) return false;
+    const sd = studentDoc.data() ?? {};
+    const trainerId = sd.trainerId as string | undefined;
+    if (!trainerId) return false;
+    const resolvedStudentId = (sd.rosterDocId as string | undefined) || user.uid;
+    const rosterSnap = await getDoc(doc(db, "personalTrainers", trainerId, "students", resolvedStudentId));
+    const fallbackDur =
+      rosterSnap.exists() && typeof (rosterSnap.data() as { sessionDurationMin?: number }).sessionDurationMin === "number"
+        ? Number((rosterSnap.data() as { sessionDurationMin: number }).sessionDurationMin)
+        : 60;
+    const slotsSnap = await getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots"));
+    const slots = slotsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as SessionSlotAttendance[];
+    return studentHasCoachPresentAccessForPlan(
+      slots,
+      resolvedStudentId,
+      workoutId,
+      Date.now(),
+      fallbackDur
+    );
+  }, [db, user?.uid, workoutId]);
+
+  useEffect(() => {
+    if (!db || !user?.uid || !workoutId) return;
+    if (!workout) {
+      if (!isLoadingWorkout) {
+        setPresenceCheckLoading(false);
+        setPresenceAllowed(false);
+      }
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setPresenceCheckLoading(true);
+      try {
+        const ok = await runPresenceCheck();
+        if (!cancelled) setPresenceAllowed(ok);
+      } catch (e) {
+        console.error("Presence check failed:", e);
+        if (!cancelled) setPresenceAllowed(false);
+      } finally {
+        if (!cancelled) setPresenceCheckLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user?.uid, workoutId, workout, isLoadingWorkout, runPresenceCheck]);
+
+  useEffect(() => {
+    if (!db || !user?.uid || presenceAllowed || !workout) return;
+    const id = window.setInterval(async () => {
+      try {
+        const ok = await runPresenceCheck();
+        if (ok) setPresenceAllowed(true);
+      } catch {
+        /* ignore */
+      }
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [db, user?.uid, presenceAllowed, workout, runPresenceCheck]);
 
   useEffect(() => {
     const rosterStudentId = effectiveStudentId ?? "";
@@ -270,6 +339,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
       return;
     }
     if (workout.studentUnlocked === false) return;
+    if (!presenceAllowed) return;
     setIsSaving(true);
     try {
       const trainerId = workout.personalTrainerId;
@@ -302,19 +372,16 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
     }
   };
 
-  if (isLoadingWorkout) {
+  if (isLoadingWorkout || (workout && presenceCheckLoading)) {
     return (
-      <StudentNavigation>
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      </StudentNavigation>
     );
   }
 
   if (!workout) {
     return (
-      <StudentNavigation>
         <div className="text-center py-20 space-y-4">
           <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
           <h2 className="text-2xl font-bold">{t("workoutNotFound")}</h2>
@@ -322,13 +389,11 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
             <Link href="/student/workouts">{t("backToWorkouts")}</Link>
           </Button>
         </div>
-      </StudentNavigation>
     );
   }
 
   if (workout.studentUnlocked === false) {
     return (
-      <StudentNavigation>
         <div className="text-center py-20 space-y-4 max-w-md mx-auto">
           <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
           <h2 className="text-2xl font-bold">{t("workoutPlanLockedTitle")}</h2>
@@ -337,13 +402,24 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
             <Link href="/student/workouts">{t("backToWorkouts")}</Link>
           </Button>
         </div>
-      </StudentNavigation>
+    );
+  }
+
+  if (!presenceAllowed) {
+    return (
+        <div className="text-center py-20 space-y-4 max-w-md mx-auto">
+          <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
+          <h2 className="text-2xl font-bold">{t("studentTrainingRequiresPresentTitle")}</h2>
+          <p className="text-muted-foreground">{t("studentTrainingRequiresPresentDescription")}</p>
+          <Button asChild>
+            <Link href="/student/workouts">{t("backToWorkouts")}</Link>
+          </Button>
+        </div>
     );
   }
 
   if (exercises.length === 0) {
     return (
-      <StudentNavigation>
         <div className="text-center py-20 space-y-4">
           <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
           <h2 className="text-2xl font-bold">{t("workoutNotFound")}</h2>
@@ -351,13 +427,11 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
             <Link href="/student/workouts">{t("backToWorkouts")}</Link>
           </Button>
         </div>
-      </StudentNavigation>
     );
   }
 
   if (isFinished) {
     return (
-      <StudentNavigation>
         <div className="max-w-md mx-auto py-12 text-center space-y-6">
           <div className="w-20 h-20 bg-accent/20 text-accent rounded-full flex items-center justify-center mx-auto">
             <CheckCircle2 className="h-12 w-12" />
@@ -384,12 +458,10 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
             <Link href="/student/workouts">{t("backToWorkouts")}</Link>
           </Button>
         </div>
-      </StudentNavigation>
     );
   }
 
   return (
-    <StudentNavigation>
       <div className="max-w-2xl mx-auto space-y-6">
         <header className="space-y-1">
           <Link
@@ -608,6 +680,5 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
           </Button>
         </CardFooter>
       </div>
-    </StudentNavigation>
   );
 }
