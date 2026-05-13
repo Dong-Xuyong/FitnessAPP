@@ -4,6 +4,7 @@ export function generateStaticParams() {
   return [];
 }
 
-export default function Page({ params }: { params: Promise<{ id: string; planId: string }> }) {
-  return <CoachWorkoutSessionPage params={params} />;
+export default async function Page({ params }: { params: Promise<{ id: string; planId: string }> }) {
+  const { id, planId } = await params;
+  return <CoachWorkoutSessionPage storageStudentId={id} planId={planId} />;
 }

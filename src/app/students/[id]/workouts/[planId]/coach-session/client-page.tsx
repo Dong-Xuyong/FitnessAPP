@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -75,11 +75,12 @@ function prefilledBodyFatFromProfile(bodyFatPercent: unknown): string {
 }
 
 export default function CoachWorkoutSessionPage({
-  params,
+  storageStudentId,
+  planId,
 }: {
-  params: Promise<{ id: string; planId: string }>;
+  storageStudentId: string;
+  planId: string;
 }) {
-  const { id: storageStudentId, planId } = use(params);
   const { user } = useUser();
   const db = useFirestore();
   const { t } = useI18n();
