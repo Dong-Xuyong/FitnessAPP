@@ -38,7 +38,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import {
   blocksForLogicalSession,
-  logicalSessionEndMs,
+  canCoachMarkSessionAttendanceAt,
+  datesWithActionablePendingAttendance,
   normalizeAttendance,
   type SessionAttendanceStatus,
 } from "@/lib/session-attendance-streak";
@@ -50,6 +51,7 @@ import {
 } from "@/components/EditWorkoutSessionDialog";
 import { clearAllTrainerWorkoutPlans } from "@/lib/firestore/clear-trainer-assignments";
 import { cn } from "@/lib/utils";
+import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,8 @@ type Availability = Record<string, DaySchedule>;
 type SlotStudent = {
   studentId: string;
   studentName: string;
+  /** Denormalized roster photo when booking (student app peers cannot list roster). */
+  studentPhotoUrl?: string;
   workoutPlanId?: string;
   workoutTitle?: string;
   sessionStart?: string;
@@ -458,7 +462,11 @@ function CalendarDayRosterRow({
     return `/students/${fid}/workouts/${encodeURIComponent(pid)}/coach-session`;
   };
 
-  const durMin = row.sessionDurationMin;
+  const rosterSessionDur = Number((rosterMatch as Record<string, unknown>)?.sessionDurationMin);
+  const durMin =
+    Number.isFinite(rosterSessionDur) && rosterSessionDur > 0
+      ? rosterSessionDur
+      : row.sessionDurationMin;
   const sessionDurationSuffix =
     durMin != null && Number.isFinite(durMin) && durMin > 0
       ? ` ${t("calendarRosterSessionDurationSuffix").replace("{minutes}", String(Math.round(durMin)))}`
@@ -883,10 +891,9 @@ function rosterPhotoUrlForSlotStudent(
     (s) => s.id === slotStudentId || String(s.userId || "") === slotStudentId
   ) as (Record<string, unknown> & { id: string }) | undefined;
   const seedId = rosterMatch?.id ?? slotStudentId;
-  return (
-    (rosterMatch?.photoUrl as string) ||
-    `https://picsum.photos/seed/${encodeURIComponent(seedId)}/100/100`
-  );
+  const fromRoster = (rosterMatch?.photoUrl as string) || "";
+  if (fromRoster.trim()) return fromRoster.trim();
+  return slotStudentPlaceholderPhotoUrl(seedId);
 }
 
 function isActiveWorkoutPlanDoc(p: Record<string, unknown>): boolean {
@@ -1248,23 +1255,41 @@ export default function AssignmentCalendarPage() {
     return map;
   }, [sessionSlots, selectedDateStr]);
 
-  const slotDates = useMemo(
-    () =>
-      [
-        ...new Set(
-          sessionSlots
-            .filter((s) => Array.isArray(s.students) && s.students.length > 0)
-            .map((s) => s.date)
-        ),
-      ].map((s) => new Date(s + "T12:00:00")),
-    [sessionSlots]
-  );
+  const slotDates = useMemo(() => {
+    const relevantSlots = filterStudentId
+      ? sessionSlots.filter(
+          (s) =>
+            Array.isArray(s.students) &&
+            s.students.some((st) => st.studentId === filterStudentId)
+        )
+      : sessionSlots.filter((s) => Array.isArray(s.students) && s.students.length > 0);
+    return [...new Set(relevantSlots.map((s) => s.date))].map((s) => new Date(s + "T12:00:00"));
+  }, [sessionSlots, filterStudentId]);
 
   // Student filter helpers
   const isFilterActive = !!filterStudentId;
 
+  const pendingAttendanceDates = useMemo(
+    () =>
+      datesWithActionablePendingAttendance(sessionSlots, Date.now(), {
+        filterStudentId: isFilterActive ? filterStudentId : undefined,
+      }).map((d) => new Date(d + "T12:00:00")),
+    [sessionSlots, isFilterActive, filterStudentId]
+  );
+
   const studentsBookedOnSelectedDay = useMemo((): DayBookedStudent[] => {
     const map = new Map<string, DayBookedStudent>();
+
+    const resolvedSessionDurationMin = (studentId: string, st: SlotStudent): number => {
+      const rosterSt = rosterStudentsSorted.find(
+        (s) => s.id === studentId || String((s as Record<string, unknown>).userId || "") === studentId
+      ) as Record<string, unknown> | undefined;
+      const rosterDur = Number(rosterSt?.sessionDurationMin);
+      const fromSlot = st.sessionDurationMin ?? slotDurationMin;
+      if (Number.isFinite(rosterDur) && rosterDur > 0) return rosterDur;
+      return fromSlot;
+    };
+
     for (const slot of sessionSlots) {
       if (slot.date !== selectedDateStr) continue;
       for (const st of slot.students || []) {
@@ -1272,7 +1297,7 @@ export default function AssignmentCalendarPage() {
         const timeLabel = String(st.sessionStart || slot.startTime || "");
         const title = String(st.workoutTitle || "").trim();
         const pid = String(st.workoutPlanId || "").trim();
-        const durationMin = st.sessionDurationMin ?? slotDurationMin;
+        const durationMin = resolvedSessionDurationMin(st.studentId, st);
         const firestoreStudentId = resolveFirestoreStudentId(rosterStudentsSorted, st.studentId);
         const prev = map.get(st.studentId);
         if (!prev) {
@@ -1312,7 +1337,7 @@ export default function AssignmentCalendarPage() {
       if (ta !== tb) return ta - tb;
       return a.studentName.localeCompare(b.studentName, undefined, { sensitivity: "base" });
     });
-  }, [sessionSlots, selectedDateStr, isFilterActive, filterStudentId, rosterStudentsSorted]);
+  }, [sessionSlots, selectedDateStr, isFilterActive, filterStudentId, rosterStudentsSorted, slotDurationMin]);
 
   const selectedCalendarDayLabel = useMemo(
     () =>
@@ -1800,9 +1825,12 @@ export default function AssignmentCalendarPage() {
     [programs]
   );
 
-  // Calendar modifier: all days belonging to weeks that have program assignments
+  // Calendar modifier: days in weeks that have program assignments (scoped to filter student when active)
   const assignedWeekDates = useMemo(() => {
-    const weekStarts = [...new Set(weekAssignments.map((a) => a.weekStart))];
+    const source = filterStudentId
+      ? weekAssignments.filter((a) => a.studentId === filterStudentId)
+      : weekAssignments;
+    const weekStarts = [...new Set(source.map((a) => a.weekStart))];
     return weekStarts.flatMap((ws) =>
       Array.from({ length: 7 }, (_, i) => {
         const d = new Date(ws + "T12:00:00");
@@ -1810,7 +1838,7 @@ export default function AssignmentCalendarPage() {
         return new Date(d);
       })
     );
-  }, [weekAssignments]);
+  }, [weekAssignments, filterStudentId]);
 
   const isUnavailableDay = useCallback(
     (date: Date) => {
@@ -2002,10 +2030,12 @@ export default function AssignmentCalendarPage() {
 
     const effectivePlanId = selectedPlanId && selectedPlanId !== "__none__" ? selectedPlanId : "";
     const plan = studentWorkoutPlans.find((p) => p.id === effectivePlanId);
+    const rosterPhoto = String(student?.photoUrl ?? "").trim();
     const newStudent: SlotStudent = {
       studentId: addStudentId,
       studentName,
       sessionAttendance: "pending",
+      ...(rosterPhoto ? { studentPhotoUrl: rosterPhoto } : {}),
       ...(effectivePlanId ? { workoutPlanId: effectivePlanId, workoutTitle: plan?.title } : {}),
     };
     const newStudents = [...currentStudents, newStudent];
@@ -2124,6 +2154,7 @@ export default function AssignmentCalendarPage() {
         }
         const student = (rosterStudents || []).find((s: any) => s.id === filterStudentId) as any;
         const studentName = `${student?.firstName || ""} ${student?.lastName || ""}`.trim() || "Aluno";
+        const rosterPhoto = String(student?.photoUrl || "").trim();
         const weekMatch = weekAssignments.find((a) => a.studentId === filterStudentId && a.weekStart === selectedWeekStart);
         let weekPlanId = "";
         if (weekMatch && db && user) {
@@ -2164,6 +2195,7 @@ export default function AssignmentCalendarPage() {
             sessionStart: time,
             sessionDurationMin: effectiveSlotDuration,
             sessionAttendance: "pending",
+            ...(rosterPhoto ? { studentPhotoUrl: rosterPhoto } : {}),
             ...(weekMatch ? { workoutTitle: weekMatch.programTitle } : {}),
             ...(weekPlanId ? { workoutPlanId: weekPlanId } : {}),
           };
@@ -2190,11 +2222,10 @@ export default function AssignmentCalendarPage() {
     const durationMin = st.sessionDurationMin ?? slotDurationMin;
     const key = `${date}-${sessionStartResolved}-${st.studentId}`;
     const nowMs = Date.now();
-    const endMs = logicalSessionEndMs(date, sessionStartResolved, durationMin);
-    if (Number.isFinite(endMs) && endMs > nowMs) {
+    if (!canCoachMarkSessionAttendanceAt(nowMs, date, sessionStartResolved)) {
       toast({
-        title: "Sessão ainda não terminou",
-        description: "Só podes marcar presença ou falta depois do horário da sessão.",
+        title: t("coachAttendanceTooEarlyTitle"),
+        description: t("coachAttendanceTooEarlyDescription"),
         variant: "destructive",
       });
       return;
@@ -2725,8 +2756,11 @@ export default function AssignmentCalendarPage() {
                           const overLimit = sessionsPerWeek != null && weekCount > sessionsPerWeek;
                           const sessionSr = st.sessionStart ?? managingSlot.startTime;
                           const durMin = st.sessionDurationMin ?? slotDurationMin;
-                          const endMs = logicalSessionEndMs(managingSlot.date, sessionSr, durMin);
-                          const futureSession = Number.isFinite(endMs) && endMs > Date.now();
+                          const tooEarlyForAttendance = !canCoachMarkSessionAttendanceAt(
+                            Date.now(),
+                            managingSlot.date,
+                            sessionSr
+                          );
                           const attKey = `${managingSlot.date}-${sessionSr}-${st.studentId}`;
                           const savingAtt = isSavingAttendance === attKey;
                           const att = normalizeAttendance(st.sessionAttendance);
@@ -2764,8 +2798,10 @@ export default function AssignmentCalendarPage() {
                                 >
                                   {att === "present" ? "Presente" : att === "absent" ? "Falta" : "Pendente"}
                                 </Badge>
-                                {futureSession && (
-                                  <span className="text-[10px] text-muted-foreground italic">após a sessão</span>
+                                {tooEarlyForAttendance && (
+                                  <span className="text-[10px] text-muted-foreground italic">
+                                    {t("coachAttendanceNotYetWindowHint")}
+                                  </span>
                                 )}
                               </div>
                               <div className="flex flex-wrap gap-1">
@@ -2774,7 +2810,7 @@ export default function AssignmentCalendarPage() {
                                   size="sm"
                                   variant="default"
                                   className="h-7 text-[10px] border-2 border-emerald-900/40 bg-emerald-600 text-white shadow-none hover:bg-emerald-700 dark:border-emerald-200/50 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-                                  disabled={futureSession || savingAtt}
+                                  disabled={tooEarlyForAttendance || savingAtt}
                                   onClick={() => handleSessionAttendanceSave(st, "present")}
                                 >
                                   Presente
@@ -2784,7 +2820,7 @@ export default function AssignmentCalendarPage() {
                                   size="sm"
                                   variant="destructive"
                                   className="h-7 text-[10px] border-2 border-destructive-foreground/35 shadow-none"
-                                  disabled={futureSession || savingAtt}
+                                  disabled={tooEarlyForAttendance || savingAtt}
                                   onClick={() => handleSessionAttendanceSave(st, "absent")}
                                 >
                                   Falta
@@ -2794,7 +2830,7 @@ export default function AssignmentCalendarPage() {
                                   size="sm"
                                   variant="default"
                                   className="h-7 text-[10px] border-2 border-amber-900/40 bg-amber-500 text-amber-950 shadow-none hover:bg-amber-600 dark:border-amber-200/50 dark:bg-amber-600 dark:text-white dark:hover:bg-amber-500"
-                                  disabled={futureSession || savingAtt}
+                                  disabled={tooEarlyForAttendance || savingAtt}
                                   onClick={() => handleSessionAttendanceSave(st, "pending")}
                                 >
                                   Pendente
@@ -3006,11 +3042,18 @@ export default function AssignmentCalendarPage() {
                 mode="single"
                 selected={selectedDate}
                 onSelect={(d) => { if (d) setSelectedDate(d); }}
-                modifiers={{ hasSlots: slotDates, unavailable: isUnavailableDay, hasProgram: assignedWeekDates }}
+                modifiers={{
+                  hasSlots: slotDates,
+                  unavailable: isUnavailableDay,
+                  hasProgram: assignedWeekDates,
+                  pendingAttendance: pendingAttendanceDates,
+                }}
                 modifiersClassNames={{
                   hasSlots:   "bg-accent/20 text-accent font-semibold rounded-full",
                   hasProgram: "bg-primary/10 font-medium",
                   unavailable: "opacity-40 line-through text-muted-foreground",
+                  pendingAttendance:
+                    "ring-2 ring-amber-500/90 dark:ring-amber-400 ring-offset-2 ring-offset-background relative z-[1] rounded-full",
                 }}
                 className="rounded-md border max-w-full"
               />
@@ -3022,8 +3065,8 @@ export default function AssignmentCalendarPage() {
                   Com sessões
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-sm bg-primary/20 inline-block" />
-                  Semana com programa
+                  <span className="w-3 h-3 rounded-full border-2 border-amber-500 dark:border-amber-400 inline-block" />
+                  Presença pendente
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-full bg-muted border inline-block" />
@@ -3228,6 +3271,38 @@ export default function AssignmentCalendarPage() {
                           </div>
                         )}
                         <div className="flex-1 min-w-0">
+                          {!isContinuation && (slot?.students?.length ?? 0) > 0 && (
+                            <div
+                              className="flex flex-wrap items-center gap-1.5 mb-1.5"
+                              aria-label="Inscritos neste bloco"
+                            >
+                              {slot!.students.map((st) => {
+                                const src =
+                                  st.studentPhotoUrl?.trim() ||
+                                  rosterPhotoUrlForSlotStudent(rosterStudentsSorted, st.studentId);
+                                const initial =
+                                  (st.studentName || "").trim().charAt(0).toUpperCase() || "?";
+                                const stAtt = normalizeAttendance(st.sessionAttendance);
+                                return (
+                                  <span
+                                    key={st.studentId}
+                                    title={st.studentName}
+                                    className="relative inline-flex shrink-0"
+                                  >
+                                    <Avatar className={attendanceAvatarClassName(stAtt)}>
+                                      <AvatarImage src={src} alt="" />
+                                      <AvatarFallback className="text-[9px]">{initial}</AvatarFallback>
+                                    </Avatar>
+                                    {st.workoutPlanId ? (
+                                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm ring-2 ring-background">
+                                        <Dumbbell className="h-2 w-2" aria-hidden />
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                           {isContinuation ? (
                             <span className="text-xs text-primary/60 italic">↳ continuação</span>
                           ) : isSessionStart ? (
@@ -3317,7 +3392,9 @@ export default function AssignmentCalendarPage() {
                           {hasStudents ? (
                             <div className="flex flex-wrap items-center gap-1.5">
                               {slot!.students.map((st) => {
-                                const src = rosterPhotoUrlForSlotStudent(rosterStudentsSorted, st.studentId);
+                                const src =
+                                  st.studentPhotoUrl?.trim() ||
+                                  rosterPhotoUrlForSlotStudent(rosterStudentsSorted, st.studentId);
                                 const initial = st.studentName.trim().charAt(0).toUpperCase() || "?";
                                 const stAtt = normalizeAttendance(st.sessionAttendance);
                                 return (

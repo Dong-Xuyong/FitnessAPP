@@ -8,6 +8,7 @@ export type SessionAttendanceStatus = "pending" | "present" | "absent";
 export type SlotStudentAttendance = {
   studentId: string;
   studentName?: string;
+  studentPhotoUrl?: string;
   workoutPlanId?: string;
   workoutTitle?: string;
   sessionStart?: string;
@@ -50,18 +51,114 @@ export function normalizeAttendance(v?: SessionAttendanceStatus | string): Sessi
   return "pending";
 }
 
+/** Start instant of a logical booked session (local `YYYY-MM-DD` + `HH:mm`). */
+export function logicalSessionStartMs(date: string, sessionStartClock: string): number {
+  const d = date.substring(0, 10);
+  const clock = sessionStartClock && sessionStartClock.length >= 4 ? sessionStartClock : "00:00";
+  const startIso = `${d}T${clock}:00`;
+  const startMs = Date.parse(startIso);
+  return startMs;
+}
+
+/** Minutes before session start when the coach may record attendance (and student app unlocks). */
+export const COACH_ATTENDANCE_MARKABLE_MINUTES_BEFORE_SESSION = 15;
+
+/** After session end, students may still finish logging this workout for a short window. */
+export const STUDENT_TRAINING_ACCESS_GRACE_MINUTES_AFTER_SESSION_END = 240;
+
 /** End instant of logical session for streak eligibility (elapsed if <= nowMs). */
 export function logicalSessionEndMs(
   date: string,
   sessionStartClock: string,
   durationMin: number
 ): number {
-  const d = date.substring(0, 10);
-  const clock = sessionStartClock && sessionStartClock.length >= 4 ? sessionStartClock : "00:00";
-  const startIso = `${d}T${clock}:00`;
-  const startMs = Date.parse(startIso);
+  const startMs = logicalSessionStartMs(date, sessionStartClock);
   if (!Number.isFinite(startMs)) return NaN;
   return startMs + durationMin * 60 * 1000;
+}
+
+/** Coach may mark attendance from N minutes before start onward (including after the session ends). */
+export function canCoachMarkSessionAttendanceAt(
+  nowMs: number,
+  date: string,
+  sessionStartClock: string
+): boolean {
+  const startMs = logicalSessionStartMs(date, sessionStartClock);
+  if (!Number.isFinite(startMs)) return false;
+  const openAt = startMs - COACH_ATTENDANCE_MARKABLE_MINUTES_BEFORE_SESSION * 60 * 1000;
+  return nowMs >= openAt;
+}
+
+export type ActionablePendingAttendanceOptions = {
+  /** When set, only this student's bookings are considered (coach roster filter). */
+  filterStudentId?: string;
+};
+
+/**
+ * ISO date strings (YYYY-MM-DD) where at least one student has `pending` session attendance
+ * and the coach may mark attendance (same window as the manage-slot UI).
+ */
+export function datesWithActionablePendingAttendance(
+  slots: SessionSlotAttendance[],
+  nowMs: number,
+  options?: ActionablePendingAttendanceOptions
+): string[] {
+  const filterId = options?.filterStudentId?.trim();
+  const days = new Set<string>();
+
+  for (const slot of slots) {
+    if (!slot.date || !slot.startTime || !Array.isArray(slot.students)) continue;
+    const dateKey = slot.date.substring(0, 10);
+    for (const st of slot.students) {
+      if (!st?.studentId) continue;
+      if (filterId && st.studentId !== filterId) continue;
+      if (normalizeAttendance(st.sessionAttendance) !== "pending") continue;
+      const sessionStart = st.sessionStart ?? slot.startTime;
+      if (!canCoachMarkSessionAttendanceAt(nowMs, dateKey, sessionStart)) continue;
+      days.add(dateKey);
+    }
+  }
+  return [...days].sort();
+}
+
+/**
+ * True when the student may open the live workout for `workoutPlanId`: booked slot with coach `present`,
+ * current time within [start − 15min, end + grace].
+ */
+export function studentHasCoachPresentAccessForPlan(
+  slots: SessionSlotAttendance[],
+  studentId: string,
+  workoutPlanId: string,
+  nowMs: number,
+  fallbackSessionDurationMin: number
+): boolean {
+  if (!studentId || !workoutPlanId) return false;
+  const beforeMs = COACH_ATTENDANCE_MARKABLE_MINUTES_BEFORE_SESSION * 60 * 1000;
+  const graceMs = STUDENT_TRAINING_ACCESS_GRACE_MINUTES_AFTER_SESSION_END * 60 * 1000;
+  const seenLogical = new Set<string>();
+
+  for (const slot of slots) {
+    for (const st of slot.students || []) {
+      if (st.studentId !== studentId) continue;
+      if (normalizeAttendance(st.sessionAttendance) !== "present") continue;
+      const startClock = st.sessionStart ?? slot.startTime;
+      const durationMin = st.sessionDurationMin ?? fallbackSessionDurationMin;
+      const logicalKey = `${slot.date}|${startClock}|${studentId}`;
+      if (seenLogical.has(logicalKey)) continue;
+      seenLogical.add(logicalKey);
+
+      const rowPlan = st.workoutPlanId;
+      if (rowPlan && rowPlan !== workoutPlanId) continue;
+
+      const startMs = logicalSessionStartMs(slot.date, startClock);
+      const endMs = logicalSessionEndMs(slot.date, startClock, durationMin);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
+      if (nowMs < startMs - beforeMs) continue;
+      if (nowMs > endMs + graceMs) continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Times of each occupied block start for one logical booking. */
