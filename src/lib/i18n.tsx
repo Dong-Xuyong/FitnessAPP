@@ -194,7 +194,7 @@ const translations = {
     workoutPlanLockedDescription: "Complete the previous step in your program sequence to unlock this workout.",
     studentTrainingRequiresPresentTitle: "Session not unlocked yet",
     studentTrainingRequiresPresentDescription:
-      "Your coach must mark you present for today’s booked session before you can start this workout. If you just arrived, ask them to mark attendance in the calendar.",
+      "Your coach must mark you present on the calendar day of your booked session before you can start this workout. If you are already at the gym, ask them to record attendance in the calendar.",
     coachAttendanceTooEarlyTitle: "Too early to record attendance",
     coachAttendanceTooEarlyDescription:
       "You can mark attendance from 15 minutes before the session start time.",
@@ -238,6 +238,13 @@ const translations = {
     startWorkout: "Start Workout",
     myProgress: "My Progress",
     myBilling: "My Billing",
+    studentWorkoutsPlansHeadingToday: "Today's workouts",
+    studentWorkoutsPlansHeadingWeek: "Workouts for the selected week",
+    studentWorkoutsNoPlansForSelectedWeek:
+      "No unlocked workouts for this calendar week. Choose another week on the calendar or ask your coach.",
+    studentWorkoutsLockedPlanMessage:
+      "You have a workout assigned for this week. It will be shown here and you can start once your coach marks you present on the day of your booked session.",
+    workoutHistoryLastSessionOn: "Last session",
 
     // Common
     loading: "Loading...",
@@ -607,6 +614,8 @@ const translations = {
     registerYourSet: "Log your set",
     sessionFeedbackTitle: "How did it go?",
     sessionFeedbackHint: "Optional — your coach can see this after you save.",
+    sessionFeedbackExpand: "Show feedback & metrics",
+    sessionFeedbackCollapse: "Hide feedback & metrics",
     sessionDifficultyLabel: "How hard was this workout?",
     sessionMoodLabel: "How do you feel?",
     sessionDifficultyPlaceholder: "Anything about effort, pain, or pacing…",
@@ -991,7 +1000,7 @@ const translations = {
     workoutPlanLockedDescription: "Conclui o passo anterior na sequência do programa para desbloquear este treino.",
     studentTrainingRequiresPresentTitle: "Sessão ainda não desbloqueada",
     studentTrainingRequiresPresentDescription:
-      "O teu treinador tem de te marcar presente na sessão reservada antes de poderes iniciar este treino. Se já estás no ginásio, pede-lhe que registe a presença no calendário.",
+      "O teu treinador tem de te marcar presente no dia da sessão reservada antes de poderes iniciar este treino. Se já estás no ginásio, pede-lhe que registe a presença no calendário.",
     coachAttendanceTooEarlyTitle: "Ainda não podes marcar presença",
     coachAttendanceTooEarlyDescription:
       "Só podes registar presença, falta ou pendente a partir de 15 minutos antes do horário de início da sessão.",
@@ -1035,6 +1044,13 @@ const translations = {
     startWorkout: "Iniciar Treino",
     myProgress: "Meu Progresso",
     myBilling: "Minha Faturação",
+    studentWorkoutsPlansHeadingToday: "Treinos de hoje",
+    studentWorkoutsPlansHeadingWeek: "Treinos da semana selecionada",
+    studentWorkoutsNoPlansForSelectedWeek:
+      "Não há treinos desbloqueados para esta semana do calendário. Escolhe outra semana ou fala com o teu treinador.",
+    studentWorkoutsLockedPlanMessage:
+      "Tens um treino atribuído para esta semana. Será mostrado aqui e poderás iniciar quando o treinador te marcar presente no dia da sessão reservada.",
+    workoutHistoryLastSessionOn: "Última sessão",
 
     // Common
     loading: "A carregar...",
@@ -1404,6 +1420,8 @@ const translations = {
     registerYourSet: "Regista a tua série",
     sessionFeedbackTitle: "Como foi o treino?",
     sessionFeedbackHint: "Opcional — o treinador vê isto depois de guardares.",
+    sessionFeedbackExpand: "Mostrar feedback e métricas",
+    sessionFeedbackCollapse: "Ocultar feedback e métricas",
     sessionDifficultyLabel: "Quão difícil foi o treino?",
     sessionMoodLabel: "Como te sentes?",
     sessionDifficultyPlaceholder: "Esforço, desconforto, ritmo…",

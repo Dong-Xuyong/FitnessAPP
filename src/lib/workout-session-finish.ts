@@ -1,5 +1,5 @@
 import type { Firestore } from "firebase/firestore";
-import { collection, doc, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, updateDoc, writeBatch } from "firebase/firestore";
 
 export type FinishWorkoutSetLog = { weight: string; reps: string };
 
@@ -25,6 +25,9 @@ export function exerciseHasLoggedSet(log: FinishWorkoutSetLog | undefined): bool
  * Writes workout session + completed plan + optional sequence unlock + optional profile patches.
  * `storageStudentId` is the Firestore segment under `students/{storageStudentId}/workoutPlans`.
  * `sessionStudentAuthUid` is stored on the session document as `studentId` and used for `students/{uid}` global doc.
+ *
+ * Sequence unlock runs in a **second** write after the first batch commits: security rules use `get()`
+ * on the prior plan’s `status`, which does not include uncommitted updates from the same batch.
  */
 export async function commitFinishedWorkoutSession(params: {
   db: Firestore;
@@ -100,18 +103,6 @@ export async function commitFinishedWorkoutSession(params: {
     status: "completed",
   });
   const nextPlanId = typeof params.sequenceNextPlanId === "string" ? params.sequenceNextPlanId.trim() : "";
-  if (nextPlanId) {
-    const nextRef = doc(
-      params.db,
-      "personalTrainers",
-      params.trainerId,
-      "students",
-      params.storageStudentId,
-      "workoutPlans",
-      nextPlanId
-    );
-    batch.update(nextRef, { studentUnlocked: true });
-  }
   if (params.bodyWeightKg != null || params.bodyFatPercent != null) {
     const profilePatch: Record<string, number> = {};
     if (params.bodyWeightKg != null) profilePatch.weightKg = params.bodyWeightKg;
@@ -124,4 +115,30 @@ export async function commitFinishedWorkoutSession(params: {
     );
   }
   await batch.commit();
+
+  if (nextPlanId) {
+    const nextRef = doc(
+      params.db,
+      "personalTrainers",
+      params.trainerId,
+      "students",
+      params.storageStudentId,
+      "workoutPlans",
+      nextPlanId
+    );
+    try {
+      const nextSnap = await getDoc(nextRef);
+      if (nextSnap.exists()) {
+        const nd = nextSnap.data() as Record<string, unknown>;
+        const afterId = nd.sequenceUnlockAfterPlanId;
+        const chainOk = typeof afterId === "string" && afterId === params.workoutPlanId;
+        const notYetUnlocked = nd.studentUnlocked !== true;
+        if (chainOk && notYetUnlocked) {
+          await updateDoc(nextRef, { studentUnlocked: true });
+        }
+      }
+    } catch (e) {
+      console.error("Sequence unlock failed after session was saved:", e);
+    }
+  }
 }

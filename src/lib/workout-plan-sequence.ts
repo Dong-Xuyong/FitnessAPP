@@ -12,6 +12,30 @@ export function sequenceStepLabel(stepInCycleIndex: number): string {
   return STEP_LABELS[stepInCycleIndex] ?? "?";
 }
 
+/** Minimal plan fields for sequence unlock checks (client + rules-adjacent heuristics). */
+export type SequencePlanUnlockFields = {
+  id?: string;
+  studentUnlocked?: boolean;
+  sequenceUnlockAfterPlanId?: string | null;
+  sequenceGroupId?: string | null;
+};
+
+/**
+ * Treat a sequence step as unlocked when Firestore says so, or when the prior plan id
+ * is in `completedPlanIds` (doc completed / session logged) so UI matches reality if
+ * `studentUnlocked` was not updated.
+ */
+export function isSequenceStepEffectiveUnlocked(
+  plan: SequencePlanUnlockFields,
+  completedPlanIds: ReadonlySet<string>
+): boolean {
+  if (!plan.sequenceGroupId) return true;
+  if (plan.studentUnlocked !== false) return true;
+  const prior = typeof plan.sequenceUnlockAfterPlanId === "string" ? plan.sequenceUnlockAfterPlanId.trim() : "";
+  if (!prior) return false;
+  return completedPlanIds.has(prior);
+}
+
 /**
  * Writes `repeatCycles × programsInOrder.length` workout plan docs with unlock chain metadata.
  * Only the first document is visible to the student until each prior step is completed.

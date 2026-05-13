@@ -17,8 +17,13 @@ import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
 import { doc, getDoc, collection, getDocs, updateDoc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
-import { studentHasCoachPresentAccessForPlan, type SessionSlotAttendance } from "@/lib/session-attendance-streak";
+import {
+  resolveStudentPresentStartPlans,
+  studentLocalCalendarDateKeyMs,
+  type SessionSlotAttendance,
+} from "@/lib/session-attendance-streak";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
+import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -53,6 +58,7 @@ interface WorkoutPlan {
   studentUnlocked?: boolean;
   sequenceGroupId?: string;
   sequenceStepIndex?: number;
+  sequenceUnlockAfterPlanId?: string | null;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -214,9 +220,15 @@ export default function StudentWorkoutsPage() {
 
   // Workout plans
   const [workouts, setWorkouts]           = useState<WorkoutPlan[]>([]);
+  /** Plan ids completed on roster (used with sequence `sequenceUnlockAfterPlanId`). */
+  const [completedPlanIds, setCompletedPlanIds] = useState<ReadonlySet<string>>(new Set());
   const [expandedWorkoutId, setExpandedWorkoutId] = useState<string | null>(null);
   /** Re-evaluate “coach marked present” access periodically without full refetch. */
   const [presentAccessTick, setPresentAccessTick] = useState(0);
+  const [hasCompletedWorkoutSessionToday, setHasCompletedWorkoutSessionToday] = useState(false);
+
+  /** Roster document id under the trainer (falls back to auth uid until first fetch). */
+  const myId = rosterDocId || user?.uid || "";
 
   // ── Data fetching ────────────────────────────────────────────────────────────
 
@@ -237,11 +249,12 @@ export default function StudentWorkoutsPage() {
         setTrainerId(tid);
         setRosterDocId(rid);
 
-        const [rosterDoc, trainerDoc, slotsSnap, plansSnap] = await Promise.all([
+        const [rosterDoc, trainerDoc, slotsSnap, plansSnap, sessionsSnap] = await Promise.all([
           getDoc(doc(db!, "personalTrainers", tid, "students", rid)),
           getDoc(doc(db!, "personalTrainers", tid)),
           getDocs(collection(db!, "personalTrainers", tid, "sessionSlots")),
           getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutPlans")),
+          getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutSessions")),
         ]);
         if (cancelled) return;
 
@@ -280,8 +293,34 @@ export default function StudentWorkoutsPage() {
         // 4. All session slots
         setSessionSlots(slotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SessionSlot)));
 
+        const todayKey = studentLocalCalendarDateKeyMs(Date.now());
+        let completedSessionToday = false;
+        for (const sd of sessionsSnap.docs) {
+          const data = sd.data() as { completedAt?: unknown };
+          const ca = data.completedAt;
+          if (ca == null) continue;
+          let ms: number | null = null;
+          if (typeof ca === "object" && ca !== null && "toDate" in (ca as object) && typeof (ca as { toDate?: () => Date }).toDate === "function") {
+            ms = (ca as { toDate: () => Date }).toDate().getTime();
+          } else if (typeof ca === "string" && ca.trim()) {
+            ms = Date.parse(ca);
+          }
+          if (ms == null || !Number.isFinite(ms)) continue;
+          if (studentLocalCalendarDateKeyMs(ms) === todayKey) {
+            completedSessionToday = true;
+            break;
+          }
+        }
+        if (!cancelled) setHasCompletedWorkoutSessionToday(completedSessionToday);
+
         // 5. Workout plans
         const plans: WorkoutPlan[] = plansSnap.docs.map(d => ({ id: d.id, ...d.data() })) as WorkoutPlan[];
+
+        const completedIds = new Set<string>();
+        for (const p of plans) {
+          if (p.completedAt || p.status === "completed") completedIds.add(p.id);
+        }
+        if (!cancelled) setCompletedPlanIds(completedIds);
 
         const expiredPlans = plans.filter(p => {
           if (p.completedAt || p.status === "completed") return false;
@@ -299,7 +338,7 @@ export default function StudentWorkoutsPage() {
         const activePlans = plans.filter(p => {
           if (p.completedAt || p.status === "completed") return false;
           if (expiredPlans.some(e => e.id === p.id)) return false;
-          if (p.studentUnlocked === false) return false;
+          if (!isSequenceStepEffectiveUnlocked(p, completedIds)) return false;
           return getPlanDaysUntilExpiry(p) >= 0;
         });
         activePlans.sort((a,b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || ""));
@@ -318,9 +357,46 @@ export default function StudentWorkoutsPage() {
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (!db || !user?.uid || !trainerId || !myId) return;
+    let cancelled = false;
+    async function refreshCompletedToday() {
+      try {
+        const sessionsSnap = await getDocs(
+          collection(db!, "personalTrainers", trainerId, "students", myId, "workoutSessions")
+        );
+        if (cancelled) return;
+        const todayKey = studentLocalCalendarDateKeyMs(Date.now());
+        let completedSessionToday = false;
+        for (const sd of sessionsSnap.docs) {
+          const data = sd.data() as { completedAt?: unknown };
+          const ca = data.completedAt;
+          if (ca == null) continue;
+          let ms: number | null = null;
+          if (typeof ca === "object" && ca !== null && "toDate" in (ca as object) && typeof (ca as { toDate?: () => Date }).toDate === "function") {
+            ms = (ca as { toDate: () => Date }).toDate().getTime();
+          } else if (typeof ca === "string" && ca.trim()) {
+            ms = Date.parse(ca);
+          }
+          if (ms == null || !Number.isFinite(ms)) continue;
+          if (studentLocalCalendarDateKeyMs(ms) === todayKey) {
+            completedSessionToday = true;
+            break;
+          }
+        }
+        if (!cancelled) setHasCompletedWorkoutSessionToday(completedSessionToday);
+      } catch {
+        /* ignore */
+      }
+    }
+    void refreshCompletedToday();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user?.uid, trainerId, myId, presentAccessTick]);
+
   // ── Derived ───────────────────────────────────────────────────────────────────
 
-  const myId            = rosterDocId || user?.uid || "";
   const selectedDateStr = toDateStr(selectedDate);
   const selectedDaySched = availability[DAY_KEYS[selectedDate.getDay()]];
   const isSelectedDayAvailable = !!(selectedDaySched?.enabled && selectedDaySched.ranges.length);
@@ -413,24 +489,42 @@ export default function StudentWorkoutsPage() {
   }, [workouts, selectedWeekStart]);
 
   const planPresentAccess = useMemo(() => {
-    void presentAccessTick;
     const now = Date.now();
     const map = new Map<string, boolean>();
     if (!myId) return map;
     const slots = sessionSlots as SessionSlotAttendance[];
+    const candidates = weekPlansOrdered.map((w) => ({
+      id: w.id,
+      sequenceStepIndex: Number(w.sequenceStepIndex) || 0,
+    }));
+    const resolved = resolveStudentPresentStartPlans(
+      slots,
+      myId,
+      candidates,
+      now,
+      sessionDurationMin,
+      hasCompletedWorkoutSessionToday
+    );
     for (const w of weekPlansOrdered) {
-      map.set(
-        w.id,
-        studentHasCoachPresentAccessForPlan(slots, myId, w.id, now, sessionDurationMin)
-      );
+      map.set(w.id, resolved.get(w.id) === true);
     }
     return map;
-  }, [myId, sessionSlots, weekPlansOrdered, sessionDurationMin, presentAccessTick]);
+  }, [
+    myId,
+    sessionSlots,
+    weekPlansOrdered,
+    sessionDurationMin,
+    presentAccessTick,
+    selectedWeekStart,
+    hasCompletedWorkoutSessionToday,
+  ]);
 
-  const startableWeekPlans = useMemo(
-    () => weekPlansOrdered.filter((w) => planPresentAccess.get(w.id) === true),
-    [weekPlansOrdered, planPresentAccess]
-  );
+  const workoutsPlansSectionTitle = useMemo(() => {
+    const today = toDateStr(new Date());
+    return toDateStr(selectedDate) === today
+      ? t("studentWorkoutsPlansHeadingToday")
+      : t("studentWorkoutsPlansHeadingWeek");
+  }, [selectedDate, t]);
 
   // ── Register / unregister ─────────────────────────────────────────────────────
 
@@ -532,7 +626,7 @@ export default function StudentWorkoutsPage() {
               (w) =>
                 !!w.sequenceGroupId &&
                 !(w.weekStart || w.assignedAt || w.createdAt) &&
-                w.studentUnlocked !== false
+                isSequenceStepEffectiveUnlocked(w, completedPlanIds)
             )
             .sort((a, b) => (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0))[0];
         const totalSessionMin = slotsNeeded * slotDurationMin;
@@ -655,15 +749,15 @@ export default function StudentWorkoutsPage() {
           <Card className="lg:col-span-3">
             <CardHeader>
               {/* Week selected on calendar — same filter as program list below */}
-              {startableWeekPlans.length > 0 && (
+              {weekPlansOrdered.length > 0 && (
                 <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 mb-2">
                   <Dumbbell className="h-4 w-4 text-primary shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">Programa desta semana</p>
+                    <p className="text-xs text-muted-foreground">{workoutsPlansSectionTitle}</p>
                     <p className="text-sm font-semibold text-primary">
-                      {startableWeekPlans.length === 1
-                        ? startableWeekPlans[0].title
-                        : `${startableWeekPlans.length} programas nesta semana`}
+                      {weekPlansOrdered.length === 1
+                        ? weekPlansOrdered[0].title
+                        : `${weekPlansOrdered.length} programas nesta semana`}
                     </p>
                   </div>
                 </div>
@@ -871,70 +965,106 @@ export default function StudentWorkoutsPage() {
           </Card>
         </div>
 
-        {/* Assigned workout plans for the week selected on the calendar (coach marked present + time window) */}
-        {startableWeekPlans.length > 0 && (
+        {trainerId ? (
           <div className="space-y-3">
-            <h2 className="text-lg font-semibold">Programa desta semana</h2>
-            <div className="space-y-2">
-              {startableWeekPlans.map((w) => {
-                const isExpanded = expandedWorkoutId === w.id;
-                const weekDate = w.weekStart
-                  ? new Date(w.weekStart + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })
-                  : w.assignedAt
-                  ? new Date(w.assignedAt).toLocaleDateString()
-                  : null;
+            <h2 className="text-lg font-semibold">{workoutsPlansSectionTitle}</h2>
+            {weekPlansOrdered.length > 0 ? (
+              <div className="space-y-2">
+                {weekPlansOrdered.map((w) => {
+                  const isExpanded = expandedWorkoutId === w.id;
+                  const weekDate = w.weekStart
+                    ? new Date(w.weekStart + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })
+                    : w.assignedAt
+                    ? new Date(w.assignedAt).toLocaleDateString()
+                    : null;
 
-                return (
-                  <div key={w.id} className="rounded-lg border overflow-hidden bg-card">
-                    {/* Header */}
-                    <div className={`flex items-center gap-3 px-3 py-2.5 ${
-                      isExpanded ? "border-b" : ""
-                    }`}>
-                      <Dumbbell className="h-4 w-4 text-primary shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{w.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {w.exercises?.length || 0} exercícios
-                          {weekDate ? ` · semana de ${weekDate}` : ""}
-                        </p>
-                      </div>
-                      <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0"
-                        onClick={() => setExpandedWorkoutId(isExpanded ? null : w.id)}>
-                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      </Button>
-                      <Button size="sm" className="shrink-0 h-7 bg-accent text-accent-foreground gap-1.5 text-xs" asChild>
-                        <Link href={`/student/workouts/${w.id}/session`}>
-                          <Play className="h-3 w-3" /> Iniciar
-                        </Link>
-                      </Button>
-                    </div>
-
-                    {/* Expanded exercises */}
-                    {isExpanded && (
-                      <div className="divide-y">
-                        {(w.exercises || []).length === 0 ? (
-                          <p className="text-sm text-muted-foreground text-center py-4">Sem exercícios.</p>
-                        ) : (w.exercises || []).map((ex: any, idx: number) => (
-                          <div key={idx} className="px-4 py-3 space-y-1.5">
-                            <p className="text-sm font-semibold">{ex.exerciseName}</p>
-                            {ex.notes ? (
-                              <div className="flex items-start gap-1.5">
-                                <StickyNote className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                                <p className="text-xs text-muted-foreground whitespace-pre-line">{ex.notes}</p>
+                  const canStartThisWeek = planPresentAccess.get(w.id) === true;
+                  const panelId = `student-workout-plan-${w.id}`;
+                  return (
+                    <div key={w.id} className="rounded-lg border overflow-hidden bg-card">
+                      {canStartThisWeek ? (
+                        <>
+                          <div
+                            className={`flex items-center gap-2 px-3 py-2.5 ${
+                              isExpanded ? "border-b" : ""
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              id={`${panelId}-toggle`}
+                              aria-expanded={isExpanded}
+                              aria-controls={panelId}
+                              className="flex flex-1 min-w-0 items-center gap-3 rounded-md py-0.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                              onClick={() => setExpandedWorkoutId(isExpanded ? null : w.id)}
+                            >
+                              <Dumbbell className="h-4 w-4 text-primary shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold truncate">{w.title}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {w.exercises?.length || 0} exercícios
+                                  {weekDate ? ` · semana de ${weekDate}` : ""}
+                                </p>
                               </div>
-                            ) : (
-                              <p className="text-xs text-muted-foreground italic">Sem notas do treinador.</p>
-                            )}
+                              <span className="shrink-0 text-muted-foreground" aria-hidden>
+                                {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                              </span>
+                            </button>
+                            <Button size="sm" className="shrink-0 h-7 bg-accent text-accent-foreground gap-1.5 text-xs" asChild>
+                              <Link href={`/student/workouts/${w.id}/session`}>
+                                <Play className="h-3 w-3" /> Iniciar
+                              </Link>
+                            </Button>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+
+                          {isExpanded && (
+                            <div id={panelId} role="region" aria-labelledby={`${panelId}-toggle`} className="divide-y">
+                              {(w.exercises || []).length === 0 ? (
+                                <p className="text-sm text-muted-foreground text-center py-4">Sem exercícios.</p>
+                              ) : (w.exercises || []).map((ex: any, idx: number) => (
+                                <div key={idx} className="px-4 py-3 space-y-1.5">
+                                  <p className="text-sm font-semibold">{ex.exerciseName}</p>
+                                  {ex.notes ? (
+                                    <div className="flex items-start gap-1.5">
+                                      <StickyNote className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                                      <p className="text-xs text-muted-foreground whitespace-pre-line">{ex.notes}</p>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground italic">Sem notas do treinador.</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 px-3 py-2.5">
+                          <div className="flex flex-1 min-w-0 items-start gap-3">
+                            <Dumbbell className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
+                            <p className="text-sm text-muted-foreground leading-snug">
+                              {t("studentWorkoutsLockedPlanMessage")}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="shrink-0 h-7 gap-1.5 text-xs"
+                            disabled
+                            title={t("studentTrainingRequiresPresentDescription")}
+                          >
+                            <Play className="h-3 w-3" /> Iniciar
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t("studentWorkoutsNoPlansForSelectedWeek")}</p>
+            )}
           </div>
-        )}
+        ) : null}
 
       </div>
   );

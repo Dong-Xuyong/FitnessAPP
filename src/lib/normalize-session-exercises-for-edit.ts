@@ -1,4 +1,4 @@
-/** Rows used by EditWorkoutSessionDialog (matches student profile workout history editor). */
+/** Rows used by EditWorkoutSessionDialog (coach may edit per-set weight/reps only; name is read-only in UI). */
 export type EditSessionExerciseRow = {
   name: string;
   sets: { weight: number; reps: number }[];

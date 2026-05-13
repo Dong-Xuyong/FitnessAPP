@@ -51,6 +51,19 @@ export function normalizeAttendance(v?: SessionAttendanceStatus | string): Sessi
   return "pending";
 }
 
+function localCalendarDateKeyFromMs(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Local calendar `YYYY-MM-DD` for a wall-clock instant (student device). */
+export function studentLocalCalendarDateKeyMs(ms: number): string {
+  return localCalendarDateKeyFromMs(ms);
+}
+
 /** Start instant of a logical booked session (local `YYYY-MM-DD` + `HH:mm`). */
 export function logicalSessionStartMs(date: string, sessionStartClock: string): number {
   const d = date.substring(0, 10);
@@ -122,27 +135,27 @@ export function datesWithActionablePendingAttendance(
 }
 
 /**
- * True when the student may open the live workout for `workoutPlanId`: booked slot with coach `present`,
- * current time within [start − 15min, end + grace].
+ * True when the student may open the live workout for `workoutPlanId`: a booked slot on **today's
+ * calendar date** (local) where the coach marked them `present`, and the slot's linked plan (if any)
+ * matches `workoutPlanId`. The narrow pre-start / post-grace time window is not used — the whole
+ * session day counts once present is recorded.
  */
 export function studentHasCoachPresentAccessForPlan(
   slots: SessionSlotAttendance[],
   studentId: string,
   workoutPlanId: string,
   nowMs: number,
-  fallbackSessionDurationMin: number
+  _fallbackSessionDurationMin: number
 ): boolean {
   if (!studentId || !workoutPlanId) return false;
-  const beforeMs = COACH_ATTENDANCE_MARKABLE_MINUTES_BEFORE_SESSION * 60 * 1000;
-  const graceMs = STUDENT_TRAINING_ACCESS_GRACE_MINUTES_AFTER_SESSION_END * 60 * 1000;
   const seenLogical = new Set<string>();
+  const todayKey = localCalendarDateKeyFromMs(nowMs);
 
   for (const slot of slots) {
     for (const st of slot.students || []) {
       if (st.studentId !== studentId) continue;
       if (normalizeAttendance(st.sessionAttendance) !== "present") continue;
       const startClock = st.sessionStart ?? slot.startTime;
-      const durationMin = st.sessionDurationMin ?? fallbackSessionDurationMin;
       const logicalKey = `${slot.date}|${startClock}|${studentId}`;
       if (seenLogical.has(logicalKey)) continue;
       seenLogical.add(logicalKey);
@@ -150,15 +163,57 @@ export function studentHasCoachPresentAccessForPlan(
       const rowPlan = st.workoutPlanId;
       if (rowPlan && rowPlan !== workoutPlanId) continue;
 
-      const startMs = logicalSessionStartMs(slot.date, startClock);
-      const endMs = logicalSessionEndMs(slot.date, startClock, durationMin);
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
-      if (nowMs < startMs - beforeMs) continue;
-      if (nowMs > endMs + graceMs) continue;
+      const slotDateKey = (slot.date || "").substring(0, 10);
+      if (!slotDateKey || slotDateKey !== todayKey) continue;
       return true;
     }
   }
   return false;
+}
+
+export type PlanPresentCandidate = { id: string; sequenceStepIndex: number };
+
+/**
+ * Resolves which assigned plans may show "start" for the student today given coach `present`
+ * and slot `workoutPlanId` data. When the slot has no linked plan id, raw Firestore checks would
+ * grant every candidate; this keeps at most one (earliest `sequenceStepIndex`). If any workout
+ * session was already completed today, no plan may start.
+ */
+export function resolveStudentPresentStartPlans(
+  slots: SessionSlotAttendance[],
+  studentId: string,
+  candidates: readonly PlanPresentCandidate[],
+  nowMs: number,
+  fallbackSessionDurationMin: number,
+  hasCompletedWorkoutSessionToday: boolean
+): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  for (const c of candidates) out.set(c.id, false);
+  if (!studentId || candidates.length === 0 || hasCompletedWorkoutSessionToday) return out;
+
+  const rawOk: PlanPresentCandidate[] = [];
+  for (const c of candidates) {
+    if (
+      studentHasCoachPresentAccessForPlan(
+        slots,
+        studentId,
+        c.id,
+        nowMs,
+        fallbackSessionDurationMin
+      )
+    ) {
+      rawOk.push(c);
+    }
+  }
+  if (rawOk.length === 0) return out;
+  if (rawOk.length === 1) {
+    out.set(rawOk[0]!.id, true);
+    return out;
+  }
+  const sorted = [...rawOk].sort((a, b) => a.sequenceStepIndex - b.sequenceStepIndex || a.id.localeCompare(b.id));
+  const pick = sorted[0]!;
+  out.set(pick.id, true);
+  return out;
 }
 
 /** Times of each occupied block start for one logical booking. */

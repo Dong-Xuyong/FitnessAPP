@@ -1,8 +1,9 @@
 
 "use client";
 
-import { useState, useEffect, useCallback, use, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +15,8 @@ import {
   Loader2,
   X,
   StickyNote,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
@@ -23,8 +26,11 @@ import {
   commitFinishedWorkoutSession,
   exerciseHasLoggedSet,
 } from "@/lib/workout-session-finish";
-import { studentHasCoachPresentAccessForPlan } from "@/lib/session-attendance-streak";
-import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
+import {
+  studentHasCoachPresentAccessForPlan,
+  studentLocalCalendarDateKeyMs,
+  type SessionSlotAttendance,
+} from "@/lib/session-attendance-streak";
 import { cn } from "@/lib/utils";
 
 const SESSION_QUERY_LIMIT = 40;
@@ -111,11 +117,10 @@ interface WorkoutPlan {
   createdAt?: string;
   studentUnlocked?: boolean;
   sequenceNextPlanId?: string | null;
+  sequenceUnlockAfterPlanId?: string | null;
 }
 
-export default function WorkoutSessionPage({ params }: { params: Promise<{ id: string }> }) {
-  const unwrappedParams = use(params);
-  const workoutId = unwrappedParams.id;
+export default function WorkoutSessionPage({ workoutId }: { workoutId: string }) {
   const { user } = useUser();
   const db = useFirestore();
   const { t } = useI18n();
@@ -135,6 +140,9 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
   const [sessionBodyFatPercent, setSessionBodyFatPercent] = useState("");
   const [presenceCheckLoading, setPresenceCheckLoading] = useState(true);
   const [presenceAllowed, setPresenceAllowed] = useState(false);
+  const [sessionFeedbackOpen, setSessionFeedbackOpen] = useState(false);
+  /** Prior step doc is completed but `studentUnlocked` may still be false if unlock write failed. */
+  const [priorStepCompletedOverride, setPriorStepCompletedOverride] = useState(false);
   const prefilledSignatureRef = useRef<string | null>(null);
   const metricsPrefilledRef = useRef(false);
 
@@ -145,6 +153,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
     setSessionBodyFatPercent("");
     setPresenceCheckLoading(true);
     setPresenceAllowed(false);
+    setPriorStepCompletedOverride(false);
   }, [workoutId]);
 
   useEffect(() => {
@@ -187,6 +196,30 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
     };
   }, [db, user?.uid, workoutId]);
 
+  useEffect(() => {
+    setPriorStepCompletedOverride(false);
+    if (!db || !user?.uid || !workout || workout.studentUnlocked !== false) return;
+    const prior =
+      typeof workout.sequenceUnlockAfterPlanId === "string"
+        ? workout.sequenceUnlockAfterPlanId.trim()
+        : "";
+    const tid = workout.personalTrainerId;
+    const rid = effectiveStudentId || user.uid;
+    if (!prior || !tid || !rid) return;
+    let cancelled = false;
+    void getDoc(doc(db, "personalTrainers", tid, "students", rid, "workoutPlans", prior)).then((snap) => {
+      if (cancelled || !snap.exists()) return;
+      const d = snap.data() as { status?: string; completedAt?: unknown };
+      const done =
+        d?.status === "completed" ||
+        (d?.completedAt != null && String(d.completedAt as string).trim() !== "");
+      if (done) setPriorStepCompletedOverride(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user?.uid, workout, effectiveStudentId]);
+
   const runPresenceCheck = useCallback(async () => {
     if (!db || !user?.uid || !workoutId) return false;
     const studentDoc = await getDoc(doc(db, "students", user.uid));
@@ -202,13 +235,35 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
         : 60;
     const slotsSnap = await getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots"));
     const slots = slotsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as SessionSlotAttendance[];
-    return studentHasCoachPresentAccessForPlan(
+    const sessionsSnap = await getDocs(
+      collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")
+    );
+    const todayK = studentLocalCalendarDateKeyMs(Date.now());
+    let completedSessionToday = false;
+    for (const docSn of sessionsSnap.docs) {
+      const data = docSn.data() as { completedAt?: unknown };
+      const ca = data.completedAt;
+      if (ca == null) continue;
+      let ms: number | null = null;
+      if (typeof ca === "object" && ca !== null && "toDate" in (ca as object) && typeof (ca as { toDate?: () => Date }).toDate === "function") {
+        ms = (ca as { toDate: () => Date }).toDate().getTime();
+      } else if (typeof ca === "string" && ca.trim()) {
+        ms = Date.parse(ca);
+      }
+      if (ms == null || !Number.isFinite(ms)) continue;
+      if (studentLocalCalendarDateKeyMs(ms) === todayK) {
+        completedSessionToday = true;
+        break;
+      }
+    }
+    const present = studentHasCoachPresentAccessForPlan(
       slots,
       resolvedStudentId,
       workoutId,
       Date.now(),
       fallbackDur
     );
+    return present && !completedSessionToday;
   }, [db, user?.uid, workoutId]);
 
   useEffect(() => {
@@ -338,7 +393,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
       setIsFinished(true);
       return;
     }
-    if (workout.studentUnlocked === false) return;
+    if (workout.studentUnlocked === false && !priorStepCompletedOverride) return;
     if (!presenceAllowed) return;
     setIsSaving(true);
     try {
@@ -392,7 +447,7 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  if (workout.studentUnlocked === false) {
+  if (workout.studentUnlocked === false && !priorStepCompletedOverride) {
     return (
         <div className="text-center py-20 space-y-4 max-w-md mx-auto">
           <Dumbbell className="h-10 w-10 mx-auto text-muted-foreground" />
@@ -474,11 +529,36 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
         </header>
 
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
-            <p className="text-xs text-muted-foreground">{t("sessionFeedbackHint")}</p>
-          </CardHeader>
-          <CardContent className="space-y-5">
+          <Collapsible open={sessionFeedbackOpen} onOpenChange={setSessionFeedbackOpen}>
+            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+              <div className="min-w-0 space-y-1">
+                <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
+                <p className="text-xs text-muted-foreground">{t("sessionFeedbackHint")}</p>
+              </div>
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5"
+                  aria-expanded={sessionFeedbackOpen}
+                  aria-label={
+                    sessionFeedbackOpen ? t("sessionFeedbackCollapse") : t("sessionFeedbackExpand")
+                  }
+                >
+                  {sessionFeedbackOpen ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {sessionFeedbackOpen ? t("sessionFeedbackCollapse") : t("sessionFeedbackExpand")}
+                  </span>
+                </Button>
+              </CollapsibleTrigger>
+            </CardHeader>
+            <CollapsibleContent>
+              <CardContent className="space-y-5 border-t pt-4">
             <div className="space-y-2">
               <p className="text-sm font-medium">{t("sessionDifficultyLabel")}</p>
               <div className="flex flex-wrap gap-2">
@@ -589,7 +669,9 @@ export default function WorkoutSessionPage({ params }: { params: Promise<{ id: s
                 />
               </div>
             </div>
-          </CardContent>
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
         </Card>
 
         <div className="space-y-4">

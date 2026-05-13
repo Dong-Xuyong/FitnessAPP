@@ -86,15 +86,32 @@ service cloud.firestore {
       );
     }
 
+    /** Prior plan in a sequence is finished (status and/or completedAt). */
+    function priorPlanFinishedForSequenceUnlock(personalTrainerId, studentId, priorPlanId) {
+      return priorPlanId is string &&
+        exists(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)/workoutPlans/$(priorPlanId)) &&
+        (
+          get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)/workoutPlans/$(priorPlanId)).data.status == 'completed' ||
+          ('completedAt' in get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)/workoutPlans/$(priorPlanId)).data)
+        );
+    }
+
     /** Student unlocks the next step in a sequence (only `studentUnlocked` false → true). */
     function studentUnlockingSequenceStep(personalTrainerId, studentId) {
       return (
         canStudentAccessTrainerStudentPath(personalTrainerId, studentId) &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentUnlocked']) &&
-        resource.data.studentUnlocked == false &&
-        request.resource.data.studentUnlocked == true &&
         resource.data.sequenceUnlockAfterPlanId is string &&
-        get(/databases/$(database)/documents/personalTrainers/$(personalTrainerId)/students/$(studentId)/workoutPlans/$(resource.data.sequenceUnlockAfterPlanId)).data.status == 'completed'
+        (
+          resource.data.get('studentUnlocked', false) == false ||
+          (('studentUnlocked' in resource.data) && resource.data.studentUnlocked == null)
+        ) &&
+        request.resource.data.studentUnlocked == true &&
+        priorPlanFinishedForSequenceUnlock(
+          personalTrainerId,
+          studentId,
+          resource.data.sequenceUnlockAfterPlanId
+        )
       );
     }
 

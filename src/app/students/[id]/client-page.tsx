@@ -47,7 +47,7 @@ import {
   updateDocumentNonBlocking,
   setDocumentNonBlocking,
 } from "@/firebase";
-import { doc, collection, addDoc, updateDoc, deleteDoc, getDoc, query, where, writeBatch } from "firebase/firestore";
+import { doc, collection, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -78,6 +78,8 @@ import {
   ensurePendingPaymentForNextPeriodIfWindow,
 } from "@/lib/roster-payment-status";
 import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
+import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
+import { deleteSequencePlanWithChainRepair } from "@/lib/workout-plan-sequence-delete";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -765,6 +767,22 @@ export default function StudentDetailPage({ id }: { id: string }) {
   }, [db, user, id]);
   const { data: workoutSessions } = useCollection(workoutSessionsRef);
 
+  const completedWorkoutPlanIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const sess of workoutSessions || []) {
+      const wid = String((sess as { workoutPlanId?: string }).workoutPlanId || "").trim();
+      if (wid && (sess as { completedAt?: string }).completedAt) s.add(wid);
+    }
+    for (const p of workoutPlans || []) {
+      const pid = String((p as { id?: string }).id || "").trim();
+      if (!pid) continue;
+      if ((p as { completedAt?: string }).completedAt || (p as { status?: string }).status === "completed") {
+        s.add(pid);
+      }
+    }
+    return s;
+  }, [workoutSessions, workoutPlans]);
+
   const sessionSlotsRef = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collection(db, "personalTrainers", user.uid, "sessionSlots");
@@ -982,26 +1000,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
     setDeletingWorkoutPlanId(planId);
     try {
-      const planRef = doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", planId);
-      const snap = await getDoc(planRef);
-      const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
-      const stepIndex = Number(data?.sequenceStepIndex ?? NaN);
-      const nextId = String(data?.sequenceNextPlanId || "").trim();
-      const isSequenceHead =
-        !!data?.sequenceGroupId &&
-        Number.isFinite(stepIndex) &&
-        stepIndex === 0 &&
-        !!nextId;
-
-      if (isSequenceHead) {
-        const batch = writeBatch(db);
-        const nextRef = doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", nextId);
-        batch.update(nextRef, { studentUnlocked: true });
-        batch.delete(planRef);
-        await batch.commit();
-      } else {
-        await deleteDoc(planRef);
-      }
+      await deleteSequencePlanWithChainRepair(db, user.uid, id, planId);
       toast({ title: t("assignedWorkoutRemoved") });
     } catch (error: any) {
       toast({
@@ -1881,16 +1880,18 @@ export default function StudentDetailPage({ id }: { id: string }) {
                             </div>
                             <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                               {plan.sequenceGroupId ? (
-                                <Badge variant="secondary" className="text-xs">
-                                  {String(plan.sequenceStepLabel || "")} · {t("assignSequence")}
+                                <Badge
+                                  variant={
+                                    isSequenceStepEffectiveUnlocked(plan, completedWorkoutPlanIds)
+                                      ? "outline"
+                                      : "destructive"
+                                  }
+                                >
+                                  {isSequenceStepEffectiveUnlocked(plan, completedWorkoutPlanIds)
+                                    ? t("sequenceUnlockedBadge")
+                                    : t("sequenceLockedBadge")}
                                 </Badge>
                               ) : null}
-                              {plan.sequenceGroupId ? (
-                                <Badge variant={plan.studentUnlocked === false ? "destructive" : "outline"}>
-                                  {plan.studentUnlocked === false ? t("sequenceLockedBadge") : t("sequenceUnlockedBadge")}
-                                </Badge>
-                              ) : null}
-                              <Badge variant="outline">{t("active")}</Badge>
                               <Button
                                 size="icon"
                                 variant="ghost"

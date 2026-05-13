@@ -25,7 +25,7 @@ import type { TranslationKey } from "@/lib/i18n";
 import type { EditSessionExerciseRow } from "@/lib/normalize-session-exercises-for-edit";
 import { normalizeSessionExercisesForEdit } from "@/lib/normalize-session-exercises-for-edit";
 import type { useToast } from "@/hooks/use-toast";
-import { X, AlertTriangle, Trash2 } from "lucide-react";
+import { AlertTriangle, Trash2 } from "lucide-react";
 
 /** Minimal session fields for the edit dialog (Firestore workout session doc). */
 export type EditWorkoutSessionDialogSession = {
@@ -122,26 +122,9 @@ export function EditWorkoutSessionDialog({
           <div className="space-y-4">
             {rows.map((ex, ei) => (
               <div key={ei} className="border rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <Input
-                    className="font-medium text-sm h-8"
-                    value={ex.name}
-                    onChange={(e) => {
-                      const copy = [...rows];
-                      copy[ei] = { ...copy[ei], name: e.target.value };
-                      setRows(copy);
-                    }}
-                  />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 ml-2 text-destructive shrink-0"
-                    type="button"
-                    onClick={() => setRows(rows.filter((_, i) => i !== ei))}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                <p className="font-medium text-sm leading-snug pr-1" title={ex.name}>
+                  {ex.name || "—"}
+                </p>
                 <div className="space-y-1">
                   {ex.sets.map((s, si) => (
                     <div key={si} className="flex items-center gap-2">
@@ -173,37 +156,8 @@ export function EditWorkoutSessionDialog({
                           setRows(copy);
                         }}
                       />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6 text-destructive"
-                        type="button"
-                        onClick={() => {
-                          const copy = [...rows];
-                          copy[ei] = {
-                            ...copy[ei],
-                            sets: copy[ei].sets.filter((_, i) => i !== si),
-                          };
-                          setRows(copy);
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
                     </div>
                   ))}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 text-xs mt-1"
-                    type="button"
-                    onClick={() => {
-                      const copy = [...rows];
-                      copy[ei] = { ...copy[ei], sets: [...copy[ei].sets, { weight: 0, reps: 0 }] };
-                      setRows(copy);
-                    }}
-                  >
-                    + Add Set
-                  </Button>
                 </div>
               </div>
             ))}

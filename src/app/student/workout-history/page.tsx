@@ -3,22 +3,14 @@
 import { useEffect, useState } from "react";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useUser, useFirestore } from "@/firebase";
 import { cn } from "@/lib/utils";
-import { collection, deleteDoc, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
+import { studentLocalCalendarDateKeyMs } from "@/lib/session-attendance-streak";
 import {
   CheckCircle2,
   Clock,
@@ -27,7 +19,6 @@ import {
   Loader2,
   Pencil,
   Save,
-  Trash2,
   X as XIcon,
 } from "lucide-react";
 
@@ -69,6 +60,24 @@ interface WorkoutSession {
   moodNotes?: string;
   bodyWeightKg?: number | null;
   sessionBodyFatPercent?: number | null;
+}
+
+function parseCompletedAtMs(ca: unknown): number | null {
+  if (ca == null) return null;
+  if (
+    typeof ca === "object" &&
+    ca !== null &&
+    "toDate" in (ca as object) &&
+    typeof (ca as { toDate?: () => Date }).toDate === "function"
+  ) {
+    const t = (ca as { toDate: () => Date }).toDate().getTime();
+    return Number.isFinite(t) ? t : null;
+  }
+  if (typeof ca === "string" && ca.trim()) {
+    const v = Date.parse(ca);
+    return Number.isFinite(v) ? v : null;
+  }
+  return null;
 }
 
 function SessionFeedbackSummary({ session, t }: { session: WorkoutSession; t: (key: TranslationKey) => string }) {
@@ -138,8 +147,6 @@ export default function StudentWorkoutHistoryPage() {
   const [editBodyWeightKg, setEditBodyWeightKg] = useState("");
   const [editSessionBodyFatPercent, setEditSessionBodyFatPercent] = useState("");
   const [isSavingSession, setIsSavingSession] = useState(false);
-  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
-  const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   useEffect(() => {
     if (!db || !user) {
@@ -170,10 +177,31 @@ export default function StudentWorkoutHistoryPage() {
 
         const completedSessions = sessionsSnap.docs
           .map((d) => ({ id: d.id, ...d.data() } as WorkoutSession))
-          .filter((s) => !!s.completedAt)
-          .sort((a, b) => Date.parse(b.completedAt || "") - Date.parse(a.completedAt || ""));
+          .filter((s) => parseCompletedAtMs(s.completedAt as unknown) != null)
+          .sort(
+            (a, b) =>
+              (parseCompletedAtMs(b.completedAt as unknown) ?? 0) -
+              (parseCompletedAtMs(a.completedAt as unknown) ?? 0)
+          );
 
-        setCompletedWorkouts(completedSessions);
+        const byDay = new Map<string, WorkoutSession>();
+        for (const s of completedSessions) {
+          const ms = parseCompletedAtMs(s.completedAt as unknown);
+          if (ms == null) continue;
+          const dayKey = studentLocalCalendarDateKeyMs(ms);
+          const prev = byDay.get(dayKey);
+          const prevMs = prev ? parseCompletedAtMs(prev.completedAt as unknown) : null;
+          if (!prev || prevMs == null || ms > prevMs) {
+            byDay.set(dayKey, s);
+          }
+        }
+        const dedupedSessions = [...byDay.values()].sort(
+          (a, b) =>
+            (parseCompletedAtMs(b.completedAt as unknown) ?? 0) -
+            (parseCompletedAtMs(a.completedAt as unknown) ?? 0)
+        );
+
+        setCompletedWorkouts(dedupedSessions);
       } catch (error) {
         console.error("Failed to load workout history", error);
       } finally {
@@ -262,29 +290,6 @@ export default function StudentWorkoutHistoryPage() {
     }
   };
 
-  const handleConfirmDeleteSession = async () => {
-    if (!db || !confirmDeleteSessionId || !trainerId || !resolvedStudentId) return;
-    setIsDeletingSession(true);
-    try {
-      await deleteDoc(
-        doc(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions", confirmDeleteSessionId)
-      );
-      setCompletedWorkouts((prev) => prev.filter((s) => s.id !== confirmDeleteSessionId));
-      if (expandedSessionId === confirmDeleteSessionId) setExpandedSessionId(null);
-      if (editingSessionId === confirmDeleteSessionId) endEditing();
-      setConfirmDeleteSessionId(null);
-      toast({ title: t("workoutSessionDeleted") });
-    } catch (e: any) {
-      toast({
-        title: t("deleteSessionFailed"),
-        description: e?.message,
-        variant: "destructive",
-      });
-    } finally {
-      setIsDeletingSession(false);
-    }
-  };
-
   if (isUserLoading || isLoading) {
     return (
         <div className="flex items-center justify-center h-[60vh]">
@@ -294,7 +299,6 @@ export default function StudentWorkoutHistoryPage() {
   }
 
   return (
-    <>
       <div className="space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("workoutHistory")}</h1>
@@ -311,7 +315,9 @@ export default function StudentWorkoutHistoryPage() {
             </div>
             <div className="space-y-2">
               {completedWorkouts.map((session) => {
-                const completedDate = session.completedAt || session.date;
+                const completedAtRaw = session.completedAt?.trim();
+                const fallbackDate = session.date?.trim();
+                const completedDate = completedAtRaw || fallbackDate;
                 const isExpanded = expandedSessionId === session.id;
                 const isEditing = editingSessionId === session.id;
                 const exList = isEditing ? editSessionExercises : (session.exercises || []);
@@ -337,6 +343,7 @@ export default function StudentWorkoutHistoryPage() {
                           {completedDate && (
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
                               <Clock className="h-3 w-3 shrink-0" aria-hidden />{" "}
+                              <span className="font-medium text-foreground/80">{t("workoutHistoryLastSessionOn")}:</span>{" "}
                               {new Date(completedDate).toLocaleDateString()}
                             </p>
                           )}
@@ -354,6 +361,7 @@ export default function StudentWorkoutHistoryPage() {
                           {completedDate && (
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
                               <Clock className="h-3 w-3 shrink-0" aria-hidden />{" "}
+                              <span className="font-medium text-foreground/80">{t("workoutHistoryLastSessionOn")}:</span>{" "}
                               {new Date(completedDate).toLocaleDateString()}
                             </p>
                           )}
@@ -383,16 +391,6 @@ export default function StudentWorkoutHistoryPage() {
                             >
                               <Pencil className="h-3.5 w-3.5" />
                               {t("editSession")}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="gap-1.5 border-destructive/40 text-xs text-destructive hover:bg-destructive/10"
-                              onClick={() => setConfirmDeleteSessionId(session.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              {t("deleteSession")}
                             </Button>
                           </div>
                         )}
@@ -589,33 +587,5 @@ export default function StudentWorkoutHistoryPage() {
           </div>
         )}
       </div>
-
-      <AlertDialog
-        open={confirmDeleteSessionId !== null}
-        onOpenChange={(open) => {
-          if (!open && !isDeletingSession) setConfirmDeleteSessionId(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteWorkoutConfirmTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("deleteWorkoutConfirmDesc")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2 sm:gap-0">
-            <AlertDialogCancel disabled={isDeletingSession}>{t("cancel")}</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              className="gap-1.5"
-              disabled={isDeletingSession}
-              onClick={() => void handleConfirmDeleteSession()}
-            >
-              {isDeletingSession ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {t("deleteSession")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
   );
 }
