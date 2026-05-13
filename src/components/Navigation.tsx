@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -41,6 +40,86 @@ const navItemKeys = [
   { key: "myProfile" as const, href: "/profile", icon: User },
 ];
 
+type TrainerNavProfile = {
+  firstName?: string;
+  lastName?: string;
+  photoUrl?: string;
+} | null;
+
+function trainerDisplayName(trainer: TrainerNavProfile): string {
+  if (!trainer) return "Trainer";
+  const n = `${trainer.firstName || ""} ${trainer.lastName || ""}`.trim();
+  return n || "Trainer";
+}
+
+function TrainerSidebarIdentity({
+  trainer,
+  user,
+  layout = "vertical",
+  collapsed = false,
+  onNavigate,
+}: {
+  trainer: TrainerNavProfile;
+  user: { uid?: string; photoURL?: string | null; email?: string | null; displayName?: string | null } | null;
+  layout?: "vertical" | "horizontal";
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
+  const displayName = trainerDisplayName(trainer);
+  const avatarSrc =
+    trainer?.photoUrl ||
+    user?.photoURL ||
+    `https://picsum.photos/seed/${encodeURIComponent(user?.uid || "trainer")}/100/100`;
+  const fallback =
+    (trainer?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "T").toUpperCase();
+
+  if (collapsed) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            href="/dashboard"
+            onClick={onNavigate}
+            className="flex justify-center rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5"
+          >
+            <Avatar className="h-10 w-10 shrink-0 ring-2 ring-primary/10">
+              <AvatarImage src={avatarSrc} alt="" />
+              <AvatarFallback className="text-sm">{fallback}</AvatarFallback>
+            </Avatar>
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-[220px]">
+          <p className="font-medium">{displayName}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  const wrapClass =
+    layout === "vertical"
+      ? "flex flex-col items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5"
+      : "flex flex-row items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5";
+
+  const textAlign = layout === "vertical" ? "text-center" : "text-left";
+
+  return (
+    <Link href="/dashboard" className={wrapClass} onClick={onNavigate}>
+      <Avatar
+        className={cn(
+          "shrink-0 ring-2 ring-primary/10",
+          layout === "vertical" ? "h-16 w-16" : "h-12 w-12"
+        )}
+      >
+        <AvatarImage src={avatarSrc} alt="" />
+        <AvatarFallback className={layout === "vertical" ? "text-lg" : "text-sm"}>{fallback}</AvatarFallback>
+      </Avatar>
+      <div className={cn("min-w-0", layout === "horizontal" && "flex-1", textAlign)}>
+        <p className="text-sm font-semibold leading-snug truncate">{displayName}</p>
+      </div>
+    </Link>
+  );
+}
+
 /* ─── Shared sidebar nav content ─── */
 type SidebarTranslate = (key: "dashboard" | "students" | "programs" | "exercises" | "assignmentCalendar" | "coachProgressNav" | "myProfile" | "logout") => string;
 
@@ -53,26 +132,21 @@ function SidebarContent({
   t,
 }: {
   pathname: string;
-  trainer: Record<string, string> | null;
-  user: { uid?: string; photoURL?: string | null; email?: string | null } | null;
+  trainer: TrainerNavProfile;
+  user: { uid?: string; photoURL?: string | null; email?: string | null; displayName?: string | null } | null;
   onSignOut: () => void;
   onNavClick?: () => void;
   t: SidebarTranslate;
 }) {
   return (
     <div className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="p-4">
-        <Link href="/dashboard" onClick={onNavClick} className="block">
-          <Image
-            src="/sergio-oliveira-logo.png"
-            alt="Sergio Oliveira Personal Trainer"
-            width={130}
-            height={73}
-            priority
-            className="h-auto w-full max-w-[110px] rounded-md"
-          />
-        </Link>
+      <div className="p-6 pb-4 border-b shrink-0">
+        <TrainerSidebarIdentity
+          trainer={trainer}
+          user={user}
+          layout="horizontal"
+          onNavigate={onNavClick}
+        />
       </div>
 
       {/* Nav Items */}
@@ -95,38 +169,15 @@ function SidebarContent({
         ))}
       </nav>
 
-      {/* Bottom: Avatar + Logout */}
+      {/* Bottom: Logout */}
       <div className="p-2 border-t mt-auto space-y-1">
-        <Link
-          href="/profile"
-          onClick={onNavClick}
-          className="flex items-center gap-3 px-4 py-2 mb-1 hover:bg-accent/5 rounded-lg transition-colors group"
-        >
-          <Avatar className="h-8 w-8 ring-2 ring-primary/10 group-hover:ring-primary/30 transition-all">
-            <AvatarImage
-              src={
-                (trainer as any)?.photoUrl ||
-                user?.photoURL ||
-                `https://picsum.photos/seed/${user?.uid}/100/100`
-              }
-            />
-            <AvatarFallback>
-              {(trainer as any)?.firstName?.[0] || user?.email?.[0] || "T"}
-            </AvatarFallback>
-          </Avatar>
-          <div className="overflow-hidden">
-            <p className="text-sm font-medium leading-none truncate group-hover:text-primary transition-colors">
-              {trainer
-                ? `${(trainer as any).firstName} ${(trainer as any).lastName}`
-                : "Trainer"}
-            </p>
-            <p className="text-xs text-muted-foreground truncate">{user?.email || "Account"}</p>
-          </div>
-        </Link>
         <Button
           variant="ghost"
           className="w-full justify-start gap-3 text-muted-foreground"
-          onClick={onSignOut}
+          onClick={() => {
+            onNavClick?.();
+            onSignOut();
+          }}
         >
           <LogOut className="h-5 w-5" />
           {t("logout")}
@@ -185,29 +236,13 @@ export function Navigation({ children }: { children: React.ReactNode }) {
           )}
         >
           {/* Logo */}
-          <div className={cn("p-4 flex items-center", collapsed ? "justify-center" : "justify-between")}>
-            {!collapsed ? (
-              <Link href="/dashboard" className="block overflow-hidden">
-                <Image
-                  src="/sergio-oliveira-logo.png"
-                  alt="Sergio Oliveira Personal Trainer"
-                  width={130}
-                  height={73}
-                  priority
-                  className="h-auto w-full max-w-[110px] rounded-md"
-                />
-              </Link>
-            ) : (
-              <Link href="/dashboard">
-                <Image
-                  src="/sergio-oliveira-logo.png"
-                  alt="Sergio Oliveira Personal Trainer"
-                  width={48}
-                  height={48}
-                  className="h-10 w-10 rounded-md object-cover"
-                />
-              </Link>
-            )}
+          <div className={cn("border-b shrink-0", collapsed ? "p-2" : "p-4 pb-4")}>
+            <TrainerSidebarIdentity
+              trainer={trainer as TrainerNavProfile}
+              user={user}
+              layout="vertical"
+              collapsed={collapsed}
+            />
           </div>
 
           {/* Nav Items */}
@@ -244,86 +279,31 @@ export function Navigation({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          {/* Bottom: Avatar + Logout */}
+          {/* Bottom: Logout */}
           <div className="p-2 border-t mt-auto space-y-1">
             {collapsed ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Link
-                      href="/profile"
-                      className="flex items-center justify-center px-3 py-2 hover:bg-accent/5 rounded-lg transition-colors"
-                    >
-                      <Avatar className="h-8 w-8 ring-2 ring-primary/10 hover:ring-primary/30 transition-all">
-                        <AvatarImage
-                          src={
-                            (trainer as any)?.photoUrl ||
-                            user?.photoURL ||
-                            `https://picsum.photos/seed/${user?.uid}/100/100`
-                          }
-                        />
-                        <AvatarFallback>
-                          {(trainer as any)?.firstName?.[0] || user?.email?.[0] || "T"}
-                        </AvatarFallback>
-                      </Avatar>
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {trainer
-                      ? `${(trainer as any).firstName} ${(trainer as any).lastName}`
-                      : "Profile"}
-                  </TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="w-full text-muted-foreground"
-                      onClick={handleSignOut}
-                    >
-                      <LogOut className="h-5 w-5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Logout</TooltipContent>
-                </Tooltip>
-              </>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-full text-muted-foreground"
+                    onClick={handleSignOut}
+                  >
+                    <LogOut className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Logout</TooltipContent>
+              </Tooltip>
             ) : (
-              <>
-                <Link
-                  href="/profile"
-                  className="flex items-center gap-3 px-4 py-2 mb-1 hover:bg-accent/5 rounded-lg transition-colors group"
-                >
-                  <Avatar className="h-8 w-8 ring-2 ring-primary/10 group-hover:ring-primary/30 transition-all">
-                    <AvatarImage
-                      src={
-                        (trainer as any)?.photoUrl ||
-                        user?.photoURL ||
-                        `https://picsum.photos/seed/${user?.uid}/100/100`
-                      }
-                    />
-                    <AvatarFallback>
-                      {(trainer as any)?.firstName?.[0] || user?.email?.[0] || "T"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="overflow-hidden">
-                    <p className="text-sm font-medium leading-none truncate group-hover:text-primary transition-colors">
-                      {trainer
-                        ? `${(trainer as any).firstName} ${(trainer as any).lastName}`
-                        : "Trainer"}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">{user?.email || "Account"}</p>
-                  </div>
-                </Link>
-                <Button
-                  variant="ghost"
-                  className="w-full justify-start gap-3 text-muted-foreground"
-                  onClick={handleSignOut}
-                >
-                  <LogOut className="h-5 w-5" />
-                  {t("logout")}
-                </Button>
-              </>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 text-muted-foreground"
+                onClick={handleSignOut}
+              >
+                <LogOut className="h-5 w-5" />
+                {t("logout")}
+              </Button>
             )}
           </div>
 
@@ -347,7 +327,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
             <SheetTitle className="sr-only">Main navigation</SheetTitle>
             <SidebarContent
               pathname={pathname}
-              trainer={trainer as any}
+              trainer={trainer as TrainerNavProfile}
               user={user}
               onSignOut={handleSignOut}
               onNavClick={() => setMobileOpen(false)}
