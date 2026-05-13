@@ -1,7 +1,6 @@
 
 "use client";
 
-import { StudentNavigation } from "@/components/StudentNavigation";
 import { StudentProgressPanel } from "@/components/StudentProgressPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -209,17 +208,14 @@ export default function StudentDashboardPage() {
 
   if (isUserLoading || isLoadingProfile) {
     return (
-      <StudentNavigation>
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      </StudentNavigation>
     );
   }
 
   if (!studentData) {
     return (
-      <StudentNavigation>
         <div className="max-w-lg mx-auto py-16 text-center space-y-4">
           <h2 className="text-2xl font-bold font-headline">{t("welcome")}</h2>
           <p className="text-muted-foreground">
@@ -229,7 +225,6 @@ export default function StudentDashboardPage() {
             <Link href="/student/profile">{t("goToProfile")}</Link>
           </Button>
         </div>
-      </StudentNavigation>
     );
   }
 
@@ -244,7 +239,6 @@ export default function StudentDashboardPage() {
         : t("waitingForCoach");
 
   return (
-    <StudentNavigation>
       <Tabs value={activeTab} onValueChange={onDashboardTabChange} className="space-y-6">
         <TabsList className="bg-card border h-auto w-full grid grid-cols-3">
           <TabsTrigger value="home">{t("myDashboard")}</TabsTrigger>
@@ -481,6 +475,5 @@ export default function StudentDashboardPage() {
           )}
         </TabsContent>
       </Tabs>
-    </StudentNavigation>
   );
 }

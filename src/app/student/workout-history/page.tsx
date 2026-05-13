@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
-import { StudentNavigation } from "@/components/StudentNavigation";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -288,16 +287,14 @@ export default function StudentWorkoutHistoryPage() {
 
   if (isUserLoading || isLoading) {
     return (
-      <StudentNavigation>
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      </StudentNavigation>
     );
   }
 
   return (
-    <StudentNavigation>
+    <>
       <div className="space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("workoutHistory")}</h1>
@@ -619,6 +616,6 @@ export default function StudentWorkoutHistoryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </StudentNavigation>
+    </>
   );
 }

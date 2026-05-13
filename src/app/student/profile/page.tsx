@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ProfilePhotoCropDialog } from "@/components/ProfilePhotoCropDialog";
-import { StudentNavigation } from "@/components/StudentNavigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -272,17 +271,14 @@ export default function StudentProfilePage() {
 
   if (isUserLoading || (user && isLoadingProfile)) {
     return (
-      <StudentNavigation>
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      </StudentNavigation>
     );
   }
 
   if (!user) {
     return (
-      <StudentNavigation>
         <div className="max-w-md mx-auto py-16 text-center space-y-4">
           <h2 className="text-xl font-bold font-headline">{t("signInRequired")}</h2>
           <p className="text-muted-foreground">
@@ -292,12 +288,10 @@ export default function StudentProfilePage() {
             <Link href="/login?role=student">{t("goToSignIn")}</Link>
           </Button>
         </div>
-      </StudentNavigation>
     );
   }
 
   return (
-    <StudentNavigation>
       <div className="max-w-2xl mx-auto space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("myProfile")}</h1>
@@ -484,6 +478,5 @@ export default function StudentProfilePage() {
           onConfirm={handleCroppedPhotoConfirm}
         />
       </div>
-    </StudentNavigation>
   );
 }
