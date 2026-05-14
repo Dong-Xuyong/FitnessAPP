@@ -13,6 +13,7 @@ import {
   Play,
   CreditCard,
   User,
+  Store,
   Menu,
   Globe,
   ShieldBan,
@@ -40,6 +41,7 @@ const navItems = [
   { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
   { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
   { key: "billing" as const, href: "/student/billing", icon: CreditCard },
+  { key: "shop" as const, href: "/student/shop", icon: Store },
   { key: "profile" as const, href: "/student/profile", icon: User },
 ];
 
