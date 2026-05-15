@@ -1,5 +1,5 @@
 import type { Firestore } from "firebase/firestore";
-import { collection, doc, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocs, writeBatch } from "firebase/firestore";
 import type { TrainingProgramDocument } from "@/lib/types";
 import { buildWorkoutPlanExercises } from "@/lib/training-program-assignment";
 
@@ -20,6 +20,82 @@ export type SequencePlanUnlockFields = {
   sequenceGroupId?: string | null;
 };
 
+/** Existing plan row used to decide whether a new assignment continues the chain. */
+export type SequencePlanForAppend = {
+  id: string;
+  sequenceGroupId?: string | null;
+  sequenceStepIndex?: number;
+  status?: string;
+  completedAt?: string;
+};
+
+export type SequenceAppendContext = {
+  sequenceGroupId: string;
+  tailPlanId: string;
+  tailCompleted: boolean;
+  nextStepIndex: number;
+  existingCycles: number;
+};
+
+function isWorkoutPlanDocCompleted(data: Record<string, unknown> | undefined): boolean {
+  if (!data) return false;
+  const status = String(data.status ?? "").trim().toLowerCase();
+  if (status === "completed") return true;
+  const completedAt = data.completedAt;
+  return typeof completedAt === "string" && completedAt.trim().length > 0;
+}
+
+/**
+ * When the student already has sequence plans, returns metadata to append new steps
+ * to the chain with the highest step index (single continuing sequence per student).
+ */
+export function findSequenceAppendContext(
+  existingPlans: SequencePlanForAppend[],
+  programsPerCycle: number
+): SequenceAppendContext | null {
+  const sequencePlans = existingPlans.filter(
+    (p) => typeof p.sequenceGroupId === "string" && p.sequenceGroupId.trim().length > 0
+  );
+  if (sequencePlans.length === 0) return null;
+
+  const byGroup = new Map<string, SequencePlanForAppend[]>();
+  for (const p of sequencePlans) {
+    const gid = String(p.sequenceGroupId).trim();
+    const list = byGroup.get(gid) ?? [];
+    list.push(p);
+    byGroup.set(gid, list);
+  }
+
+  let best: { groupId: string; tail: SequencePlanForAppend; plans: SequencePlanForAppend[] } | null =
+    null;
+
+  for (const [groupId, plans] of byGroup) {
+    const tail = plans.reduce((a, b) =>
+      (Number(a.sequenceStepIndex) || 0) >= (Number(b.sequenceStepIndex) || 0) ? a : b
+    );
+    const tailIdx = Number(tail.sequenceStepIndex) || 0;
+    if (!best || tailIdx > (Number(best.tail.sequenceStepIndex) || 0)) {
+      best = { groupId, tail, plans };
+    }
+  }
+
+  if (!best) return null;
+
+  const programsPerCycleSafe = Math.max(1, programsPerCycle);
+  const existingCycles =
+    best.plans.length % programsPerCycleSafe === 0
+      ? best.plans.length / programsPerCycleSafe
+      : 0;
+
+  return {
+    sequenceGroupId: best.groupId,
+    tailPlanId: best.tail.id,
+    tailCompleted: isWorkoutPlanDocCompleted(best.tail as Record<string, unknown>),
+    nextStepIndex: (Number(best.tail.sequenceStepIndex) || 0) + 1,
+    existingCycles,
+  };
+}
+
 /**
  * Treat a sequence step as unlocked when Firestore says so, or when the prior plan id
  * is in `completedPlanIds` (doc completed / session logged) so UI matches reality if
@@ -38,7 +114,8 @@ export function isSequenceStepEffectiveUnlocked(
 
 /**
  * Writes `repeatCycles × programsInOrder.length` workout plan docs with unlock chain metadata.
- * Only the first document is visible to the student until each prior step is completed.
+ * If the student already has a sequence, new steps are appended to that chain (same group id,
+ * continued indices, locked until the prior tail is completed).
  * Does not set week/assigned/created timestamps so sequences are not tied to a calendar week.
  */
 export async function writeStudentSequencePlans(
@@ -47,25 +124,46 @@ export async function writeStudentSequencePlans(
   studentStorageId: string,
   programsInOrder: TrainingProgramDocument[],
   repeatCycles: number
-): Promise<void> {
-  if (!programsInOrder.length || repeatCycles < 1) return;
+): Promise<{ appended: boolean }> {
+  if (!programsInOrder.length || repeatCycles < 1) return { appended: false };
 
-  const sequenceGroupId = crypto.randomUUID();
   const coll = collection(db, "personalTrainers", trainerId, "students", studentStorageId, "workoutPlans");
+  const existingSnap = await getDocs(coll);
+  const existingPlans: SequencePlanForAppend[] = existingSnap.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<SequencePlanForAppend, "id">),
+  }));
+
+  const appendContext = findSequenceAppendContext(existingPlans, programsInOrder.length);
+  const sequenceGroupId = appendContext?.sequenceGroupId ?? crypto.randomUUID();
+  const startStepIndex = appendContext?.nextStepIndex ?? 0;
+  const existingCycles = appendContext?.existingCycles ?? 0;
+
   const totalSteps = programsInOrder.length * repeatCycles;
   const refs = Array.from({ length: totalSteps }, () => doc(coll));
   const batch = writeBatch(db);
 
-  let globalIdx = 0;
+  if (appendContext) {
+    const tailRef = doc(coll, appendContext.tailPlanId);
+    batch.update(tailRef, { sequenceNextPlanId: refs[0]!.id });
+  }
+
+  let localIdx = 0;
   for (let c = 0; c < repeatCycles; c++) {
     for (let s = 0; s < programsInOrder.length; s++) {
       const program = programsInOrder[s]!;
-      const ref = refs[globalIdx]!;
-      const prevRef = globalIdx > 0 ? refs[globalIdx - 1]! : null;
-      const nextRef = globalIdx < totalSteps - 1 ? refs[globalIdx + 1]! : null;
+      const ref = refs[localIdx]!;
+      const prevInBatchRef = localIdx > 0 ? refs[localIdx - 1]! : null;
+      const nextRef = localIdx < totalSteps - 1 ? refs[localIdx + 1]! : null;
       const exercises = buildWorkoutPlanExercises(program, 1);
       const label = sequenceStepLabel(s);
-      const cycleLabel = repeatCycles > 1 ? ` · ${c + 1}/${repeatCycles}` : "";
+      const totalCycles = existingCycles + repeatCycles;
+      const cycleNum = existingCycles + c + 1;
+      const cycleLabel = totalCycles > 1 ? ` · ${cycleNum}/${totalCycles}` : "";
+
+      const stepIndex = startStepIndex + localIdx;
+      const isFirstInBatch = localIdx === 0;
+      const isChainHead = !appendContext && isFirstInBatch;
 
       const payload: Record<string, unknown> = {
         title: `${program.name} (${label}${cycleLabel})`,
@@ -73,19 +171,29 @@ export async function writeStudentSequencePlans(
         personalTrainerId: trainerId,
         exercises,
         sequenceGroupId,
-        sequenceStepIndex: globalIdx,
+        sequenceStepIndex: stepIndex,
         sequenceStepLabel: label,
-        studentUnlocked: globalIdx === 0,
+        studentUnlocked: isChainHead
+          ? true
+          : isFirstInBatch && appendContext
+            ? appendContext.tailCompleted
+            : false,
         sourceTrainingProgramId: String((program as TrainingProgramDocument & { id?: string }).id ?? ""),
       };
 
-      if (prevRef) payload.sequenceUnlockAfterPlanId = prevRef.id;
+      if (isFirstInBatch && appendContext) {
+        payload.sequenceUnlockAfterPlanId = appendContext.tailPlanId;
+      } else if (prevInBatchRef) {
+        payload.sequenceUnlockAfterPlanId = prevInBatchRef.id;
+      }
+
       if (nextRef) payload.sequenceNextPlanId = nextRef.id;
 
       batch.set(ref, payload);
-      globalIdx++;
+      localIdx++;
     }
   }
 
   await batch.commit();
+  return { appended: !!appendContext };
 }

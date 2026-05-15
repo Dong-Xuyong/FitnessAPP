@@ -121,3 +121,56 @@ export async function clearAllTrainerWorkoutPlans(
 
   return { deletedPlanCount, deletedWeekAssignmentCount, sessionSlotsStrippedCount };
 }
+
+/**
+ * Deletes all `workoutPlans` under each candidate storage path for one student, and
+ * `weekProgramAssignments` whose `studentId` matches any candidate id.
+ */
+export async function clearStudentAssignedPlans(
+  db: Firestore,
+  trainerId: string,
+  candidateIds: string[]
+): Promise<{ deletedPlanCount: number; deletedWeekAssignmentCount: number }> {
+  const ids = [...new Set(candidateIds.map((x) => String(x || "").trim()).filter(Boolean))];
+  if (ids.length === 0) return { deletedPlanCount: 0, deletedWeekAssignmentCount: 0 };
+
+  let deletedPlanCount = 0;
+  let deletedWeekAssignmentCount = 0;
+  let batch = writeBatch(db);
+  let ops = 0;
+
+  const commitBatch = async () => {
+    if (ops === 0) return;
+    await batch.commit();
+    batch = writeBatch(db);
+    ops = 0;
+  };
+
+  const enqueueDelete = async (ref: DocumentReference, kind: "plan" | "week") => {
+    batch.delete(ref);
+    ops++;
+    if (kind === "plan") deletedPlanCount++;
+    else deletedWeekAssignmentCount++;
+    if (ops >= MAX_BATCH_OPS) await commitBatch();
+  };
+
+  for (const candidateId of ids) {
+    const plansRef = collection(db, "personalTrainers", trainerId, "students", candidateId, "workoutPlans");
+    const snap = await getDocs(plansRef);
+    for (const d of snap.docs) {
+      await enqueueDelete(d.ref, "plan");
+    }
+  }
+
+  const weekCol = collection(db, "personalTrainers", trainerId, "weekProgramAssignments");
+  const weekSnap = await getDocs(weekCol);
+  for (const d of weekSnap.docs) {
+    const studentId = String((d.data() as { studentId?: string }).studentId || "");
+    if (ids.includes(studentId)) {
+      await enqueueDelete(d.ref, "week");
+    }
+  }
+  await commitBatch();
+
+  return { deletedPlanCount, deletedWeekAssignmentCount };
+}

@@ -304,3 +304,72 @@ export function computeSessionAttendanceStreak(
   }
   return streak;
 }
+
+function weekStartIsoFromCalendarDate(year: number, month: number, day: number): string {
+  const d = new Date(year, month, day);
+  const dow = d.getDay();
+  const mon = new Date(d);
+  mon.setDate(d.getDate() - ((dow + 6) % 7));
+  const y = mon.getFullYear();
+  const m = String(mon.getMonth() + 1).padStart(2, "0");
+  const dd = String(mon.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+/** Distinct ISO week-start Mondays that include at least one day in the calendar month. */
+export function countWeeksInCalendarMonth(referenceDate: Date = new Date()): number {
+  const year = referenceDate.getFullYear();
+  const month = referenceDate.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const weekStarts = new Set<string>();
+  for (let day = 1; day <= lastDay; day++) {
+    weekStarts.add(weekStartIsoFromCalendarDate(year, month, day));
+  }
+  return weekStarts.size;
+}
+
+/** Monthly booking cap from roster `sessionsPerWeek` × weeks in month; null when not configured. */
+export function monthlySessionAllowance(
+  sessionsPerWeek: number | undefined | null,
+  referenceDate: Date = new Date()
+): number | null {
+  const spw = Number(sessionsPerWeek);
+  if (!Number.isFinite(spw) || spw <= 0) return null;
+  return spw * countWeeksInCalendarMonth(referenceDate);
+}
+
+/** Unique booked calendar sessions in the month of `referenceDate` (deduped multi-block rows). */
+export function countMonthlySessionAttendanceStats(
+  slots: SessionSlotAttendance[],
+  candidateStudentIds: string[],
+  referenceDate: Date = new Date()
+): { booked: number; present: number; absent: number } {
+  const month = referenceDate.getMonth();
+  const year = referenceDate.getFullYear();
+  const candidateSet = new Set(candidateStudentIds.map((x) => String(x || "").trim()).filter(Boolean));
+  const byKey = new Map<string, SessionAttendanceStatus>();
+
+  for (const slot of slots) {
+    const dateKey = String(slot.date || "").substring(0, 10);
+    if (!dateKey) continue;
+    const d = new Date(`${dateKey}T12:00:00`);
+    if (Number.isNaN(d.getTime()) || d.getMonth() !== month || d.getFullYear() !== year) continue;
+
+    for (const st of slot.students || []) {
+      if (!st?.studentId || !candidateSet.has(st.studentId)) continue;
+      const startClock = st.sessionStart ?? slot.startTime ?? "";
+      const key = `${dateKey}|${startClock}`;
+      const att = normalizeAttendance(st.sessionAttendance);
+      const prev = byKey.get(key);
+      byKey.set(key, prev !== undefined ? mergeAttendance(prev, att) : att);
+    }
+  }
+
+  let present = 0;
+  let absent = 0;
+  for (const att of byKey.values()) {
+    if (att === "present") present += 1;
+    else if (att === "absent") absent += 1;
+  }
+  return { booked: byKey.size, present, absent };
+}

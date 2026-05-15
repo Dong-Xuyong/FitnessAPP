@@ -12,6 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Calendar as MonthCalendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -32,7 +34,7 @@ import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebas
 import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, Timestamp } from "firebase/firestore";
 import {
   CalendarDays, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
-  Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp,
+  Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp, ListOrdered,
   ExternalLink, ClipboardList, History, Pencil,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -43,8 +45,18 @@ import {
   normalizeAttendance,
   type SessionAttendanceStatus,
 } from "@/lib/session-attendance-streak";
-import { buildWorkoutPlanExercises } from "@/lib/training-program-assignment";
 import { getStudentDisplayName } from "@/lib/student-display";
+import {
+  linkStudentProfileForTrainerAssignments,
+  resolveWorkoutPlansStorageStudentId,
+} from "@/components/AssignStudentSequenceForm";
+import {
+  applyDefaultStudentSequenceToStudent,
+  DefaultStudentSequenceNotConfiguredError,
+  getDefaultStudentSequenceProgram,
+  type DefaultStudentSequenceProgram,
+} from "@/lib/firestore/default-student-sequence";
+import type { TrainingProgramDocument } from "@/lib/types";
 import {
   EditWorkoutSessionDialog,
   type EditWorkoutSessionDialogSession,
@@ -862,15 +874,6 @@ function getWeekStart(dateStr: string): string {
   return toDateStr(mon);
 }
 
-/** Human-readable "Mon DD MMM – Sun DD MMM YYYY" label for a week. */
-function weekLabel(weekStart: string): string {
-  const mon = new Date(weekStart + "T12:00:00");
-  const sun = new Date(mon);
-  sun.setDate(mon.getDate() + 6);
-  const short: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
-  return `${mon.toLocaleDateString(undefined, short)} – ${sun.toLocaleDateString(undefined, { ...short, year: "numeric" })}`;
-}
-
 /** Doc id under `students/{id}/workoutPlans` — slot rows may use roster id or linked auth `userId`. */
 function resolveFirestoreStudentId(
   roster: Array<{ id: string } & Record<string, unknown>>,
@@ -971,14 +974,11 @@ export default function AssignmentCalendarPage() {
   const [weekAssignments, setWeekAssignments] = useState<WeekAssignment[]>([]);
   const [programs, setPrograms] = useState<any[]>([]);
   const [assignWeekOpen, setAssignWeekOpen] = useState(false);
-  const [assignWeekStudentId, setAssignWeekStudentId] = useState("");
-  const [assignWeekProgramId, setAssignWeekProgramId] = useState("");
-  const [isAssigningWeek, setIsAssigningWeek] = useState(false);
-  // Weekly program assignment from calendar
-  const [assignWeekMode, setAssignWeekMode] = useState<"single" | "weekly">("single");
-  const [assignWeeklyProgramId, setAssignWeeklyProgramId] = useState("");
-  const [isAssigningWeeklyFromCal, setIsAssigningWeeklyFromCal] = useState(false);
-  const [isRemovingStudentWeekAssignments, setIsRemovingStudentWeekAssignments] = useState(false);
+  const [assignWeekStudentIds, setAssignWeekStudentIds] = useState<string[]>([]);
+  const [isApplyingDefaultSequence, setIsApplyingDefaultSequence] = useState(false);
+  const [defaultSequenceForAssign, setDefaultSequenceForAssign] =
+    useState<DefaultStudentSequenceProgram | null>(null);
+  const [isLoadingDefaultSequenceForAssign, setIsLoadingDefaultSequenceForAssign] = useState(false);
   const [isRemovingStudentAllAssignments, setIsRemovingStudentAllAssignments] = useState(false);
 
   // Student filter (0 = no filter, shows all; set = student-centric view)
@@ -1369,7 +1369,6 @@ export default function AssignmentCalendarPage() {
 
   // Selected week helpers
   const selectedWeekStart = getWeekStart(selectedDateStr);
-  const selectedWeekLabel  = weekLabel(selectedWeekStart);
 
   const selectedWeekAssignments = useMemo(
     () => weekAssignments.filter((a) =>
@@ -1814,16 +1813,36 @@ export default function AssignmentCalendarPage() {
     sessionCompletedSlotPlanByKey,
   ]);
 
-  const weeklyPrograms = useMemo(
+  const assignableBasePrograms = useMemo(
     () =>
-      programs.filter((program: any) => {
-        const hasWeeklyType = program.programType === "weekly";
-        const hasSourcePrograms = Array.isArray(program.sourceProgramIds) && program.sourceProgramIds.length > 0;
-        const hasLegacyWeeklyPlan = Array.isArray(program.weeklyPlan) && program.weeklyPlan.length > 0;
-        return hasWeeklyType || hasSourcePrograms || hasLegacyWeeklyPlan;
-      }),
+      programs.filter(
+        (p: { programType?: string }) => p.programType !== "weekly" && p.programType !== "sequence"
+      ) as Array<TrainingProgramDocument & { id: string }>,
     [programs]
   );
+
+  useEffect(() => {
+    if (!assignWeekOpen || !db || !user) {
+      setDefaultSequenceForAssign(null);
+      setIsLoadingDefaultSequenceForAssign(false);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingDefaultSequenceForAssign(true);
+    void getDefaultStudentSequenceProgram(db, user.uid)
+      .then((def) => {
+        if (!cancelled) setDefaultSequenceForAssign(def);
+      })
+      .catch(() => {
+        if (!cancelled) setDefaultSequenceForAssign(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDefaultSequenceForAssign(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [assignWeekOpen, db, user]);
 
   // Calendar modifier: days in weeks that have program assignments (scoped to filter student when active)
   const assignedWeekDates = useMemo(() => {
@@ -2271,140 +2290,57 @@ export default function AssignmentCalendarPage() {
     }
   };
 
-  // ── Weekly program assignment from calendar ────────────────────────────────
-
-  const handleAssignWeeklyFromCal = async () => {
-    if (!db || !user || !assignWeekStudentId || !assignWeeklyProgramId) return;
-    const weeklyProg = programs.find((p) => p.id === assignWeeklyProgramId);
-    if (!weeklyProg) return;
-    const student = (rosterStudents || []).find((s: any) => s.id === assignWeekStudentId) as any;
-    const studentName = `${student?.firstName || ""} ${student?.lastName || ""}`.trim() || "Aluno";
-    const sourceProgramIds: string[] = Array.isArray(weeklyProg.sourceProgramIds) ? weeklyProg.sourceProgramIds : [];
-    const legacyPlan: Array<{ week: number; trainingProgramId: string }> = Array.isArray(weeklyProg.weeklyPlan)
-      ? weeklyProg.weeklyPlan
-      : [];
-    const durationWeeks: number = weeklyProg.durationWeeks || Math.max(1, legacyPlan.length || 1);
-    const baseProgs = programs.filter((p) => p.programType !== "weekly");
-    setIsAssigningWeeklyFromCal(true);
+  const handleApplyDefaultSequenceFromCal = async () => {
+    if (!db || !user || assignWeekStudentIds.length === 0 || !defaultSequenceForAssign) return;
+    const studentCount = assignWeekStudentIds.length;
+    const portalRows = (portalStudents || []) as Array<{ id: string; email?: string }>;
+    setIsApplyingDefaultSequence(true);
     try {
-      const workoutPlansRef = collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans");
-      if (sourceProgramIds.length > 0) {
-        for (let w = 1; w <= durationWeeks; w++) {
-          const ws = w === 1 ? selectedWeekStart : (() => {
-            const d = new Date(selectedWeekStart + "T12:00:00");
-            d.setDate(d.getDate() + (w - 1) * 7);
-            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-          })();
-          for (const progId of sourceProgramIds) {
-            const srcProg = baseProgs.find((p) => p.id === progId);
-            if (!srcProg) continue;
-            const exs = buildWorkoutPlanExercises(srcProg, w);
-            await setDoc(doc(collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans")), {
-              title: srcProg.name, studentId: assignWeekStudentId,
-              personalTrainerId: user.uid, weekStart: ws,
-              weekNumber: w, totalWeeks: durationWeeks,
-              weeklyProgramId: weeklyProg.id, weeklyProgramName: weeklyProg.name,
-              sourceTrainingProgramId: progId, exercises: exs,
-              createdAt: new Date().toISOString(),
-            });
-            const waRef = doc(collection(db, "personalTrainers", user.uid, "weekProgramAssignments"));
-            const wa: WeekAssignment = { id: waRef.id, studentId: assignWeekStudentId, studentName, weekStart: ws, programId: progId, programTitle: srcProg.name };
-            await setDoc(waRef, wa);
-            setWeekAssignments((prev) => [...prev, wa]);
-          }
-        }
-      } else {
-        for (const legacyItem of legacyPlan) {
-          const srcProg = baseProgs.find((p) => p.id === legacyItem.trainingProgramId);
-          if (!srcProg) continue;
-          const weekNumber = Math.max(1, Number(legacyItem.week) || 1);
-          const ws = (() => {
-            const d = new Date(selectedWeekStart + "T12:00:00");
-            d.setDate(d.getDate() + (weekNumber - 1) * 7);
-            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-          })();
-          const exs = (srcProg.sessions || []).flatMap((s: any) =>
-            (s.exercises || []).map((e: any) => ({
-              exerciseName: e.exerciseName, sets: e.sets ?? 1, reps: e.reps ?? "",
-              restTimeSeconds: e.restTimeSeconds ?? 0, notes: e.notes,
-            }))
-          );
-          await setDoc(doc(collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans")), {
-            title: srcProg.name, studentId: assignWeekStudentId,
-            personalTrainerId: user.uid, weekStart: ws,
-            weekNumber, totalWeeks: durationWeeks,
-            weeklyProgramId: weeklyProg.id, weeklyProgramName: weeklyProg.name,
-            sourceTrainingProgramId: srcProg.id, exercises: exs,
-            createdAt: new Date().toISOString(),
-          });
-          const waRef = doc(collection(db, "personalTrainers", user.uid, "weekProgramAssignments"));
-          const wa: WeekAssignment = { id: waRef.id, studentId: assignWeekStudentId, studentName, weekStart: ws, programId: srcProg.id, programTitle: srcProg.name };
-          await setDoc(waRef, wa);
-          setWeekAssignments((prev) => [...prev, wa]);
-        }
+      let anyAppended = false;
+      for (const rosterStudentId of assignWeekStudentIds) {
+        await linkStudentProfileForTrainerAssignments(
+          db,
+          user.uid,
+          rosterStudentId,
+          rosterStudents as Array<{ id: string; userId?: string; email?: string }> | null,
+          portalRows
+        );
+        const storageId = resolveWorkoutPlansStorageStudentId(
+          rosterStudentId,
+          rosterStudents as Array<{ id: string; userId?: string; email?: string }> | null,
+          portalRows
+        );
+        const { appended } = await applyDefaultStudentSequenceToStudent(
+          db,
+          user.uid,
+          storageId,
+          assignableBasePrograms
+        );
+        if (appended) anyAppended = true;
       }
       setAssignWeekOpen(false);
-      setAssignWeekStudentId("");
-      setAssignWeeklyProgramId("");
-      toast({ title: `${weeklyProg.name} atribuído (${durationWeeks} sem.)` });
-    } catch (e: any) {
-      toast({ title: "Erro", description: e?.message, variant: "destructive" });
-    } finally {
-      setIsAssigningWeeklyFromCal(false);
-    }
-  };
-
-  // ── Week assignment handlers ───────────────────────────────────────────────
-
-  const handleAddWeekAssignment = async () => {
-    if (!db || !user || !assignWeekStudentId || !assignWeekProgramId) return;
-    const program = programs.find((p) => p.id === assignWeekProgramId);
-    const student = (rosterStudents || []).find((s: any) => s.id === assignWeekStudentId) as any;
-    const studentName = `${student?.firstName || ""} ${student?.lastName || ""}`.trim() || "Aluno";
-    setIsAssigningWeek(true);
-    try {
-      // 1. Save a denormalized week assignment record
-      const waRef = doc(collection(db, "personalTrainers", user.uid, "weekProgramAssignments"));
-      const wa: WeekAssignment = {
-        id: waRef.id,
-        studentId: assignWeekStudentId,
-        studentName,
-        weekStart: selectedWeekStart,
-        programId: assignWeekProgramId,
-        programTitle: program?.name || "Programa",
-      };
-      await setDoc(waRef, wa);
-
-      // 2. Create a workoutPlan in the student's subcollection (week-based)
-      const exercises = (program?.sessions || []).flatMap((s: any) =>
-        (s.exercises || []).map((e: any) => ({
-          exerciseName: e.exerciseName || "",
-          sets: e.sets ?? 1,
-          reps: e.reps ?? "",
-          restTimeSeconds: e.restTimeSeconds ?? 0,
-          notes: e.notes ?? "",
-        }))
-      );
-      const wpRef = doc(collection(db, "personalTrainers", user.uid, "students", assignWeekStudentId, "workoutPlans"));
-      await setDoc(wpRef, {
-        title: program?.name || "Programa",
-        studentId: assignWeekStudentId,
-        personalTrainerId: user.uid,
-        weekStart: selectedWeekStart,
-        programId: assignWeekProgramId,
-        exercises,
-        createdAt: new Date().toISOString(),
+      setAssignWeekStudentIds([]);
+      toast({
+        title:
+          studentCount > 1
+            ? anyAppended
+              ? t("sequenceAssignedAppendedToast")
+              : t("sequenceAssignedToast")
+            : anyAppended
+              ? t("sequenceAssignedAppendedToast")
+              : t("sequenceAssignedToast"),
       });
-
-      setWeekAssignments((prev) => [...prev, wa]);
-      setAssignWeekOpen(false);
-      setAssignWeekStudentId("");
-      setAssignWeekProgramId("");
-      toast({ title: `Programa atribuído para a semana de ${selectedWeekLabel}` });
-    } catch (e: any) {
-      toast({ title: "Erro", description: e?.message, variant: "destructive" });
+    } catch (e: unknown) {
+      if (e instanceof DefaultStudentSequenceNotConfiguredError) {
+        toast({ variant: "destructive", title: t("defaultSequenceNotConfigured") });
+      } else if (e instanceof Error && e.message === "DEFAULT_STUDENT_SEQUENCE_PROGRAMS_MISSING") {
+        toast({ variant: "destructive", title: t("defaultStudentSequenceProgramsMissing") });
+      } else {
+        const msg = e instanceof Error ? e.message : t("sequenceAssignFailed");
+        toast({ variant: "destructive", title: t("sequenceAssignFailed"), description: msg });
+      }
     } finally {
-      setIsAssigningWeek(false);
+      setIsApplyingDefaultSequence(false);
     }
   };
 
@@ -2416,45 +2352,6 @@ export default function AssignmentCalendarPage() {
       toast({ title: "Atribuição removida" });
     } catch {
       toast({ title: "Erro", variant: "destructive" });
-    }
-  };
-
-  const handleRemoveAllAssignmentsForStudentInWeek = async () => {
-    if (!db || !user || !filterStudentId) return;
-    const assignmentsForStudent = selectedWeekAssignments.filter((a) => a.studentId === filterStudentId);
-    if (assignmentsForStudent.length === 0) {
-      toast({ title: "Sem atribuições para remover" });
-      return;
-    }
-
-    setIsRemovingStudentWeekAssignments(true);
-    try {
-      await Promise.all(
-        assignmentsForStudent.map((a) =>
-          deleteDoc(doc(db, "personalTrainers", user.uid, "weekProgramAssignments", a.id))
-        )
-      );
-
-      const plansSnap = await getDocs(
-        collection(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans")
-      );
-      const weeklyPlans = plansSnap.docs.filter(
-        (d) => (d.data()?.weekStart as string | undefined) === selectedWeekStart
-      );
-      await Promise.all(
-        weeklyPlans.map((d) =>
-          deleteDoc(doc(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans", d.id))
-        )
-      );
-
-      setWeekAssignments((prev) =>
-        prev.filter((a) => !(a.studentId === filterStudentId && a.weekStart === selectedWeekStart))
-      );
-      toast({ title: "Todos os programas do aluno foram removidos" });
-    } catch (e: any) {
-      toast({ title: "Erro", description: e?.message, variant: "destructive" });
-    } finally {
-      setIsRemovingStudentWeekAssignments(false);
     }
   };
 
@@ -2506,108 +2403,145 @@ export default function AssignmentCalendarPage() {
         </header>
 
         {/* ── Assign to week dialog ─────────────────────────────────────────── */}
-        <Dialog open={assignWeekOpen} onOpenChange={(o) => { setAssignWeekOpen(o); if (!o) setAssignWeekMode("single"); }}>
+        <Dialog open={assignWeekOpen} onOpenChange={(o) => {
+          setAssignWeekOpen(o);
+          if (!o) setAssignWeekStudentIds([]);
+        }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Dumbbell className="h-4 w-4 text-primary" /> Atribuir Programa
+                <ListOrdered className="h-4 w-4 text-primary" /> {t("applyDefaultStudentSequence")}
               </DialogTitle>
-              <DialogDescription>{selectedWeekLabel}</DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-2">
 
-              {/* Mode toggle */}
-              <div className="flex rounded-lg border overflow-hidden text-sm">
-                <button
-                  className={`flex-1 py-2 font-medium transition-colors ${assignWeekMode === "single" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50"}`}
-                  onClick={() => setAssignWeekMode("single")}>
-                  Treino único
-                </button>
-                <button
-                  className={`flex-1 py-2 font-medium transition-colors ${assignWeekMode === "weekly" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50"}`}
-                  onClick={() => setAssignWeekMode("weekly")}>
-                  Programa semanal
-                </button>
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm">
+                <p className="font-medium text-foreground">{t("sequenceProgramsInOrder")}</p>
+                {isLoadingDefaultSequenceForAssign ? (
+                  <div className="flex items-center gap-2 text-muted-foreground py-1">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t("loading")}
+                  </div>
+                ) : defaultSequenceForAssign ? (
+                  <>
+                    <p className="text-muted-foreground leading-snug">
+                      {(defaultSequenceForAssign.sourceProgramNames.length > 0
+                        ? defaultSequenceForAssign.sourceProgramNames
+                        : defaultSequenceForAssign.sourceProgramIds.map(
+                            (pid) =>
+                              assignableBasePrograms.find((p) => p.id === pid)?.name || pid
+                          )
+                      ).join(" → ")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {defaultSequenceForAssign.sequenceRepeatCycles}× {t("sequenceTemplateCycles")}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-destructive text-xs">{t("defaultSequenceNotConfigured")}</p>
+                )}
               </div>
 
-              {/* Student selector (both modes) */}
+              {/* Student multi-select */}
               <div className="space-y-1.5">
-                <Label>Aluno</Label>
-                <Select value={assignWeekStudentId} onValueChange={setAssignWeekStudentId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecionar aluno..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(rosterStudents || []).map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {`${s.firstName || ""} ${s.lastName || ""}`.trim() || "Sem nome"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Alunos</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 w-full justify-between font-normal px-3"
+                    >
+                      <span
+                        className={cn(
+                          "truncate text-left",
+                          assignWeekStudentIds.length === 0 && "text-muted-foreground"
+                        )}
+                      >
+                        {assignWeekStudentIds.length === 0
+                          ? "Selecionar alunos..."
+                          : assignWeekStudentIds.length === 1
+                            ? getStudentDisplayName(
+                                (rosterStudentsSorted.find((s) => s.id === assignWeekStudentIds[0]) as Record<string, unknown>) ?? {},
+                                "Sem nome"
+                              )
+                            : `${assignWeekStudentIds.length} alunos selecionados`}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-2" align="start">
+                    <div className="max-h-60 overflow-y-auto space-y-0.5">
+                      {rosterStudentsSorted.length === 0 ? (
+                        <p className="text-sm text-muted-foreground px-2 py-1.5">Sem alunos na lista</p>
+                      ) : (
+                        rosterStudentsSorted.map((s) => {
+                          const checked = assignWeekStudentIds.includes(s.id);
+                          const name = getStudentDisplayName(s, "Sem nome");
+                          const initial =
+                            name !== "Sem nome"
+                              ? name.trim().charAt(0).toUpperCase() || "?"
+                              : "?";
+                          const photoSrc = rosterPhotoUrlForSlotStudent(rosterStudentsSorted, s.id);
+                          return (
+                            <div
+                              key={s.id}
+                              role="button"
+                              tabIndex={0}
+                              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted cursor-pointer"
+                              onClick={() => {
+                                setAssignWeekStudentIds((prev) =>
+                                  checked ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+                                );
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setAssignWeekStudentIds((prev) =>
+                                    checked ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+                                  );
+                                }
+                              }}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(value) => {
+                                  setAssignWeekStudentIds((prev) =>
+                                    value ? [...prev, s.id] : prev.filter((id) => id !== s.id)
+                                  );
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              <Avatar className="h-7 w-7 shrink-0 border border-border/50">
+                                <AvatarImage src={photoSrc} alt="" />
+                                <AvatarFallback className="text-[10px]">{initial}</AvatarFallback>
+                              </Avatar>
+                              <span className="truncate">{name}</span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
 
-              {assignWeekMode === "single" ? (
-                /* Single base program */
-                <div className="space-y-1.5">
-                  <Label>Treino</Label>
-                  <Select value={assignWeekProgramId} onValueChange={setAssignWeekProgramId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecionar treino..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {programs.filter((p) => p.programType !== "weekly").map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                /* Weekly cycle program */
-                <div className="space-y-1.5">
-                  <Label>Programa semanal</Label>
-                  <Select value={assignWeeklyProgramId} onValueChange={setAssignWeeklyProgramId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecionar programa semanal..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {weeklyPrograms.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name} · {p.durationWeeks || "?"} sem.
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {assignWeeklyProgramId && (() => {
-                    const wp = programs.find((p) => p.id === assignWeeklyProgramId);
-                    const names: string[] = wp?.sourceProgramNames || [];
-                    return names.length > 0 ? (
-                      <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
-                        <p className="font-medium">Por semana:</p>
-                        {names.map((n: string, i: number) => <p key={i} className="ml-2">↳ {n}</p>)}
-                      </div>
-                    ) : null;
-                  })()}
-                </div>
-              )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setAssignWeekOpen(false)}>Cancelar</Button>
-              {assignWeekMode === "single" ? (
-                <Button
-                  onClick={handleAddWeekAssignment}
-                  disabled={!assignWeekStudentId || !assignWeekProgramId || isAssigningWeek}>
-                  {isAssigningWeek && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                  Atribuir
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleAssignWeeklyFromCal}
-                  disabled={!assignWeekStudentId || !assignWeeklyProgramId || isAssigningWeeklyFromCal}>
-                  {isAssigningWeeklyFromCal && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                  Atribuir ciclo
-                </Button>
-              )}
+              <Button variant="outline" onClick={() => setAssignWeekOpen(false)}>{t("cancel")}</Button>
+              <Button
+                onClick={() => void handleApplyDefaultSequenceFromCal()}
+                disabled={
+                  assignWeekStudentIds.length === 0 ||
+                  !defaultSequenceForAssign ||
+                  isApplyingDefaultSequence ||
+                  isLoadingDefaultSequenceForAssign
+                }
+                className="gap-2"
+              >
+                {isApplyingDefaultSequence && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("applyDefaultStudentSequence")}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -3501,8 +3435,7 @@ export default function AssignmentCalendarPage() {
                   size="sm"
                   className="gap-1.5 shrink-0"
                   onClick={() => {
-                    setAssignWeekStudentId(isFilterActive ? filterStudentId : "");
-                    setAssignWeekProgramId("");
+                    setAssignWeekStudentIds(isFilterActive && filterStudentId ? [filterStudentId] : []);
                     setAssignWeekOpen(true);
                   }}
                 >
@@ -3516,22 +3449,8 @@ export default function AssignmentCalendarPage() {
                   size="sm"
                   variant="outline"
                   className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10 w-fit"
-                  onClick={handleRemoveAllAssignmentsForStudentInWeek}
-                  disabled={isRemovingStudentWeekAssignments || isRemovingStudentAllAssignments}
-                >
-                  {isRemovingStudentWeekAssignments ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                  Remover todos do aluno (semana)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10 w-fit"
                   onClick={handleRemoveAllAssignmentsForStudent}
-                  disabled={isRemovingStudentAllAssignments || isRemovingStudentWeekAssignments}
+                  disabled={isRemovingStudentAllAssignments}
                 >
                   {isRemovingStudentAllAssignments ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

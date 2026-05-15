@@ -14,6 +14,7 @@ import {
   Search,
   Plus,
   User,
+  Store,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -37,6 +38,7 @@ const navItemKeys = [
   { key: "coachProgressNav" as const, href: "/progress", icon: LineChart },
   { key: "students" as const, href: "/students", icon: Users },
   { key: "exercises" as const, href: "/exercises", icon: Search },
+  { key: "shop" as const, href: "/shop", icon: Store },
   { key: "myProfile" as const, href: "/profile", icon: User },
 ];
 
@@ -121,7 +123,7 @@ function TrainerSidebarIdentity({
 }
 
 /* ─── Shared sidebar nav content ─── */
-type SidebarTranslate = (key: "dashboard" | "students" | "programs" | "exercises" | "assignmentCalendar" | "coachProgressNav" | "myProfile" | "logout") => string;
+type SidebarTranslate = (key: "dashboard" | "students" | "programs" | "exercises" | "assignmentCalendar" | "coachProgressNav" | "myProfile" | "shop" | "logout") => string;
 
 function SidebarContent({
   pathname,
@@ -221,6 +223,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
     "assignment-calendar": t("assignmentCalendar"),
     progress: t("coachProgressNav"),
     profile: t("myProfile"),
+    shop: t("shop"),
   };
   const currentPathKey = pathname.split("/")[1] || "dashboard";
 
