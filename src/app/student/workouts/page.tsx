@@ -20,10 +20,16 @@ import { useToast } from "@/hooks/use-toast";
 import {
   resolveStudentPresentStartPlans,
   studentLocalCalendarDateKeyMs,
+  type SessionAttendanceStatus,
   type SessionSlotAttendance,
 } from "@/lib/session-attendance-streak";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
+import {
+  isOpenTrainingAccess,
+  normalizeTrainingAccessMode,
+  type TrainingAccessMode,
+} from "@/lib/student-training-access";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -226,6 +232,7 @@ export default function StudentWorkoutsPage() {
   /** Re-evaluate “coach marked present” access periodically without full refetch. */
   const [presentAccessTick, setPresentAccessTick] = useState(0);
   const [hasCompletedWorkoutSessionToday, setHasCompletedWorkoutSessionToday] = useState(false);
+  const [trainingAccessMode, setTrainingAccessMode] = useState<TrainingAccessMode>("scheduled");
 
   /** Roster document id under the trainer (falls back to auth uid until first fetch). */
   const myId = rosterDocId || user?.uid || "";
@@ -245,9 +252,11 @@ export default function StudentWorkoutsPage() {
         const tid = studentDoc.data()?.trainerId as string | undefined;
         if (!tid) { setIsLoading(false); return; }
         const rid = (studentDoc.data()?.rosterDocId as string | undefined) || user!.uid;
+        const globalAccessMode = normalizeTrainingAccessMode(studentDoc.data()?.trainingAccessMode);
         if (cancelled) return;
         setTrainerId(tid);
         setRosterDocId(rid);
+        setTrainingAccessMode(globalAccessMode);
 
         const [rosterDoc, trainerDoc, slotsSnap, plansSnap, sessionsSnap] = await Promise.all([
           getDoc(doc(db!, "personalTrainers", tid, "students", rid)),
@@ -265,6 +274,9 @@ export default function StudentWorkoutsPage() {
           setMyPhotoUrl(String(rd.photoUrl || "").trim());
           if (rd.sessionsPerWeek)   setSessionsPerWeek(Number(rd.sessionsPerWeek));
           if (rd.sessionDurationMin) setSessionDurationMin(Number(rd.sessionDurationMin));
+          if (rd.trainingAccessMode != null) {
+            setTrainingAccessMode(normalizeTrainingAccessMode(rd.trainingAccessMode));
+          }
         } else {
           setMyPhotoUrl("");
         }
@@ -488,10 +500,23 @@ export default function StudentWorkoutsPage() {
       });
   }, [workouts, selectedWeekStart]);
 
+  const isOpenAccess = isOpenTrainingAccess(trainingAccessMode);
+
+  const plansToShow = useMemo(
+    () => (isOpenAccess ? workouts : weekPlansOrdered),
+    [isOpenAccess, workouts, weekPlansOrdered]
+  );
+
   const planPresentAccess = useMemo(() => {
-    const now = Date.now();
     const map = new Map<string, boolean>();
     if (!myId) return map;
+    if (isOpenAccess) {
+      for (const w of plansToShow) {
+        map.set(w.id, isSequenceStepEffectiveUnlocked(w, completedPlanIds));
+      }
+      return map;
+    }
+    const now = Date.now();
     const slots = sessionSlots as SessionSlotAttendance[];
     const candidates = weekPlansOrdered.map((w) => ({
       id: w.id,
@@ -511,11 +536,13 @@ export default function StudentWorkoutsPage() {
     return map;
   }, [
     myId,
+    isOpenAccess,
+    plansToShow,
+    completedPlanIds,
     sessionSlots,
     weekPlansOrdered,
     sessionDurationMin,
     presentAccessTick,
-    selectedWeekStart,
     hasCompletedWorkoutSessionToday,
   ]);
 
@@ -678,10 +705,18 @@ export default function StudentWorkoutsPage() {
       <div className="space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
-          <p className="text-muted-foreground">Agenda de sessões com o teu treinador</p>
+          <p className="text-muted-foreground">
+            {isOpenAccess ? t("trainingAccessModeOpen") : "Agenda de sessões com o teu treinador"}
+          </p>
         </header>
 
-        {/* Main grid */}
+        {isOpenAccess ? (
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-sm text-muted-foreground">{t("studentOpenAccessWorkoutsIntro")}</p>
+            </CardContent>
+          </Card>
+        ) : (
         <div className="grid lg:grid-cols-5 gap-6 items-start">
 
           {/* Left: Calendar + weekly booking limit */}
@@ -964,13 +999,16 @@ export default function StudentWorkoutsPage() {
             </CardContent>
           </Card>
         </div>
+        )}
 
         {trainerId ? (
           <div className="space-y-3">
-            <h2 className="text-lg font-semibold">{workoutsPlansSectionTitle}</h2>
-            {weekPlansOrdered.length > 0 ? (
+            <h2 className="text-lg font-semibold">
+              {isOpenAccess ? t("myWorkouts") : workoutsPlansSectionTitle}
+            </h2>
+            {plansToShow.length > 0 ? (
               <div className="space-y-2">
-                {weekPlansOrdered.map((w) => {
+                {plansToShow.map((w) => {
                   const isExpanded = expandedWorkoutId === w.id;
                   const weekDate = w.weekStart
                     ? new Date(w.weekStart + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })

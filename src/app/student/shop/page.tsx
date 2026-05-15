@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
+import { isOpenTrainingAccess, normalizeTrainingAccessMode } from "@/lib/student-training-access";
 import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +26,7 @@ export default function StudentShopPage() {
   const { toast } = useToast();
   const { user } = useUser();
   const db = useFirestore();
+  const router = useRouter();
 
   const studentRef = useMemoFirebase(() => {
     if (!db || !user?.uid) return null;
@@ -32,6 +35,39 @@ export default function StudentShopPage() {
 
   const { data: studentData, isLoading: isStudentLoading } = useDoc(studentRef);
   const trainerId = typeof studentData?.trainerId === "string" ? studentData.trainerId : undefined;
+
+  useEffect(() => {
+    if (!db || !user?.uid || isStudentLoading) return;
+    let cancelled = false;
+    (async () => {
+      let mode = normalizeTrainingAccessMode(studentData?.trainingAccessMode);
+      const tid = typeof studentData?.trainerId === "string" ? studentData.trainerId : undefined;
+      const rosterId =
+        (typeof studentData?.rosterDocId === "string" && studentData.rosterDocId.trim()) ||
+        user.uid;
+      if (tid) {
+        try {
+          const rosterSnap = await getDoc(
+            doc(db, "personalTrainers", tid, "students", rosterId)
+          );
+          if (rosterSnap.exists()) {
+            const rd = rosterSnap.data();
+            if (rd?.trainingAccessMode != null) {
+              mode = normalizeTrainingAccessMode(rd.trainingAccessMode);
+            }
+          }
+        } catch {
+          /* keep global mode */
+        }
+      }
+      if (!cancelled && isOpenTrainingAccess(mode)) {
+        router.replace("/student/workouts");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user?.uid, isStudentLoading, studentData, router]);
 
   const [dateStr, setDateStr] = useState(() => localDateYmd(new Date()));
   const [coffeeCount, setCoffeeCount] = useState(0);

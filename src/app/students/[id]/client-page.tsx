@@ -84,6 +84,11 @@ import {
 } from "@/lib/roster-payment-status";
 import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
+import {
+  isOpenTrainingAccess,
+  normalizeTrainingAccessMode,
+  type TrainingAccessMode,
+} from "@/lib/student-training-access";
 import { deleteSequencePlanWithChainRepair } from "@/lib/workout-plan-sequence-delete";
 import { clearStudentAssignedPlans } from "@/lib/firestore/clear-trainer-assignments";
 
@@ -147,13 +152,26 @@ function adjustAssignedExercises(exercises: any[], weightDelta: number, repDelta
 }
 
 // ─── Billing Tab Component ───────────────────────────────────────
-function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studentId: string; toast: any }) {
+function BillingTab({
+  db,
+  user,
+  studentId,
+  globalStudentUid,
+  toast,
+}: {
+  db: any;
+  user: any;
+  studentId: string;
+  globalStudentUid: string;
+  toast: any;
+}) {
   const { t } = useI18n();
   const [monthlyRate, setMonthlyRate] = useState("");
   const [rate30Min, setRate30Min] = useState("");
   const [rate60Min, setRate60Min] = useState("");
   const [sessionDurationMin, setSessionDurationMin] = useState("60");
   const [sessionsPerWeek, setSessionsPerWeek] = useState("");
+  const [trainingAccessMode, setTrainingAccessMode] = useState<TrainingAccessMode>("scheduled");
   const [paymentMethod, setPaymentMethod] = useState("mbway");
   const [paymentDetails, setPaymentDetails] = useState("");
   const [showAddPayment, setShowAddPayment] = useState(false);
@@ -196,6 +214,9 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       setRate60Min(String((rosterData as any).rate60Min || ""));
       setSessionDurationMin(String((rosterData as any).sessionDurationMin || 60));
       setSessionsPerWeek(String((rosterData as any).sessionsPerWeek || ""));
+      setTrainingAccessMode(
+        normalizeTrainingAccessMode((rosterData as Record<string, unknown>).trainingAccessMode)
+      );
       setPaymentMethod((rosterData as any).paymentMethod || "mbway");
       setPaymentDetails((rosterData as any).paymentDetails || "");
     }
@@ -222,10 +243,12 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
     const safeSessions = Math.max(0, Number(sessionsPerWeek) || 0);
     const safeRate30 = Math.max(0, Number(rate30Min) || 0);
     const safeRate60 = Math.max(0, Number(rate60Min) || 0);
+    const mode = normalizeTrainingAccessMode(trainingAccessMode);
     updateDocumentNonBlocking(doc(db, "personalTrainers", user.uid, "students", studentId), {
       billingModel: "session_based",
       sessionDurationMin: safeDuration,
       sessionsPerWeek: safeSessions,
+      trainingAccessMode: mode,
       rate30Min: safeRate30,
       rate60Min: safeRate60,
       monthlyRate: Number(monthlyRate) || calculatedMonthlyRate || 0,
@@ -233,6 +256,13 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
       paymentDetails,
       billingStatus: "active",
     });
+    if (globalStudentUid) {
+      setDocumentNonBlocking(
+        doc(db, "students", globalStudentUid),
+        { trainingAccessMode: mode },
+        { merge: true }
+      );
+    }
     toast({ title: t("billingSettingsSaved") });
   };
 
@@ -355,6 +385,22 @@ function BillingTab({ db, user, studentId, toast }: { db: any; user: any; studen
                 value={sessionsPerWeek}
                 onChange={(e) => setSessionsPerWeek(e.target.value)}
               />
+            </div>
+            <div className="space-y-2 sm:col-span-2 lg:col-span-4">
+              <Label>{t("trainingAccessModeLabel")}</Label>
+              <Select
+                value={trainingAccessMode}
+                onValueChange={(v) => setTrainingAccessMode(normalizeTrainingAccessMode(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="scheduled">{t("trainingAccessModeScheduled")}</SelectItem>
+                  <SelectItem value="open">{t("trainingAccessModeOpen")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{t("trainingAccessModeOpenDesc")}</p>
             </div>
           </div>
 
@@ -629,6 +675,7 @@ function normalizePortalStudent(global: Record<string, unknown>, studentId: stri
     activityStatus: (global.activityStatus as string) || "active",
     subscriptionStatus: (global.subscriptionStatus as string) || "pending",
     goalType: (global.goalType as string) || "general",
+    trainingAccessMode: normalizeTrainingAccessMode(global.trainingAccessMode),
   };
 }
 
@@ -1352,6 +1399,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
                 <Badge className="bg-accent text-accent-foreground capitalize">
                   {portalOnly ? "Portal" : student.activityStatus}
                 </Badge>
+                {student && isOpenTrainingAccess((student as { trainingAccessMode?: string }).trainingAccessMode) ? (
+                  <Badge className="bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">
+                    {t("trainingAccessOpenBadge")}
+                  </Badge>
+                ) : null}
                 {isStudentBlocked && (
                   <Badge variant="destructive" className="gap-1">
                     <Ban className="h-3 w-3" /> Blocked
@@ -2192,7 +2244,13 @@ export default function StudentDetailPage({ id }: { id: string }) {
           </TabsContent>
 
           <TabsContent value="billing" className="space-y-6">
-            <BillingTab db={db} user={user} studentId={paymentsFirestoreStudentId} toast={toast} />
+            <BillingTab
+              db={db}
+              user={user}
+              studentId={paymentsFirestoreStudentId}
+              globalStudentUid={id}
+              toast={toast}
+            />
           </TabsContent>
         </Tabs>
 

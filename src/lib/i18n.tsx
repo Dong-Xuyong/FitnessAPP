@@ -574,6 +574,15 @@ const translations = {
     coachRosterLegendAbsent: "Marked absent",
     coachRosterLegendAllowance: "Monthly registration limit",
     coachRosterMetricsLoadFailed: "Could not load roster session stats.",
+    trainingAccessModeLabel: "Training access",
+    trainingAccessModeScheduled: "Scheduled (calendar booking)",
+    trainingAccessModeOpen: "Open access",
+    trainingAccessModeOpenDesc:
+      "Student skips calendar booking and coach present checks; can start workouts anytime with no daily session limit.",
+    trainingAccessOpenBadge: "Open access",
+    studentOpenAccessWorkoutsIntro:
+      "You have open access. Start your assigned workout when you are ready — no calendar booking required.",
+    studentOpenAccessShopHint: "You can also log shop visits from the Shop menu.",
     noStudentsAssigned: "No students assigned",
     upcomingMilestones: "Upcoming Milestones",
     nextGoalsToCelebrate: "Next goals to celebrate",
@@ -1422,6 +1431,15 @@ const translations = {
     coachRosterLegendAbsent: "Marcadas falta",
     coachRosterLegendAllowance: "Limite de registo no mês",
     coachRosterMetricsLoadFailed: "Não foi possível carregar as estatísticas da lista.",
+    trainingAccessModeLabel: "Acesso ao treino",
+    trainingAccessModeScheduled: "Agendado (reserva no calendário)",
+    trainingAccessModeOpen: "Acesso livre",
+    trainingAccessModeOpenDesc:
+      "O aluno não usa reservas no calendário nem precisa de presença marcada; pode iniciar treinos a qualquer momento, sem limite diário.",
+    trainingAccessOpenBadge: "Acesso livre",
+    studentOpenAccessWorkoutsIntro:
+      "Tens acesso livre. Inicia o treino atribuído quando estiveres pronto — não é necessário reservar no calendário.",
+    studentOpenAccessShopHint: "Podes também registar visitas à loja no menu Loja.",
     noStudentsAssigned: "Nenhum aluno atribuído",
     upcomingMilestones: "Próximos Marcos",
     nextGoalsToCelebrate: "Próximos objetivos a celebrar",
