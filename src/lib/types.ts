@@ -90,6 +90,8 @@ export interface TrainingProgramDocument {
   durationWeeks?: number;
   sessions: TrainingProgramSession[];
   programType?: 'single' | 'weekly' | 'sequence';
+  /** When true on a `sequence` template, this is the trainer's single default applied to students. */
+  isDefaultStudentSequence?: boolean;
   /** For `programType: 'sequence'` templates: default repeat count when assigning to a student. */
   sequenceRepeatCycles?: number;
   sourceProgramIds?: string[];

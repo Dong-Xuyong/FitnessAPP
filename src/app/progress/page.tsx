@@ -4,7 +4,6 @@ import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Progress } from "@/components/ui/progress";
 import { TrendingUp, Users, Award, Calendar, Loader2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
@@ -20,11 +19,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { collection, deleteDoc, doc, getDoc, query, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import {
+  countMonthlySessionAttendanceStats,
+  monthlySessionAllowance,
+  type SessionSlotAttendance,
+} from "@/lib/session-attendance-streak";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RosterMonthlySessionChart } from "@/components/RosterMonthlySessionChart";
 
 const COACH_DASH_TABS = ["students", "progress", "milestones"] as const;
 type CoachDashTab = (typeof COACH_DASH_TABS)[number];
@@ -53,10 +58,20 @@ function ProgressPageContent() {
   const db = useFirestore();
   const [pendingDeleteMilestoneId, setPendingDeleteMilestoneId] = useState<string | null>(null);
   const [deletingMilestoneId, setDeletingMilestoneId] = useState<string | null>(null);
-  const [leaderboard, setLeaderboard] = useState<Array<{ name: string; score: number }>>([]);
+  const [leaderboard, setLeaderboard] = useState<
+    Array<{
+      studentId: string;
+      name: string;
+      booked: number;
+      absent: number;
+      monthlyAllowance: number | null;
+    }>
+  >([]);
+  const [avgCompletionRate, setAvgCompletionRate] = useState(0);
   const [growthMetric, setGrowthMetric] = useState(0);
   const [topPerformer, setTopPerformer] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [metricsLoadFailed, setMetricsLoadFailed] = useState(false);
   /** Global `students/{docId}` display names for milestone.studentId / roster id fallbacks */
   const [directoryNamesByStudentDocId, setDirectoryNamesByStudentDocId] = useState<
     Record<string, string>
@@ -125,29 +140,48 @@ function ProgressPageContent() {
 
     async function calculateMetrics() {
       setIsLoading(true);
+      setMetricsLoadFailed(false);
       try {
-        const { getDocs, collection: collectionFunc } = await import("firebase/firestore");
-        
-        // Get all roster students
-        const rosterRef = collectionFunc(db, "personalTrainers", user.uid, "students");
-        const rosterSnap = await getDocs(rosterRef);
-        
+        const rosterRef = collection(db, "personalTrainers", user.uid, "students");
+        const [rosterSnap, sessionSlotsSnap] = await Promise.all([
+          getDocs(rosterRef),
+          getDocs(collection(db, "personalTrainers", user.uid, "sessionSlots")),
+        ]);
+
+        const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
+          const data = d.data() as SessionSlotAttendance;
+          return {
+            ...data,
+            id: d.id,
+            date: String(data.date ?? ""),
+            startTime: String(data.startTime ?? ""),
+            students: Array.isArray(data.students) ? data.students : [],
+          };
+        });
+
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        
-        const leaderboardData: Array<{ name: string; score: number }> = [];
+
+        const leaderboardData: Array<{
+          studentId: string;
+          name: string;
+          booked: number;
+          absent: number;
+          monthlyAllowance: number | null;
+        }> = [];
+        const completionRates: number[] = [];
         let maxGrowth = 0;
         let topStudent: any = null;
-        
+
         for (const studentDoc of rosterSnap.docs) {
           const studentData: any = studentDoc.data();
           const studentId = studentDoc.id;
           
           // Get workout plans and sessions this month
           const [plansSnap, sessionsSnap] = await Promise.all([
-            getDocs(collectionFunc(db, "personalTrainers", user.uid, "students", studentId, "workoutPlans")),
-            getDocs(collectionFunc(db, "personalTrainers", user.uid, "students", studentId, "workoutSessions")),
+            getDocs(collection(db, "personalTrainers", user.uid, "students", studentId, "workoutPlans")),
+            getDocs(collection(db, "personalTrainers", user.uid, "students", studentId, "workoutSessions")),
           ]);
           
           const completedPlanIds = new Set<string>();
@@ -180,10 +214,30 @@ function ProgressPageContent() {
           
           const monthCompleted = monthPlans.filter((p) => completedPlanIds.has(p.id)).length;
           const completionRate = monthPlans.length > 0 ? Math.round((monthCompleted / monthPlans.length) * 100) : 0;
-          
+          completionRates.push(completionRate);
+
+          const displayName =
+            `${studentData.firstName || ""} ${studentData.lastName || ""}`.trim() ||
+            studentData.name ||
+            studentData.email ||
+            "Unknown";
+
+          const candidateIds = [studentId, studentData.userId]
+            .map((x) => String(x || "").trim())
+            .filter(Boolean);
+          const { booked, absent } = countMonthlySessionAttendanceStats(
+            sessionSlotsList,
+            candidateIds,
+            now
+          );
+          const allowance = monthlySessionAllowance(studentData.sessionsPerWeek, now);
+
           leaderboardData.push({
-            name: `${studentData.firstName || ""} ${studentData.lastName || ""}`.trim() || studentData.name || studentData.email || "Unknown",
-            score: completionRate,
+            studentId,
+            name: displayName,
+            booked,
+            absent,
+            monthlyAllowance: allowance,
           });
           
           // Track growth
@@ -205,8 +259,6 @@ function ProgressPageContent() {
             }
           }
 
-          const displayName = `${studentData.firstName || ""} ${studentData.lastName || ""}`.trim() || studentData.name || studentData.email || "Unknown";
-
           // Track top performer by dynamic streak
           if (!topStudent || dynamicStreak > (topStudent.dynamicStreak || 0)) {
             topStudent = { ...studentData, studentId, name: displayName, dynamicStreak };
@@ -214,12 +266,28 @@ function ProgressPageContent() {
         }
         
         if (!cancelled) {
-          setLeaderboard(leaderboardData.sort((a, b) => b.score - a.score));
+          setLeaderboard(
+            leaderboardData.sort(
+              (a, b) =>
+                b.booked - a.booked ||
+                b.absent - a.absent ||
+                a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+            )
+          );
+          setAvgCompletionRate(
+            completionRates.length > 0
+              ? Math.round(completionRates.reduce((sum, n) => sum + n, 0) / completionRates.length)
+              : 0
+          );
           setGrowthMetric(Number(maxGrowth.toFixed(1)));
           setTopPerformer(topStudent);
         }
       } catch (error) {
         console.error("Error calculating metrics", error);
+        if (!cancelled) {
+          setMetricsLoadFailed(true);
+          setLeaderboard([]);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -358,21 +426,32 @@ function ProgressPageContent() {
             <Card>
               <CardHeader>
                 <CardTitle>{t("completionLeaderboard")}</CardTitle>
-                <CardDescription>{t("completionLeaderboardDesc")}</CardDescription>
+                <CardDescription className="space-y-2">
+                  <span className="block">{t("completionLeaderboardDesc")}</span>
+                  <span className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                    <span className="text-yellow-600 dark:text-yellow-400">
+                      ● {t("coachRosterLegendBooked")}
+                    </span>
+                    <span className="text-destructive">● {t("coachRosterLegendAbsent")}</span>
+                    <span className="text-neutral-900 dark:text-neutral-100">
+                      ● {t("coachRosterLegendAllowance")}
+                    </span>
+                  </span>
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {leaderboard.length > 0 ? (
-                  leaderboard.map((item, i) => (
-                    <div key={i} className="space-y-2">
-                      <div className="flex justify-between text-sm font-medium">
-                        <span>{item.name}</span>
-                        <span>{item.score}%</span>
-                      </div>
-                      <Progress value={item.score} className="h-2" />
-                    </div>
-                  ))
-                ) : (
+                {isLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                ) : metricsLoadFailed ? (
+                  <p className="text-sm text-destructive">{t("coachRosterMetricsLoadFailed")}</p>
+                ) : leaderboard.length > 0 ? (
+                  <RosterMonthlySessionChart rows={leaderboard} />
+                ) : (rosterStudents?.length ?? 0) === 0 ? (
                   <p className="text-sm text-muted-foreground">{t("noStudentsAssigned")}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t("coachRosterMetricsLoadFailed")}</p>
                 )}
               </CardContent>
             </Card>
@@ -391,7 +470,7 @@ function ProgressPageContent() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-bold mb-2">{leaderboard.length > 0 ? Math.round(leaderboard.reduce((sum, s) => sum + s.score, 0) / leaderboard.length) : 0}%</div>
+                  <div className="text-4xl font-bold mb-2">{avgCompletionRate}%</div>
                   <p className="text-sm opacity-90">{t("avgCompletionRate")}</p>
                 </CardContent>
               </Card>

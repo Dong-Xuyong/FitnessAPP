@@ -10,7 +10,8 @@
     "build": "NODE_ENV=production next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:sequence": "npx tsx --test src/lib/workout-plan-sequence.test.ts"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.28.0",

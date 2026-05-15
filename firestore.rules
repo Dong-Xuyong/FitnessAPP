@@ -280,7 +280,7 @@ service cloud.firestore {
 
         allow create: if shopSubStudentCreateValid(personalTrainerId, regId);
         allow update: if shopSubStudentUpdateValid(personalTrainerId, regId);
-        allow delete: if false;
+        allow delete: if isOwner(personalTrainerId);
       }
     
       allow get, list: if isSignedIn();

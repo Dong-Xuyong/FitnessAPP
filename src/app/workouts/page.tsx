@@ -1,23 +1,20 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, CalendarRange, ListOrdered, Copy } from "lucide-react";
+import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, CalendarRange, ListOrdered } from "lucide-react";
 import Link from "next/link";
-import { useUser, useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking, addDocumentNonBlocking } from "@/firebase";
-import { collection, doc } from "firebase/firestore";
+import { useUser, useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking } from "@/firebase";
+import { doc } from "firebase/firestore";
+import { AssignStudentSequenceForm } from "@/components/AssignStudentSequenceForm";
 import {
-  AssignStudentSequenceForm,
-  linkStudentProfileForTrainerAssignments,
-  resolveWorkoutPlansStorageStudentId,
-} from "@/components/AssignStudentSequenceForm";
+  getDefaultStudentSequenceProgram,
+  upsertDefaultStudentSequenceProgram,
+} from "@/lib/firestore/default-student-sequence";
 import {
   trainingProgramsRef,
   totalExercisesInProgram,
@@ -36,15 +33,6 @@ type TrainingProgramListItem = TrainingProgramDocument & {
   id: string;
 };
 
-type RosterStudent = {
-  id: string;
-  userId?: string;
-  email?: string;
-  name?: string;
-  firstName?: string;
-  lastName?: string;
-};
-
 export default function WorkoutsPage() {
   const { user } = useUser();
   const db = useFirestore();
@@ -52,30 +40,17 @@ export default function WorkoutsPage() {
   const { t } = useI18n();
   const [isInitializing, setIsInitializing] = useState(false);
   const [isAddingWeeklyDefault, setIsAddingWeeklyDefault] = useState(false);
-  const [sequenceRosterStudentId, setSequenceRosterStudentId] = useState("");
   const [sequenceDraftOrderedIds, setSequenceDraftOrderedIds] = useState<string[]>([]);
   const [sequenceDraftRepeatCycles, setSequenceDraftRepeatCycles] = useState(1);
-  const [sequenceTemplateName, setSequenceTemplateName] = useState("");
-  const [isSavingSequenceTemplate, setIsSavingSequenceTemplate] = useState(false);
+  const [isSavingDefaultSequence, setIsSavingDefaultSequence] = useState(false);
+  const [defaultSequenceLoaded, setDefaultSequenceLoaded] = useState(false);
 
   const programsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return trainingProgramsRef(db, user.uid);
   }, [db, user]);
 
-  const studentsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return collection(db, "personalTrainers", user.uid, "students");
-  }, [db, user]);
-
-  const globalStudentsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, "students");
-  }, [db]);
-
   const { data: rawPrograms, isLoading } = useCollection<TrainingProgramListItem>(programsQuery);
-  const { data: students } = useCollection<RosterStudent>(studentsQuery);
-  const { data: globalStudents } = useCollection(globalStudentsQuery);
 
   const programs = useMemo(() => {
     if (!rawPrograms) return null;
@@ -92,11 +67,6 @@ export default function WorkoutsPage() {
     [programs]
   );
 
-  const sequenceTemplates = useMemo(
-    () => (programs || []).filter((p) => p.programType === "sequence"),
-    [programs]
-  );
-
   /** Legacy 6-source cycle or all three PU/Dip/Squat weekly metas — disables duplicate seed. */
   const hasCanonicalDefaultWeekly = useMemo(() => {
     const list = programs || [];
@@ -105,14 +75,31 @@ export default function WorkoutsPage() {
     return DEFAULT_WEEKLY_STRENGTH_CYCLES.every((c) => titles.has(c.title));
   }, [programs]);
 
-  const sequenceStorageStudentId = useMemo(
-    () => resolveWorkoutPlansStorageStudentId(sequenceRosterStudentId, students, globalStudents),
-    [sequenceRosterStudentId, students, globalStudents]
-  );
+  useEffect(() => {
+    if (!db || !user || defaultSequenceLoaded || isLoading) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const def = await getDefaultStudentSequenceProgram(db, user.uid);
+        if (cancelled || !def) {
+          setDefaultSequenceLoaded(true);
+          return;
+        }
+        setSequenceDraftOrderedIds(def.sourceProgramIds);
+        setSequenceDraftRepeatCycles(def.sequenceRepeatCycles);
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) setDefaultSequenceLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user, defaultSequenceLoaded, isLoading]);
 
-  const handleSaveSequenceTemplate = async (payload: { orderedIds: string[]; cycles: number }) => {
+  const handleSaveDefaultSequence = async (payload: { orderedIds: string[]; cycles: number }) => {
     if (!db || !user) return;
-    if (payload.orderedIds.length < 2) return;
     const names = payload.orderedIds
       .map((id) => basePrograms.find((p) => p.id === id)?.name)
       .filter(Boolean) as string[];
@@ -120,67 +107,19 @@ export default function WorkoutsPage() {
       toast({ variant: "destructive", title: t("sequenceTemplateSaveFailed") });
       return;
     }
-    const now = new Date().toISOString();
-    const title =
-      sequenceTemplateName.trim() ||
-      `${t("sequenceTemplateDefaultName")} (${names.slice(0, 3).join(" → ")}${names.length > 3 ? "…" : ""})`;
-    setIsSavingSequenceTemplate(true);
+    setIsSavingDefaultSequence(true);
     try {
-      await addDocumentNonBlocking(trainingProgramsRef(db, user.uid), {
-        trainerId: user.uid,
-        name: title,
-        description: t("sequenceTemplateSavedDesc"),
-        category: "Sequence",
-        level: "all",
-        sessions: [],
-        programType: "sequence",
-        sourceProgramIds: payload.orderedIds,
+      await upsertDefaultStudentSequenceProgram(db, user.uid, {
+        orderedIds: payload.orderedIds,
+        cycles: payload.cycles,
         sourceProgramNames: names,
-        sequenceRepeatCycles: payload.cycles,
-        createdAt: now,
-        updatedAt: now,
       });
-      toast({ title: t("sequenceTemplateSavedToast") });
-      setSequenceTemplateName("");
-      setSequenceDraftOrderedIds([]);
-      setSequenceDraftRepeatCycles(1);
+      toast({ title: t("defaultStudentSequenceSavedToast") });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : t("sequenceTemplateSaveFailed");
       toast({ variant: "destructive", title: t("sequenceTemplateSaveFailed"), description: msg });
     } finally {
-      setIsSavingSequenceTemplate(false);
-    }
-  };
-
-  const handleDuplicateProgram = async (program: TrainingProgramListItem) => {
-    if (!db || !user) return;
-    try {
-      const now = new Date().toISOString();
-      await addDocumentNonBlocking(trainingProgramsRef(db, user.uid), {
-        trainerId: user.uid,
-        name: `Copy of ${program.name}`,
-        description: program.description || "",
-        category: program.category || "",
-        level: program.level || "all",
-        ...(program.durationWeeks != null ? { durationWeeks: program.durationWeeks } : {}),
-        sessions: program.sessions || [],
-        ...(program.programType != null ? { programType: program.programType } : {}),
-        ...(program.sourceProgramIds?.length ? { sourceProgramIds: program.sourceProgramIds } : {}),
-        ...(program.sourceProgramNames?.length ? { sourceProgramNames: program.sourceProgramNames } : {}),
-        ...(program.sequenceRepeatCycles != null ? { sequenceRepeatCycles: program.sequenceRepeatCycles } : {}),
-        createdAt: now,
-        updatedAt: now,
-      });
-      toast({
-        title: t("programDuplicated"),
-        description: t("programDuplicatedDesc"),
-      });
-    } catch {
-      toast({
-        variant: "destructive",
-        title: t("error"),
-        description: t("failedToDuplicate"),
-      });
+      setIsSavingDefaultSequence(false);
     }
   };
 
@@ -274,65 +213,23 @@ export default function WorkoutsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <ListOrdered className="h-5 w-5 text-primary" />
-                {t("sequenceProgramsCardTitle")}
+                {t("defaultStudentSequenceCardTitle")}
               </CardTitle>
-              <CardDescription>{t("sequenceProgramsCardDesc")}</CardDescription>
+              <CardDescription>{t("defaultStudentSequenceCardDesc")}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="sequence-template-name">{t("sequenceTemplateNameLabel")}</Label>
-                <Input
-                  id="sequence-template-name"
-                  value={sequenceTemplateName}
-                  onChange={(e) => setSequenceTemplateName(e.target.value)}
-                  placeholder={t("sequenceTemplateDefaultName")}
-                  disabled={isSavingSequenceTemplate}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>{t("sequenceAssignStudentPlaceholder")}</Label>
-                <Select
-                  value={sequenceRosterStudentId || "_none_"}
-                  onValueChange={(v) => setSequenceRosterStudentId(v === "_none_" ? "" : v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={t("selectAStudent")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none_">—</SelectItem>
-                    {students?.filter((s: any) => !s.blocked).map((student) => (
-                      <SelectItem key={student.id} value={student.id}>
-                        {[student.firstName, student.lastName].filter(Boolean).join(" ") ||
-                          student.name ||
-                          student.email ||
-                          "—"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-sm text-muted-foreground">{t("sequenceSelectStudentHint")}</p>
-              </div>
+            <CardContent>
               <AssignStudentSequenceForm
                 db={db}
                 trainerId={user.uid}
-                studentStorageId={sequenceStorageStudentId}
+                studentStorageId="_default_configure_"
                 assignablePrograms={basePrograms}
-                variant="embedded"
+                variant="defaultConfigure"
                 draftOrderedProgramIds={sequenceDraftOrderedIds}
                 onDraftOrderedProgramIdsChange={setSequenceDraftOrderedIds}
                 draftRepeatCycles={sequenceDraftRepeatCycles}
                 onDraftRepeatCyclesChange={setSequenceDraftRepeatCycles}
-                onSaveTemplate={handleSaveSequenceTemplate}
-                isSavingTemplate={isSavingSequenceTemplate}
-                onBeforeWrite={() =>
-                  linkStudentProfileForTrainerAssignments(
-                    db,
-                    user.uid,
-                    sequenceRosterStudentId,
-                    students,
-                    globalStudents
-                  )
-                }
+                onSaveDefault={handleSaveDefaultSequence}
+                isSavingDefault={isSavingDefaultSequence}
               />
             </CardContent>
           </Card>
@@ -363,9 +260,7 @@ export default function WorkoutsPage() {
           <Card className="border-dashed">
             <CardHeader>
               <CardTitle>{t("noProgramsYet")}</CardTitle>
-              <CardDescription>
-                {t("noProgramsYetDesc")}
-              </CardDescription>
+              <CardDescription>{t("noProgramsYetDesc")}</CardDescription>
             </CardHeader>
             <CardFooter className="flex flex-wrap gap-3">
               <Button asChild className="gap-2">
@@ -449,15 +344,6 @@ export default function WorkoutsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      title={t("duplicateProgram")}
-                      className="shrink-0"
-                      onClick={() => handleDuplicateProgram(program)}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
                       className="text-destructive hover:bg-destructive/10 shrink-0"
                       onClick={() => {
                         if (!db || !user) return;
@@ -475,60 +361,6 @@ export default function WorkoutsPage() {
             })}
           </div>
         )}
-
-        {!isLoading && sequenceTemplates.length > 0 && (
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold font-headline">{t("sequenceTemplatesSectionTitle")}</h3>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sequenceTemplates.map((program) => (
-                <Card key={program.id} className="flex flex-col">
-                  <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start gap-2">
-                      <Badge variant="outline" className="text-primary border-primary/20 shrink-0">
-                        {t("sequenceProgramsCardTitle")}
-                      </Badge>
-                      <Badge variant="secondary" className="tabular-nums shrink-0">
-                        {program.sequenceRepeatCycles ?? 1}× {t("sequenceTemplateCycles")}
-                      </Badge>
-                    </div>
-                    <CardTitle className="text-lg leading-snug">{program.name}</CardTitle>
-                    {program.sourceProgramNames && program.sourceProgramNames.length > 0 ? (
-                      <CardDescription className="line-clamp-3">
-                        {program.sourceProgramNames.join(" → ")}
-                      </CardDescription>
-                    ) : null}
-                  </CardHeader>
-                  <CardFooter className="pt-0 flex gap-2 mt-auto">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title={t("duplicateProgram")}
-                      className="shrink-0"
-                      onClick={() => handleDuplicateProgram(program)}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive hover:bg-destructive/10 shrink-0 ml-auto"
-                      onClick={() => {
-                        if (!db || !user) return;
-                        if (!confirm(`Delete "${program.name}"?`)) return;
-                        const ref = doc(db, "personalTrainers", user.uid, "personalTrainingPrograms", program.id);
-                        deleteDocumentNonBlocking(ref);
-                        toast({ title: t("deleted"), description: `"${program.name}" ${t("hasBeenRemoved")}` });
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </CardFooter>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
-
       </div>
     </Navigation>
   );

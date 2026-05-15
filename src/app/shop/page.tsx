@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Navigation } from "@/components/Navigation";
-import { collection, doc, getDoc, limit, orderBy, query } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, limit, orderBy, query } from "firebase/firestore";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { useI18n } from "@/lib/i18n";
+import { useToast } from "@/hooks/use-toast";
 import { getStudentDisplayName } from "@/lib/student-display";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -15,7 +17,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Store } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, Store, Trash2 } from "lucide-react";
 
 type ShopRegRow = {
   studentId?: string;
@@ -28,6 +40,7 @@ type ShopRegRow = {
 
 export default function CoachShopPage() {
   const { t } = useI18n();
+  const { toast } = useToast();
   const { user } = useUser();
   const db = useFirestore();
 
@@ -47,6 +60,8 @@ export default function CoachShopPage() {
   }, [rows]);
 
   const [nameByStudentId, setNameByStudentId] = useState<Record<string, string>>({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!db || !sortedRows.length) {
@@ -77,6 +92,21 @@ export default function CoachShopPage() {
       cancelled = true;
     };
   }, [db, sortedRows]);
+
+  const handleDelete = async (regId: string) => {
+    if (!db || !user?.uid) return;
+    setDeletingId(regId);
+    try {
+      await deleteDoc(doc(db, "personalTrainers", user.uid, "shopRegistrations", regId));
+      toast({ title: t("delete") });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast({ variant: "destructive", title: t("shopSaveFailed"), description: msg });
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
+    }
+  };
 
   return (
     <Navigation>
@@ -111,17 +141,36 @@ export default function CoachShopPage() {
                       <TableHead>{t("shopTableStudent")}</TableHead>
                       <TableHead className="text-right">{t("shopCoffeeLabel")}</TableHead>
                       <TableHead className="text-right">{t("shopWaterLabel")}</TableHead>
+                      <TableHead className="w-[72px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {sortedRows.map((row) => {
                       const sid = row.studentId || "";
+                      const isDeleting = deletingId === row.id;
                       return (
                         <TableRow key={row.id}>
                           <TableCell className="font-medium whitespace-nowrap">{row.date || "—"}</TableCell>
                           <TableCell>{nameByStudentId[sid] || sid.slice(0, 8) || "—"}</TableCell>
                           <TableCell className="text-right">{row.coffeeCount ?? 0}</TableCell>
                           <TableCell className="text-right">{row.waterServings ?? 0}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              disabled={isDeleting}
+                              aria-label={t("shopDeleteRegistration")}
+                              onClick={() => setConfirmDeleteId(row.id)}
+                            >
+                              {isDeleting ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -131,6 +180,32 @@ export default function CoachShopPage() {
             )}
           </CardContent>
         </Card>
+
+        <AlertDialog
+          open={!!confirmDeleteId}
+          onOpenChange={(open) => {
+            if (!open) setConfirmDeleteId(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-destructive">{t("shopDeleteRegistration")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("shopDeleteRegistrationConfirm")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive hover:bg-destructive/90"
+                onClick={() => {
+                  if (confirmDeleteId) void handleDelete(confirmDeleteId);
+                }}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {t("delete")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </Navigation>
   );

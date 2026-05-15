@@ -61,12 +61,17 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { EditWorkoutSessionDialog } from "@/components/EditWorkoutSessionDialog";
 import { MilestonesTab } from "@/components/MilestonesTab";
 import { useI18n } from "@/lib/i18n";
 import type { Milestone, TrainingProgramDocument } from "@/lib/types";
-import { AssignStudentSequenceForm } from "@/components/AssignStudentSequenceForm";
+import { linkStudentProfileForTrainerAssignments } from "@/components/AssignStudentSequenceForm";
+import {
+  applyDefaultStudentSequenceToStudent,
+  DefaultStudentSequenceNotConfiguredError,
+} from "@/lib/firestore/default-student-sequence";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
@@ -80,6 +85,7 @@ import {
 import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import { deleteSequencePlanWithChainRepair } from "@/lib/workout-plan-sequence-delete";
+import { clearStudentAssignedPlans } from "@/lib/firestore/clear-trainer-assignments";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -693,8 +699,10 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [editingAssignedExerciseNote, setEditingAssignedExerciseNote] = useState("");
   const [isSavingAssignedExerciseNote, setIsSavingAssignedExerciseNote] = useState(false);
   const [deletingWorkoutPlanId, setDeletingWorkoutPlanId] = useState<string | null>(null);
-  const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false);
-  const [sequenceFormKey, setSequenceFormKey] = useState(0);
+  const [isApplyingDefaultSequence, setIsApplyingDefaultSequence] = useState(false);
+  const [clearStudentPlansOpen, setClearStudentPlansOpen] = useState(false);
+  const [clearStudentPlansConfirm, setClearStudentPlansConfirm] = useState("");
+  const [isClearingStudentPlans, setIsClearingStudentPlans] = useState(false);
   const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
 
   const studentRef = useMemoFirebase(() => {
@@ -737,6 +745,48 @@ export default function StudentDetailPage({ id }: { id: string }) {
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }));
   }, [trainingPrograms]);
 
+  const handleApplyDefaultSequence = async () => {
+    if (!db || !user || portalOnly) return;
+    setIsApplyingDefaultSequence(true);
+    try {
+      const globalStudentsForLink = globalStudent
+        ? [
+            {
+              id: String((globalStudent as Record<string, unknown>).id ?? ""),
+              email: String((globalStudent as Record<string, unknown>).email ?? ""),
+            },
+          ]
+        : [];
+      await linkStudentProfileForTrainerAssignments(
+        db,
+        user.uid,
+        id,
+        allRoster as Array<{ id: string; userId?: string; email?: string }> | null,
+        globalStudentsForLink
+      );
+      const { appended } = await applyDefaultStudentSequenceToStudent(
+        db,
+        user.uid,
+        id,
+        assignableLibraryPrograms
+      );
+      toast({
+        title: appended ? t("sequenceAssignedAppendedToast") : t("sequenceAssignedToast"),
+      });
+    } catch (e: unknown) {
+      if (e instanceof DefaultStudentSequenceNotConfiguredError) {
+        toast({ variant: "destructive", title: t("defaultSequenceNotConfigured") });
+      } else if (e instanceof Error && e.message === "DEFAULT_STUDENT_SEQUENCE_PROGRAMS_MISSING") {
+        toast({ variant: "destructive", title: t("defaultStudentSequenceProgramsMissing") });
+      } else {
+        const msg = e instanceof Error ? e.message : t("sequenceAssignFailed");
+        toast({ variant: "destructive", title: t("sequenceAssignFailed"), description: msg });
+      }
+    } finally {
+      setIsApplyingDefaultSequence(false);
+    }
+  };
+
   const studentEmail = (globalStudent as any)?.email;
   const altRosterDoc = allRoster?.find(
     (s: any) => s.id === id || s.userId === id || (studentEmail && s.email === studentEmail)
@@ -753,6 +803,15 @@ export default function StudentDetailPage({ id }: { id: string }) {
     if (!rosterStudent && altRosterDoc?.id) return String(altRosterDoc.id);
     return id;
   }, [globalStudent, rosterStudent, altRosterDoc, id]);
+
+  const studentAssignmentCandidateIds = useMemo(() => {
+    const ids = new Set<string>([id]);
+    if (effectiveRoster?.id) ids.add(String(effectiveRoster.id));
+    const rosterUserId = (effectiveRoster as { userId?: string } | null)?.userId;
+    if (rosterUserId) ids.add(String(rosterUserId));
+    if (paymentsFirestoreStudentId) ids.add(paymentsFirestoreStudentId);
+    return [...ids];
+  }, [id, effectiveRoster, paymentsFirestoreStudentId]);
 
   // workoutPlans are always stored under the Auth UID (which is the URL param `id`)
   const workoutPlansRef = useMemoFirebase(() => {
@@ -1012,6 +1071,33 @@ export default function StudentDetailPage({ id }: { id: string }) {
       setDeletingWorkoutPlanId(null);
     }
   };
+
+  const handleClearStudentPlans = useCallback(async () => {
+    if (!db || !user || clearStudentPlansConfirm !== "DELETE") return;
+    setIsClearingStudentPlans(true);
+    try {
+      const { deletedPlanCount, deletedWeekAssignmentCount } = await clearStudentAssignedPlans(
+        db,
+        user.uid,
+        studentAssignmentCandidateIds
+      );
+      toast({
+        title: t("clearStudentPlansSuccess"),
+        description: [
+          t("bulkClearPlansCountDetail").replace("{count}", String(deletedPlanCount)),
+          t("bulkClearWeekAssignmentsCountDetail").replace("{count}", String(deletedWeekAssignmentCount)),
+        ].join(" "),
+      });
+      setClearStudentPlansOpen(false);
+      setClearStudentPlansConfirm("");
+      setExpandedAssignedPlanId(null);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : t("bulkClearPlansFailed");
+      toast({ variant: "destructive", title: t("bulkClearPlansFailed"), description: msg });
+    } finally {
+      setIsClearingStudentPlans(false);
+    }
+  }, [db, user, clearStudentPlansConfirm, studentAssignmentCandidateIds, t, toast]);
 
   const handleSaveAssignedExerciseNote = async (
     plan: any,
@@ -1377,35 +1463,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-
-        {/* Block/Unblock Confirmation */}
-        <Dialog
-          open={sequenceDialogOpen}
-          onOpenChange={(open) => {
-            setSequenceDialogOpen(open);
-            if (open) setSequenceFormKey((k) => k + 1);
-          }}
-        >
-          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{t("sequenceAssignTitle")}</DialogTitle>
-              <DialogDescription>{t("sequenceAssignDescription")}</DialogDescription>
-            </DialogHeader>
-            {db && user ? (
-              <AssignStudentSequenceForm
-                key={sequenceFormKey}
-                db={db}
-                trainerId={user.uid}
-                studentStorageId={id}
-                assignablePrograms={assignableLibraryPrograms}
-                disabled={portalOnly}
-                variant="dialog"
-                onCancel={() => setSequenceDialogOpen(false)}
-                onSuccess={() => setSequenceDialogOpen(false)}
-              />
-            ) : null}
-          </DialogContent>
-        </Dialog>
 
         <AlertDialog open={showBlockConfirm} onOpenChange={setShowBlockConfirm}>
           <AlertDialogContent>
@@ -1855,17 +1912,89 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
                       <CardDescription>{t("assignedWorkouts")}</CardDescription>
                     </div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="shrink-0 gap-2"
-                      disabled={portalOnly}
-                      onClick={() => setSequenceDialogOpen(true)}
-                    >
-                      <ListOrdered className="h-4 w-4" />
-                      {t("assignSequence")}
-                    </Button>
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      <AlertDialog
+                        open={clearStudentPlansOpen}
+                        onOpenChange={(open) => {
+                          setClearStudentPlansOpen(open);
+                          if (!open) setClearStudentPlansConfirm("");
+                        }}
+                      >
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10 shrink-0"
+                            disabled={
+                              portalOnly ||
+                              !(workoutPlans?.length) ||
+                              isClearingStudentPlans ||
+                              isApplyingDefaultSequence
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            {t("bulkClearPlansButton")}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t("clearStudentPlansTitle")}</AlertDialogTitle>
+                            <AlertDialogDescription className="space-y-3">
+                              <span className="block">{t("clearStudentPlansDescription")}</span>
+                              <span className="block font-medium text-foreground">
+                                {t("bulkClearPlansConfirmHint")}
+                              </span>
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <div className="space-y-2 py-2">
+                            <Label htmlFor="clear-student-plans-confirm">
+                              {t("bulkClearPlansConfirmPlaceholder")}
+                            </Label>
+                            <Input
+                              id="clear-student-plans-confirm"
+                              autoComplete="off"
+                              value={clearStudentPlansConfirm}
+                              onChange={(e) => setClearStudentPlansConfirm(e.target.value)}
+                              placeholder={t("bulkClearPlansConfirmPlaceholder")}
+                              disabled={isClearingStudentPlans}
+                            />
+                          </div>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel disabled={isClearingStudentPlans}>
+                              {t("cancel")}
+                            </AlertDialogCancel>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              disabled={clearStudentPlansConfirm !== "DELETE" || isClearingStudentPlans}
+                              className="gap-2"
+                              onClick={() => void handleClearStudentPlans()}
+                            >
+                              {isClearingStudentPlans ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : null}
+                              {t("confirm")}
+                            </Button>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0 gap-2"
+                        disabled={portalOnly || isApplyingDefaultSequence || isClearingStudentPlans}
+                        onClick={() => void handleApplyDefaultSequence()}
+                      >
+                        {isApplyingDefaultSequence ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ListOrdered className="h-4 w-4" />
+                        )}
+                        {t("applyDefaultStudentSequence")}
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {sortedWorkoutPlans.length > 0 ? (
