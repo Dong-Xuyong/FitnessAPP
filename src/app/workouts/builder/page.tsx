@@ -38,7 +38,7 @@ function buildSessions(title: string, exercises: BuilderExercise[]) {
         sets: 1,
         reps: "",
         restTimeSeconds: 0,
-        ...(ex.notes ? { notes: ex.notes } : {}),
+        notes: ex.notes,
       })),
     },
   ];
@@ -54,7 +54,11 @@ function WorkoutBuilderContent() {
 
   const [isSavingLibrary, setIsSavingLibrary] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loadedProgramStamp, setLoadedProgramStamp] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadedProgramStamp(null);
+  }, [editProgramId]);
 
   const [programTitle, setProgramTitle] = useState(t("newWorkoutPlan"));
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
@@ -71,18 +75,26 @@ function WorkoutBuilderContent() {
   const { data: editProgram } = useDoc<TrainingProgramDocument>(editProgramRef);
 
   useEffect(() => {
-    if (editProgram && !loaded) {
-      setProgramTitle(editProgram.name || "Untitled program");
-      const allExercises = (editProgram.sessions || []).flatMap((session) =>
-        (session.exercises || []).map((ex) => ({
-          name: ex.exerciseName,
-          notes: ex.notes || "",
-        }))
-      );
-      if (allExercises.length > 0) setExercises(allExercises);
-      setLoaded(true);
-    }
-  }, [editProgram, loaded]);
+    if (!editProgram || !editProgramId) return;
+    const exercisesSig = (editProgram.sessions ?? [])
+      .flatMap((session) =>
+        (session.exercises ?? []).map(
+          (ex) => `${ex.exerciseName ?? ""}\0${ex.notes ?? ""}`
+        )
+      )
+      .join("\n");
+    const stamp = `${editProgramId}:${editProgram.updatedAt ?? ""}:${exercisesSig}`;
+    if (loadedProgramStamp === stamp) return;
+    setProgramTitle(editProgram.name || "Untitled program");
+    const allExercises = (editProgram.sessions || []).flatMap((session) =>
+      (session.exercises || []).map((ex) => ({
+        name: ex.exerciseName,
+        notes: ex.notes ?? "",
+      }))
+    );
+    if (allExercises.length > 0) setExercises(allExercises);
+    setLoadedProgramStamp(stamp);
+  }, [editProgram, editProgramId, loadedProgramStamp]);
 
   const studentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;

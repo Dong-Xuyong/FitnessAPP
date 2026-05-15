@@ -1,33 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, CalendarRange, ListOrdered } from "lucide-react";
+import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, ListOrdered } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking } from "@/firebase";
 import { doc } from "firebase/firestore";
 import { AssignStudentSequenceForm } from "@/components/AssignStudentSequenceForm";
 import {
   getDefaultStudentSequenceProgram,
+  reconcileSequenceProgramIds,
   upsertDefaultStudentSequenceProgram,
 } from "@/lib/firestore/default-student-sequence";
 import {
   trainingProgramsRef,
   totalExercisesInProgram,
   initializeDefaultPrograms,
-  ensureDefaultWeeklyStrengthCycle,
 } from "@/lib/firestore/training-programs";
-import {
-  DEFAULT_WEEKLY_STRENGTH_CYCLES,
-  DEFAULT_WEEKLY_STRENGTH_LEGACY_TITLE,
-} from "@/lib/default-programs";
 import type { TrainingProgramDocument } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
+import { CoachLibraryExcelActions } from "@/components/CoachLibraryExcelActions";
 
 type TrainingProgramListItem = TrainingProgramDocument & {
   id: string;
@@ -39,8 +36,10 @@ export default function WorkoutsPage() {
   const { toast } = useToast();
   const { t } = useI18n();
   const [isInitializing, setIsInitializing] = useState(false);
-  const [isAddingWeeklyDefault, setIsAddingWeeklyDefault] = useState(false);
   const [sequenceDraftOrderedIds, setSequenceDraftOrderedIds] = useState<string[]>([]);
+  const [sequenceDraftProgramFallbackNames, setSequenceDraftProgramFallbackNames] = useState<
+    string[]
+  >([]);
   const [sequenceDraftRepeatCycles, setSequenceDraftRepeatCycles] = useState(1);
   const [isSavingDefaultSequence, setIsSavingDefaultSequence] = useState(false);
   const [defaultSequenceLoaded, setDefaultSequenceLoaded] = useState(false);
@@ -67,14 +66,6 @@ export default function WorkoutsPage() {
     [programs]
   );
 
-  /** Legacy 6-source cycle or all three PU/Dip/Squat weekly metas — disables duplicate seed. */
-  const hasCanonicalDefaultWeekly = useMemo(() => {
-    const list = programs || [];
-    if (list.some((p) => p.name === DEFAULT_WEEKLY_STRENGTH_LEGACY_TITLE)) return true;
-    const titles = new Set(list.map((p) => p.name).filter(Boolean));
-    return DEFAULT_WEEKLY_STRENGTH_CYCLES.every((c) => titles.has(c.title));
-  }, [programs]);
-
   useEffect(() => {
     if (!db || !user || defaultSequenceLoaded || isLoading) return;
     let cancelled = false;
@@ -85,7 +76,13 @@ export default function WorkoutsPage() {
           setDefaultSequenceLoaded(true);
           return;
         }
-        setSequenceDraftOrderedIds(def.sourceProgramIds);
+        const reconciledIds = reconcileSequenceProgramIds(
+          def.sourceProgramIds,
+          def.sourceProgramNames,
+          basePrograms
+        );
+        setSequenceDraftOrderedIds(reconciledIds);
+        setSequenceDraftProgramFallbackNames(def.sourceProgramNames);
         setSequenceDraftRepeatCycles(def.sequenceRepeatCycles);
       } catch {
         /* ignore */
@@ -96,7 +93,7 @@ export default function WorkoutsPage() {
     return () => {
       cancelled = true;
     };
-  }, [db, user, defaultSequenceLoaded, isLoading]);
+  }, [db, user, defaultSequenceLoaded, isLoading, basePrograms]);
 
   const handleSaveDefaultSequence = async (payload: { orderedIds: string[]; cycles: number }) => {
     if (!db || !user) return;
@@ -114,6 +111,7 @@ export default function WorkoutsPage() {
         cycles: payload.cycles,
         sourceProgramNames: names,
       });
+      setSequenceDraftProgramFallbackNames(names);
       toast({ title: t("defaultStudentSequenceSavedToast") });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : t("sequenceTemplateSaveFailed");
@@ -122,50 +120,6 @@ export default function WorkoutsPage() {
       setIsSavingDefaultSequence(false);
     }
   };
-
-  const handleEnsureDefaultWeeklyStrengthCycle = useCallback(async () => {
-    if (!db || !user) return;
-    setIsAddingWeeklyDefault(true);
-    try {
-      const result = await ensureDefaultWeeklyStrengthCycle(db, user.uid);
-      if (result.success) {
-        if (result.createdCount > 0) {
-          toast({
-            title: t("weeklyStrengthCycleAdded"),
-            description:
-              result.addedTitles.length > 0
-                ? `${t("weeklyStrengthCycleAddedPrefix")} ${result.addedTitles.join(", ")}.`
-                : t("weeklyStrengthCycleAddedDesc"),
-          });
-        } else {
-          toast({
-            title: t("weeklyStrengthCycleAlreadyExists"),
-            description: t("weeklyStrengthCycleAlreadyExistsDesc"),
-          });
-        }
-      } else if ("missingNames" in result) {
-        toast({
-          variant: "destructive",
-          title: t("selectProgramsRequired"),
-          description: `${t("weeklyCycleMissingIntro")} ${result.missingNames.join(", ")}`,
-        });
-      } else {
-        toast({
-          variant: "destructive",
-          title: t("weeklyStrengthCycleFailed"),
-          description: result.message,
-        });
-      }
-    } catch {
-      toast({
-        variant: "destructive",
-        title: t("weeklyStrengthCycleFailed"),
-        description: t("couldNotCreateWeekly"),
-      });
-    } finally {
-      setIsAddingWeeklyDefault(false);
-    }
-  }, [db, user, toast, t]);
 
   return (
     <Navigation>
@@ -176,29 +130,7 @@ export default function WorkoutsPage() {
             <p className="text-muted-foreground">{t("manageAndAssign")}</p>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              className="gap-2"
-              disabled={
-                isLoading ||
-                isAddingWeeklyDefault ||
-                hasCanonicalDefaultWeekly ||
-                !db ||
-                !user
-              }
-              title={
-                hasCanonicalDefaultWeekly ? t("weeklyStrengthCycleAlreadyExistsDesc") : undefined
-              }
-              onClick={handleEnsureDefaultWeeklyStrengthCycle}
-            >
-              {isAddingWeeklyDefault ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <CalendarRange className="h-4 w-4" />
-              )}
-              {t("addDefaultWeeklyStrengthCycle")}
-            </Button>
+            <CoachLibraryExcelActions />
             <Button className="gap-2" asChild>
               <Link href="/workouts/builder">
                 <Plus className="h-4 w-4" />
@@ -226,6 +158,7 @@ export default function WorkoutsPage() {
                 variant="defaultConfigure"
                 draftOrderedProgramIds={sequenceDraftOrderedIds}
                 onDraftOrderedProgramIdsChange={setSequenceDraftOrderedIds}
+                draftProgramFallbackNames={sequenceDraftProgramFallbackNames}
                 draftRepeatCycles={sequenceDraftRepeatCycles}
                 onDraftRepeatCyclesChange={setSequenceDraftRepeatCycles}
                 onSaveDefault={handleSaveDefaultSequence}
