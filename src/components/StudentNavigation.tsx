@@ -30,7 +30,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc, getDoc } from "firebase/firestore";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { isOpenTrainingAccess, normalizeTrainingAccessMode } from "@/lib/student-training-access";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useStudentPaymentReminder } from "@/hooks/use-student-payment-reminder";
 import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
@@ -127,6 +128,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const { reminder } = useStudentPaymentReminder(db, user?.uid);
   const [profile, setProfile] = useState<{ firstName?: string; fullName?: string; photoUrl?: string } | null>(null);
   const [isBlocked, setIsBlocked] = useState(false);
+  const [isOpenAccess, setIsOpenAccess] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
 
@@ -154,12 +156,31 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
           firstName,
           photoUrl: typeof d.photoUrl === "string" ? d.photoUrl : undefined,
         });
+
+        let accessMode = normalizeTrainingAccessMode(d.trainingAccessMode);
+        const trainerId = typeof d.trainerId === "string" ? d.trainerId : undefined;
+        const rosterId =
+          (typeof d.rosterDocId === "string" && d.rosterDocId.trim()) || uid;
+        if (trainerId) {
+          const rosterSnap = await getDoc(
+            doc(db, "personalTrainers", trainerId, "students", rosterId)
+          );
+          if (rosterSnap.exists()) {
+            const rd = rosterSnap.data();
+            if (rd?.trainingAccessMode != null) {
+              accessMode = normalizeTrainingAccessMode(rd.trainingAccessMode);
+            }
+          }
+        }
+        setIsOpenAccess(isOpenTrainingAccess(accessMode));
       } else {
         setProfile(null);
+        setIsOpenAccess(false);
       }
     } catch (e) {
       console.error("Error fetching profile for navigation", e);
       setProfile(null);
+      setIsOpenAccess(false);
     }
   }, [db, user?.uid]);
 
@@ -174,6 +195,11 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
     window.addEventListener(STUDENT_PROFILE_PHOTO_UPDATED, onPhotoUpdated);
     return () => window.removeEventListener(STUDENT_PROFILE_PHOTO_UPDATED, onPhotoUpdated);
   }, [fetchStudentProfile]);
+
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => !(isOpenAccess && item.key === "shop")),
+    [isOpenAccess]
+  );
 
   const navLinkActive = (item: (typeof navItems)[number]) => pathname === item.href;
 
@@ -203,7 +229,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
           </div>
 
           <nav className={cn("flex-1 space-y-1 overflow-y-auto min-h-0", desktopSidebarCollapsed ? "px-2" : "px-4")}>
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive = navLinkActive(item);
               const linkClass = cn(
                 "flex items-center gap-3 rounded-md text-sm font-medium transition-colors",
@@ -288,7 +314,7 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             />
           </div>
           <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <Link
                 key={item.key}
                 href={item.href}

@@ -32,6 +32,10 @@ import {
   type SessionSlotAttendance,
 } from "@/lib/session-attendance-streak";
 import { cn } from "@/lib/utils";
+import {
+  isOpenTrainingAccess,
+  normalizeTrainingAccessMode,
+} from "@/lib/student-training-access";
 
 const SESSION_QUERY_LIMIT = 40;
 const NOTE_MAX_LENGTH = 500;
@@ -229,6 +233,15 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
     if (!trainerId) return false;
     const resolvedStudentId = (sd.rosterDocId as string | undefined) || user.uid;
     const rosterSnap = await getDoc(doc(db, "personalTrainers", trainerId, "students", resolvedStudentId));
+    let trainingMode = normalizeTrainingAccessMode(sd.trainingAccessMode);
+    if (rosterSnap.exists()) {
+      const rd = rosterSnap.data() as { trainingAccessMode?: unknown };
+      if (rd.trainingAccessMode != null) {
+        trainingMode = normalizeTrainingAccessMode(rd.trainingAccessMode);
+      }
+    }
+    if (isOpenTrainingAccess(trainingMode)) return true;
+
     const fallbackDur =
       rosterSnap.exists() && typeof (rosterSnap.data() as { sessionDurationMin?: number }).sessionDurationMin === "number"
         ? Number((rosterSnap.data() as { sessionDurationMin: number }).sessionDurationMin)
