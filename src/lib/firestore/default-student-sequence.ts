@@ -21,6 +21,35 @@ export class DefaultStudentSequenceNotConfiguredError extends Error {
   }
 }
 
+/** Map saved sequence step ids to current library ids when programs were re-imported. */
+export function reconcileSequenceProgramIds(
+  orderedIds: string[],
+  orderedNames: string[] | undefined,
+  programs: Array<{ id: string; name: string }>
+): string[] {
+  return orderedIds.map((id, index) => {
+    if (programs.some((p) => p.id === id)) return id;
+    const savedName = orderedNames?.[index]?.trim();
+    if (!savedName) return id;
+    const byName = programs.find((p) => p.name.trim() === savedName);
+    return byName?.id ?? id;
+  });
+}
+
+/** Label for a sequence step when the library row is missing or ids are stale. */
+export function programDisplayNameForSequenceId(
+  programId: string,
+  stepIndex: number,
+  programs: Array<{ id: string; name: string }>,
+  fallbackNames?: string[]
+): string {
+  const found = programs.find((p) => p.id === programId);
+  if (found?.name?.trim()) return found.name.trim();
+  const fallback = fallbackNames?.[stepIndex]?.trim();
+  if (fallback) return fallback;
+  return programId;
+}
+
 function isDefaultStudentSequenceDoc(data: Record<string, unknown>): boolean {
   return data.programType === "sequence" && data.isDefaultStudentSequence === true;
 }
@@ -102,11 +131,17 @@ export async function applyDefaultStudentSequenceToStudent(
   const def = await getDefaultStudentSequenceProgram(db, trainerId);
   if (!def) throw new DefaultStudentSequenceNotConfiguredError();
 
-  const programsInOrder = def.sourceProgramIds
+  const orderedIds = reconcileSequenceProgramIds(
+    def.sourceProgramIds,
+    def.sourceProgramNames,
+    assignablePrograms
+  );
+
+  const programsInOrder = orderedIds
     .map((pid) => assignablePrograms.find((p) => p.id === pid))
     .filter(Boolean) as Array<TrainingProgramDocument & { id: string }>;
 
-  if (programsInOrder.length !== def.sourceProgramIds.length) {
+  if (programsInOrder.length !== orderedIds.length) {
     throw new Error("DEFAULT_STUDENT_SEQUENCE_PROGRAMS_MISSING");
   }
 

@@ -409,6 +409,26 @@ const translations = {
     trainingPrograms: "Training Programs",
     manageAndAssign: "Manage and assign workouts to your students.",
     createProgram: "Create Program",
+    exportExcel: "Export Excel",
+    importExcel: "Import Excel",
+    excelExportSuccess: "Library exported",
+    excelExportSuccessDesc: "{exercises} exercises and {programs} programs exported to Excel.",
+    excelExportFailed: "Could not export the library.",
+    excelImportSuccess: "Import complete",
+    excelImportSummary:
+      "Exercises: {exercisesUpdated} updated, {exercisesCreated} created ({exercisesSkipped} skipped). Programs: {programsUpdated} updated, {programsCreated} created ({programsSkipped} rows skipped). Coach notes applied: {programNotesUpdated}.",
+    excelImportFailed: "Could not import the file.",
+    excelInvalidFile: "Invalid Excel file",
+    excelNoRowsFound: "No exercise or program rows found in the workbook.",
+    excelImportConfirmTitle: "Import from Excel?",
+    excelExercisesInstruction:
+      "You may add more exercise rows below (name and description only). New names create exercises; existing names are updated.",
+    excelProgramsInstruction:
+      "You may add more program rows below. Use program name, exercise name, and coach notes (Nota do Treinador). New program names create a program; existing programs update coach notes or add exercises.",
+    excelImportConfirmDesc:
+      "Updates exercises and programs from Excel. New program names create training programs. Existing programs update coach notes; new exercises can be added to a program. Sets, reps, and rest are not changed.",
+    excelImportPreview: "{exercises} exercise row(s), {programs} program row(s) to process.",
+    excelImportNotesPreview: "Coach notes found",
     weeklyPrograms: "Weekly Programs",
     weeklyProgramsDesc: "Build a weekly cycle with per-program workout day, kg increase, rep increase, defined cycle length, and student assignment.",
     weeklyProgramName: "Weekly program name",
@@ -1266,6 +1286,26 @@ const translations = {
     trainingPrograms: "Programas de Treino",
     manageAndAssign: "Gerir e atribuir treinos aos seus alunos.",
     createProgram: "Criar Programa",
+    exportExcel: "Exportar Excel",
+    importExcel: "Importar Excel",
+    excelExportSuccess: "Biblioteca exportada",
+    excelExportSuccessDesc: "{exercises} exercícios e {programs} programas exportados para Excel.",
+    excelExportFailed: "Não foi possível exportar a biblioteca.",
+    excelImportSuccess: "Importação concluída",
+    excelImportSummary:
+      "Exercícios: {exercisesUpdated} atualizados, {exercisesCreated} criados ({exercisesSkipped} ignorados). Programas: {programsUpdated} atualizados, {programsCreated} criados ({programsSkipped} linhas ignoradas). Notas do treinador aplicadas: {programNotesUpdated}.",
+    excelImportFailed: "Não foi possível importar o ficheiro.",
+    excelInvalidFile: "Ficheiro Excel inválido",
+    excelNoRowsFound: "Não foram encontradas linhas de exercícios ou programas.",
+    excelImportConfirmTitle: "Importar do Excel?",
+    excelExercisesInstruction:
+      "Pode adicionar mais linhas de exercícios abaixo (apenas nome e descrição). Nomes novos criam exercícios; nomes existentes são atualizados.",
+    excelProgramsInstruction:
+      "Pode adicionar mais linhas de programas abaixo. Use nome do programa, nome do exercício e Nota do Treinador. Nomes de programa novos criam um programa; programas existentes atualizam notas ou acrescentam exercícios.",
+    excelImportConfirmDesc:
+      "Atualiza exercícios e programas a partir do Excel. Nomes de programa novos criam programas de treino. Programas existentes atualizam notas; exercícios novos podem ser adicionados ao programa. Séries, repetições e descanso não são alterados.",
+    excelImportPreview: "{exercises} linha(s) de exercícios, {programs} linha(s) de programas a processar.",
+    excelImportNotesPreview: "Notas do treinador detetadas",
     weeklyPrograms: "Programas Semanais",
     weeklyProgramsDesc: "Crie um ciclo semanal com dia de treino por programa, aumento de kg, aumento de repetições, duração do ciclo e atribuição de aluno.",
     weeklyProgramName: "Nome do programa semanal",

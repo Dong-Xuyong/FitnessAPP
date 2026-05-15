@@ -25,6 +25,7 @@ import { useUser, useFirestore, useCollection, useMemoFirebase, addDocumentNonBl
 import { collection, doc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n, useCategoryLabel } from "@/lib/i18n";
+import { CoachLibraryExcelActions } from "@/components/CoachLibraryExcelActions";
 
 const categories = ["All", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body", "Cardio", "Other"];
 
@@ -215,7 +216,9 @@ export default function ExercisesPage() {
               />
             </div>
           </div>
-          
+
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <CoachLibraryExcelActions />
           <Dialog open={isAddingExercise} onOpenChange={setIsAddingExercise}>
             <DialogTrigger asChild>
               <Button className="gap-2 shrink-0">
@@ -311,6 +314,7 @@ export default function ExercisesPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {/* Edit Exercise Dialog */}

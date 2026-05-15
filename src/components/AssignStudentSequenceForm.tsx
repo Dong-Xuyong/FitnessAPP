@@ -10,6 +10,7 @@ import { DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 import type { TrainingProgramDocument } from "@/lib/types";
+import { programDisplayNameForSequenceId } from "@/lib/firestore/default-student-sequence";
 import { writeStudentSequencePlans, sequenceStepLabel } from "@/lib/workout-plan-sequence";
 import { ChevronDown, ChevronUp, Loader2, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,8 @@ type Props = {
   onDraftOrderedProgramIdsChange?: (ids: string[]) => void;
   draftRepeatCycles?: number;
   onDraftRepeatCyclesChange?: (n: number) => void;
+  /** Parallel to ordered ids when saved names exist but library ids changed (e.g. Excel re-import). */
+  draftProgramFallbackNames?: string[];
   /** Save as `personalTrainingPrograms` sequence template (no student). Embedded mode shows extra button. */
   onSaveTemplate?: (payload: { orderedIds: string[]; cycles: number }) => void | Promise<void>;
   isSavingTemplate?: boolean;
@@ -58,6 +61,7 @@ export function AssignStudentSequenceForm({
   onDraftOrderedProgramIdsChange,
   draftRepeatCycles,
   onDraftRepeatCyclesChange,
+  draftProgramFallbackNames,
   onSaveTemplate,
   isSavingTemplate = false,
   onSaveDefault,
@@ -245,7 +249,12 @@ export function AssignStudentSequenceForm({
             <p className="text-sm text-muted-foreground">{t("sequenceAddProgram")}</p>
           ) : null}
           {orderedProgramIds.map((pid, idx) => {
-            const p = assignablePrograms.find((x) => x.id === pid);
+            const label = programDisplayNameForSequenceId(
+              pid,
+              idx,
+              assignablePrograms,
+              draftProgramFallbackNames
+            );
             return (
               <div
                 key={`${pid}-${idx}`}
@@ -254,7 +263,7 @@ export function AssignStudentSequenceForm({
                 <span className="text-xs font-semibold tabular-nums w-6 shrink-0">
                   {sequenceStepLabel(idx)}
                 </span>
-                <span className="text-sm truncate flex-1 min-w-0">{p?.name || pid}</span>
+                <span className="text-sm truncate flex-1 min-w-0">{label}</span>
                 <Button
                   type="button"
                   variant="ghost"
