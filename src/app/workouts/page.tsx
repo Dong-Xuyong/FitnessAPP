@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, ListOrdered } from "lucide-react";
+import { Plus, Dumbbell, Clock, ArrowRight, Loader2, Zap, Trash2, ListOrdered, Bookmark } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking } from "@/firebase";
 import { doc } from "firebase/firestore";
@@ -16,6 +18,12 @@ import {
   reconcileSequenceProgramIds,
   upsertDefaultStudentSequenceProgram,
 } from "@/lib/firestore/default-student-sequence";
+import {
+  createSequenceTemplate,
+  deleteSequenceTemplate,
+  listSequenceTemplatesFromPrograms,
+  type SequenceTemplateSummary,
+} from "@/lib/firestore/sequence-templates";
 import {
   trainingProgramsRef,
   totalExercisesInProgram,
@@ -42,6 +50,8 @@ export default function WorkoutsPage() {
   >([]);
   const [sequenceDraftRepeatCycles, setSequenceDraftRepeatCycles] = useState(1);
   const [isSavingDefaultSequence, setIsSavingDefaultSequence] = useState(false);
+  const [isSavingSequenceTemplate, setIsSavingSequenceTemplate] = useState(false);
+  const [sequenceTemplateName, setSequenceTemplateName] = useState("");
   const [defaultSequenceLoaded, setDefaultSequenceLoaded] = useState(false);
 
   const programsQuery = useMemoFirebase(() => {
@@ -63,6 +73,11 @@ export default function WorkoutsPage() {
       (programs || []).filter(
         (program) => program.programType !== "weekly" && program.programType !== "sequence"
       ),
+    [programs]
+  );
+
+  const savedSequenceTemplates = useMemo(
+    () => listSequenceTemplatesFromPrograms(programs || []),
     [programs]
   );
 
@@ -95,11 +110,55 @@ export default function WorkoutsPage() {
     };
   }, [db, user, defaultSequenceLoaded, isLoading, basePrograms]);
 
-  const handleSaveDefaultSequence = async (payload: { orderedIds: string[]; cycles: number }) => {
-    if (!db || !user) return;
-    const names = payload.orderedIds
+  const resolveSequenceProgramNames = (orderedIds: string[]) =>
+    orderedIds
       .map((id) => basePrograms.find((p) => p.id === id)?.name)
       .filter(Boolean) as string[];
+
+  const handleSaveSequenceTemplate = async (payload: { orderedIds: string[]; cycles: number }) => {
+    if (!db || !user) return;
+    const names = resolveSequenceProgramNames(payload.orderedIds);
+    if (names.length !== payload.orderedIds.length) {
+      toast({ variant: "destructive", title: t("sequenceTemplateSaveFailed") });
+      return;
+    }
+    setIsSavingSequenceTemplate(true);
+    try {
+      await createSequenceTemplate(db, user.uid, {
+        name: sequenceTemplateName,
+        orderedIds: payload.orderedIds,
+        cycles: payload.cycles,
+        sourceProgramNames: names,
+        defaultName: t("sequenceTemplateDefaultName"),
+      });
+      setSequenceTemplateName("");
+      toast({
+        title: t("sequenceTemplateSavedToast"),
+        description: t("sequenceTemplateSavedDesc"),
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : t("sequenceTemplateSaveFailed");
+      toast({ variant: "destructive", title: t("sequenceTemplateSaveFailed"), description: msg });
+    } finally {
+      setIsSavingSequenceTemplate(false);
+    }
+  };
+
+  const handleDeleteSequenceTemplate = async (template: SequenceTemplateSummary) => {
+    if (!db || !user) return;
+    if (!confirm(t("sequenceTemplateDeleteConfirm"))) return;
+    try {
+      await deleteSequenceTemplate(db, user.uid, template.id);
+      toast({ title: t("sequenceTemplateDeletedToast") });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : t("sequenceTemplateSaveFailed");
+      toast({ variant: "destructive", title: t("sequenceTemplateSaveFailed"), description: msg });
+    }
+  };
+
+  const handleSaveDefaultSequence = async (payload: { orderedIds: string[]; cycles: number }) => {
+    if (!db || !user) return;
+    const names = resolveSequenceProgramNames(payload.orderedIds);
     if (names.length !== payload.orderedIds.length) {
       toast({ variant: "destructive", title: t("sequenceTemplateSaveFailed") });
       return;
@@ -149,7 +208,17 @@ export default function WorkoutsPage() {
               </CardTitle>
               <CardDescription>{t("defaultStudentSequenceCardDesc")}</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="sequence-template-name">{t("sequenceTemplateNameLabel")}</Label>
+                <Input
+                  id="sequence-template-name"
+                  value={sequenceTemplateName}
+                  onChange={(e) => setSequenceTemplateName(e.target.value)}
+                  placeholder={t("sequenceTemplateDefaultName")}
+                  disabled={isSavingSequenceTemplate || isSavingDefaultSequence}
+                />
+              </div>
               <AssignStudentSequenceForm
                 db={db}
                 trainerId={user.uid}
@@ -161,9 +230,56 @@ export default function WorkoutsPage() {
                 draftProgramFallbackNames={sequenceDraftProgramFallbackNames}
                 draftRepeatCycles={sequenceDraftRepeatCycles}
                 onDraftRepeatCyclesChange={setSequenceDraftRepeatCycles}
+                onSaveTemplate={handleSaveSequenceTemplate}
+                isSavingTemplate={isSavingSequenceTemplate}
                 onSaveDefault={handleSaveDefaultSequence}
                 isSavingDefault={isSavingDefaultSequence}
               />
+              {savedSequenceTemplates.length > 0 ? (
+                <div className="space-y-3 border-t pt-4">
+                  <h3 className="text-sm font-semibold flex items-center gap-2">
+                    <Bookmark className="h-4 w-4 text-primary" />
+                    {t("sequenceTemplatesSectionTitle")}
+                  </h3>
+                  <ul className="space-y-2">
+                    {savedSequenceTemplates.map((template) => {
+                      const labels =
+                        template.sourceProgramNames.length > 0
+                          ? template.sourceProgramNames
+                          : template.sourceProgramIds.map((id, idx) =>
+                              basePrograms.find((p) => p.id === id)?.name ??
+                              template.sourceProgramNames[idx] ??
+                              id
+                            );
+                      return (
+                        <li
+                          key={template.id}
+                          className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border rounded-md p-3 bg-muted/30"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{template.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {labels.join(" → ")} · {template.sequenceRepeatCycles}×{" "}
+                              {t("sequenceTemplateCycles")}
+                            </p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:bg-destructive/10"
+                              onClick={() => void handleDeleteSequenceTemplate(template)}
+                            >
+                              {t("sequenceTemplateDelete")}
+                            </Button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         )}

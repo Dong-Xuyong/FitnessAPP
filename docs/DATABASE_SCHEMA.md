@@ -145,6 +145,38 @@ firestore (root)
 
 ---
 
+### `/personalTrainers/{trainerId}/shopItems/{itemId}` Documents
+**Purpose**: Coach-managed catalog for the gym shop (name + price).
+
+**Key Fields**:
+- `name`: Display name
+- `price`: Price in EUR
+- `active`: When `false`, hidden from students
+- `createdAt`, `updatedAt`: ISO timestamps
+
+---
+
+### `/personalTrainers/{trainerId}/shopRegistrations/{regId}` Documents
+**Purpose**: Daily shop purchase log per student. Doc id: `{authUid}_{YYYY-MM-DD}`.
+
+**Key Fields**:
+- `studentId`, `trainerId`, `date` (`YYYY-MM-DD`)
+- `lines`: `[{ itemId, quantity }]` (quantity 0–999)
+- `updatedAt`: ISO timestamp
+
+Shop charges for a calendar month roll into the student’s **pending** payment for that `YYYY-MM` period (see Cloud Function `syncShopPaymentOnRegistrationWrite`).
+
+---
+
+### `/personalTrainers/{trainerId}/students/{studentId}/payments/{paymentId}` — shop breakdown
+**Optional fields** (when shop sync ran):
+- `baseAmount`: Membership (`monthlyRate`)
+- `shopAmount`: Shop total for `period`
+- `amount`: `baseAmount + shopAmount`
+- `shopSyncedAt`: Last sync timestamp
+
+---
+
 ### `/personalTrainers/{trainerId}/sessionSlots/{slotId}` Documents
 **Purpose**: Calendar blocks where students enroll. Doc id encodes `{date}_{startTime_without_colon}` (e.g. `2026-04-10_1200`). Long sessions span multiple consecutive slot documents; each duplicated `students[]` row shares the same `sessionStart`, `sessionDurationMin`, and attendance fields.
 

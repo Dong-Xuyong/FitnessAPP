@@ -30,6 +30,13 @@ import {
   normalizeTrainingAccessMode,
   type TrainingAccessMode,
 } from "@/lib/student-training-access";
+import {
+  buildLatestPerfByExerciseName,
+  buildLatestPerfByPlanId,
+  formatLastSessionPerformanceLabel,
+  normalizeExerciseKey,
+  type LastSessionPerf,
+} from "@/lib/last-session-performance";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -233,6 +240,14 @@ export default function StudentWorkoutsPage() {
   const [presentAccessTick, setPresentAccessTick] = useState(0);
   const [hasCompletedWorkoutSessionToday, setHasCompletedWorkoutSessionToday] = useState(false);
   const [trainingAccessMode, setTrainingAccessMode] = useState<TrainingAccessMode>("scheduled");
+  /** Latest logged weight/reps per exercise for each plan (from completed sessions). */
+  const [lastPerfByPlanId, setLastPerfByPlanId] = useState<
+    Record<string, Record<string, LastSessionPerf>>
+  >({});
+  /** Newest logged weight/reps per exercise name (any completed session). */
+  const [lastPerfByExercise, setLastPerfByExercise] = useState<Record<string, LastSessionPerf>>(
+    {}
+  );
 
   /** Roster document id under the trainer (falls back to auth uid until first fetch). */
   const myId = rosterDocId || user?.uid || "";
@@ -307,8 +322,18 @@ export default function StudentWorkoutsPage() {
 
         const todayKey = studentLocalCalendarDateKeyMs(Date.now());
         let completedSessionToday = false;
+        const sessionRows: Array<{
+          workoutPlanId?: string;
+          completedAt?: unknown;
+          exercises?: unknown[];
+        }> = [];
         for (const sd of sessionsSnap.docs) {
-          const data = sd.data() as { completedAt?: unknown };
+          const data = sd.data() as {
+            completedAt?: unknown;
+            workoutPlanId?: string;
+            exercises?: unknown[];
+          };
+          sessionRows.push(data);
           const ca = data.completedAt;
           if (ca == null) continue;
           let ms: number | null = null;
@@ -320,10 +345,27 @@ export default function StudentWorkoutsPage() {
           if (ms == null || !Number.isFinite(ms)) continue;
           if (studentLocalCalendarDateKeyMs(ms) === todayKey) {
             completedSessionToday = true;
-            break;
           }
         }
-        if (!cancelled) setHasCompletedWorkoutSessionToday(completedSessionToday);
+        sessionRows.sort((a, b) => {
+          const parseMs = (ca: unknown) => {
+            if (ca == null) return 0;
+            if (typeof ca === "object" && ca !== null && "toDate" in (ca as object) && typeof (ca as { toDate?: () => Date }).toDate === "function") {
+              return (ca as { toDate: () => Date }).toDate().getTime();
+            }
+            if (typeof ca === "string" && ca.trim()) {
+              const p = Date.parse(ca);
+              return Number.isFinite(p) ? p : 0;
+            }
+            return 0;
+          };
+          return parseMs(b.completedAt) - parseMs(a.completedAt);
+        });
+        if (!cancelled) {
+          setHasCompletedWorkoutSessionToday(completedSessionToday);
+          setLastPerfByPlanId(buildLatestPerfByPlanId(sessionRows));
+          setLastPerfByExercise(buildLatestPerfByExerciseName(sessionRows));
+        }
 
         // 5. Workout plans
         const plans: WorkoutPlan[] = plansSnap.docs.map(d => ({ id: d.id, ...d.data() })) as WorkoutPlan[];
@@ -380,8 +422,18 @@ export default function StudentWorkoutsPage() {
         if (cancelled) return;
         const todayKey = studentLocalCalendarDateKeyMs(Date.now());
         let completedSessionToday = false;
+        const sessionRows: Array<{
+          workoutPlanId?: string;
+          completedAt?: unknown;
+          exercises?: unknown[];
+        }> = [];
         for (const sd of sessionsSnap.docs) {
-          const data = sd.data() as { completedAt?: unknown };
+          const data = sd.data() as {
+            completedAt?: unknown;
+            workoutPlanId?: string;
+            exercises?: unknown[];
+          };
+          sessionRows.push(data);
           const ca = data.completedAt;
           if (ca == null) continue;
           let ms: number | null = null;
@@ -393,10 +445,27 @@ export default function StudentWorkoutsPage() {
           if (ms == null || !Number.isFinite(ms)) continue;
           if (studentLocalCalendarDateKeyMs(ms) === todayKey) {
             completedSessionToday = true;
-            break;
           }
         }
-        if (!cancelled) setHasCompletedWorkoutSessionToday(completedSessionToday);
+        sessionRows.sort((a, b) => {
+          const parseMs = (ca: unknown) => {
+            if (ca == null) return 0;
+            if (typeof ca === "object" && ca !== null && "toDate" in (ca as object) && typeof (ca as { toDate?: () => Date }).toDate === "function") {
+              return (ca as { toDate: () => Date }).toDate().getTime();
+            }
+            if (typeof ca === "string" && ca.trim()) {
+              const p = Date.parse(ca);
+              return Number.isFinite(p) ? p : 0;
+            }
+            return 0;
+          };
+          return parseMs(b.completedAt) - parseMs(a.completedAt);
+        });
+        if (!cancelled) {
+          setHasCompletedWorkoutSessionToday(completedSessionToday);
+          setLastPerfByPlanId(buildLatestPerfByPlanId(sessionRows));
+          setLastPerfByExercise(buildLatestPerfByExerciseName(sessionRows));
+        }
       } catch {
         /* ignore */
       }
@@ -1058,19 +1127,44 @@ export default function StudentWorkoutsPage() {
                             <div id={panelId} role="region" aria-labelledby={`${panelId}-toggle`} className="divide-y">
                               {(w.exercises || []).length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-4">Sem exercícios.</p>
-                              ) : (w.exercises || []).map((ex: any, idx: number) => (
+                              ) : (w.exercises || []).map((ex: any, idx: number) => {
+                                const prescribed =
+                                  ex.sets && ex.reps
+                                    ? `${ex.sets}×${ex.reps}`
+                                    : null;
+                                const exKey = normalizeExerciseKey(String(ex.exerciseName || ""));
+                                const lastPerf =
+                                  lastPerfByPlanId[w.id]?.[exKey] ?? lastPerfByExercise[exKey];
+                                const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
+                                  weighted: (weight, reps) =>
+                                    t("lastSessionPerformance")
+                                      .replace("{weight}", String(weight))
+                                      .replace("{reps}", String(reps)),
+                                  bodyweight: (reps) =>
+                                    t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+                                });
+                                return (
                                 <div key={idx} className="px-4 py-3 space-y-1.5">
                                   <p className="text-sm font-semibold">{ex.exerciseName}</p>
+                                  {prescribed ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      {t("prescribedSetsReps")}: {prescribed}
+                                    </p>
+                                  ) : null}
+                                  {lastHint ? (
+                                    <p className="text-xs font-medium text-primary/90">{lastHint}</p>
+                                  ) : null}
                                   {ex.notes ? (
                                     <div className="flex items-start gap-1.5">
                                       <StickyNote className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
                                       <p className="text-xs text-muted-foreground whitespace-pre-line">{ex.notes}</p>
                                     </div>
-                                  ) : (
+                                  ) : !prescribed && !lastHint ? (
                                     <p className="text-xs text-muted-foreground italic">Sem notas do treinador.</p>
-                                  )}
+                                  ) : null}
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </>
