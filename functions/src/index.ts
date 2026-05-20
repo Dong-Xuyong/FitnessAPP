@@ -166,3 +166,5 @@ export const enforcePaymentBlocking = onSchedule(
     logger.info("enforcePaymentBlocking completed", { lisbon });
   }
 );
+
+export { syncShopPaymentOnRegistrationWrite, syncShopPaymentCallable } from "./shop-billing-sync";

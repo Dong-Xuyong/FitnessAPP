@@ -358,16 +358,30 @@ export function AssignStudentSequenceForm({
     orderedProgramIds.length < 2;
 
   const footer = isDefaultConfigure ? (
-    <div className="flex justify-end pt-2">
-      <Button
-        type="button"
-        onClick={() => void handleSaveDefaultClick()}
-        disabled={saveDefaultDisabled}
-        className="gap-2"
-      >
-        {isSavingDefault ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        {t("saveDefaultStudentSequence")}
-      </Button>
+    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end pt-2">
+      {onSaveTemplate ? (
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => void handleSaveTemplateClick()}
+          disabled={saveTemplateDisabled}
+          className="gap-2"
+        >
+          {isSavingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {t("sequenceSaveTemplate")}
+        </Button>
+      ) : null}
+      {onSaveDefault ? (
+        <Button
+          type="button"
+          onClick={() => void handleSaveDefaultClick()}
+          disabled={saveDefaultDisabled}
+          className="gap-2"
+        >
+          {isSavingDefault ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {t("saveDefaultStudentSequence")}
+        </Button>
+      ) : null}
     </div>
   ) : (
     <div

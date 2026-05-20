@@ -21,6 +21,7 @@ import {
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
+import { useToast } from "@/hooks/use-toast";
 import { doc, getDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 import {
   commitFinishedWorkoutSession,
@@ -36,6 +37,12 @@ import {
   isOpenTrainingAccess,
   normalizeTrainingAccessMode,
 } from "@/lib/student-training-access";
+import {
+  buildLastPerfByExercise,
+  formatLastSessionPerformanceLabel,
+  normalizeExerciseKey,
+  type LastSessionPerf,
+} from "@/lib/last-session-performance";
 
 const SESSION_QUERY_LIMIT = 40;
 const NOTE_MAX_LENGTH = 500;
@@ -48,12 +55,6 @@ const MOOD_FACES = ["😢", "😕", "😐", "😊", "🤩"] as const;
 interface SetLog {
   weight: string;
   reps: string;
-}
-
-type LastPerf = { weight: number; reps: number };
-
-function normalizeExerciseKey(name: string): string {
-  return name.trim().toLowerCase();
 }
 
 /** Optional body-weight log (kg). Empty invalid or out-of-range → null */
@@ -86,24 +87,6 @@ function prefilledBodyFatFromProfile(bodyFatPercent: unknown): string {
   return String(n);
 }
 
-function buildPerformanceMap(sessionData: { exercises?: any[] }): Record<string, LastPerf> {
-  const out: Record<string, LastPerf> = {};
-  const exercises = sessionData.exercises || [];
-  for (const ex of exercises) {
-    const key = normalizeExerciseKey(String(ex.exerciseName || ex.name || ""));
-    if (!key) continue;
-    const sets = Array.isArray(ex.sets) ? ex.sets : [];
-    const s0 = sets[0];
-    if (!s0) continue;
-    const w = Number(s0.weight);
-    const r = Number(s0.reps);
-    if (!Number.isFinite(r) || r <= 0) continue;
-    const weight = Number.isFinite(w) ? w : 0;
-    out[key] = { weight, reps: r };
-  }
-  return out;
-}
-
 interface WorkoutExercise {
   exerciseName: string;
   sets: number;
@@ -128,6 +111,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const { user } = useUser();
   const db = useFirestore();
   const { t } = useI18n();
+  const { toast } = useToast();
 
   const [workout, setWorkout] = useState<WorkoutPlan | null>(null);
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(true);
@@ -135,7 +119,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [isFinished, setIsFinished] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
-  const [lastPerfLookup, setLastPerfLookup] = useState<Record<string, LastPerf>>({});
+  const [lastPerfLookup, setLastPerfLookup] = useState<Record<string, LastSessionPerf>>({});
   const [difficultyNotes, setDifficultyNotes] = useState("");
   const [moodNotes, setMoodNotes] = useState("");
   const [sessionDifficultyRating, setSessionDifficultyRating] = useState<number | null>(null);
@@ -337,16 +321,17 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
         const q = query(sessionsCol, orderBy("completedAt", "desc"), limit(SESSION_QUERY_LIMIT));
         const snap = await getDocs(q);
         if (cancelled) return;
-        let perf: Record<string, LastPerf> = {};
+        const perf: Record<string, LastSessionPerf> = {};
         for (const docSnap of snap.docs) {
           const data = docSnap.data() as {
-            workoutPlanId?: string;
             completedAt?: string;
             exercises?: WorkoutExercise[];
           };
-          if (data.workoutPlanId !== workoutId || !data.completedAt) continue;
-          perf = buildPerformanceMap(data);
-          break;
+          if (!data.completedAt) continue;
+          const perEx = buildLastPerfByExercise(data);
+          for (const [key, p] of Object.entries(perEx)) {
+            if (!(key in perf)) perf[key] = p;
+          }
         }
         setLastPerfLookup(perf);
       } catch (e) {
@@ -435,6 +420,11 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
       setIsFinished(true);
     } catch (e) {
       console.error("Error saving session:", e);
+      toast({
+        variant: "destructive",
+        title: t("sessionSaveFailed"),
+        description: e instanceof Error ? e.message : undefined,
+      });
     } finally {
       setIsSaving(false);
     }
@@ -522,9 +512,14 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
               </div>
             </CardContent>
           </Card>
-          <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-            <Link href="/student/workouts">{t("backToWorkouts")}</Link>
-          </Button>
+          <div className="flex flex-col gap-2 w-full">
+            <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" asChild>
+              <Link href="/student/workout-history">{t("workoutHistory")}</Link>
+            </Button>
+            <Button variant="outline" className="w-full" asChild>
+              <Link href="/student/workouts">{t("backToWorkouts")}</Link>
+            </Button>
+          </div>
         </div>
     );
   }
@@ -692,14 +687,14 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
             const log = logs[index] ?? { weight: "", reps: "" };
             const logged = exerciseHasLoggedSet(log);
             const prevPerf = lastPerfLookup[normalizeExerciseKey(exercise.exerciseName)];
-            const lastHint =
-              prevPerf && prevPerf.reps > 0
-                ? prevPerf.weight > 0
-                  ? t("lastSessionPerformance")
-                      .replace("{weight}", String(prevPerf.weight))
-                      .replace("{reps}", String(prevPerf.reps))
-                  : t("lastSessionPerformanceBodyweight").replace("{reps}", String(prevPerf.reps))
-                : null;
+            const lastHint = formatLastSessionPerformanceLabel(prevPerf, {
+              weighted: (weight, reps) =>
+                t("lastSessionPerformance")
+                  .replace("{weight}", String(weight))
+                  .replace("{reps}", String(reps)),
+              bodyweight: (reps) =>
+                t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+            });
 
             return (
               <Card key={index}>

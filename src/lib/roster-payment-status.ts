@@ -9,6 +9,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { buildPaymentAmounts, resolveMonthlyRate } from "@/lib/shop-billing";
 
 export type RosterPaymentStatus = { status: string; period: string };
 
@@ -59,13 +60,16 @@ export async function ensurePendingPaymentForCurrentPeriod(
   const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
   if (!existing.empty) return false;
 
-  const amount = Number(roster.monthlyRate ?? 0);
+  const monthlyRate = resolveMonthlyRate(roster);
+  const amounts = buildPaymentAmounts(monthlyRate, 0);
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
   const nowIso = new Date().toISOString();
 
   await addDoc(paymentsCol, {
     period,
-    amount: Number.isFinite(amount) ? amount : 0,
+    amount: amounts.amount,
+    baseAmount: amounts.baseAmount,
+    shopAmount: amounts.shopAmount,
     method,
     status: "pending",
     paidAt: null,
@@ -96,20 +100,23 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
   if (String(roster.billingStatus ?? "").trim().toLowerCase() !== "active") {
     return false;
   }
-  const amount = Number(roster.monthlyRate ?? 0);
-  if (!Number.isFinite(amount) || amount <= 0) return false;
+  const monthlyRate = resolveMonthlyRate(roster);
+  if (!Number.isFinite(monthlyRate) || monthlyRate <= 0) return false;
 
   const period = nextBillingPeriod(now);
   const paymentsCol = collection(db, "personalTrainers", trainerUid, "students", rosterStudentId, "payments");
   const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
   if (!existing.empty) return false;
 
+  const amounts = buildPaymentAmounts(monthlyRate, 0);
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
   const nowIso = now.toISOString();
 
   await addDoc(paymentsCol, {
     period,
-    amount,
+    amount: amounts.amount,
+    baseAmount: amounts.baseAmount,
+    shopAmount: amounts.shopAmount,
     method,
     status: "pending",
     paidAt: null,

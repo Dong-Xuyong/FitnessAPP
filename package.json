@@ -12,7 +12,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test:sequence": "npx tsx --test src/lib/workout-plan-sequence.test.ts",
-    "test:excel": "npx tsx --test src/lib/coach-library-excel.test.ts"
+    "test:excel": "npx tsx --test src/lib/coach-library-excel.test.ts",
+    "test:shop": "npx tsx --test src/lib/shop-billing.test.ts"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.28.0",

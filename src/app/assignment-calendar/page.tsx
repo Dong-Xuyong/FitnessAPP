@@ -51,11 +51,17 @@ import {
   resolveWorkoutPlansStorageStudentId,
 } from "@/components/AssignStudentSequenceForm";
 import {
-  applyDefaultStudentSequenceToStudent,
-  DefaultStudentSequenceNotConfiguredError,
   getDefaultStudentSequenceProgram,
   type DefaultStudentSequenceProgram,
 } from "@/lib/firestore/default-student-sequence";
+import {
+  applySequenceTemplateToStudent,
+  listSequenceTemplatesFromPrograms,
+} from "@/lib/firestore/sequence-templates";
+import {
+  buildAssignSequenceOptions,
+  SequenceTemplatePicker,
+} from "@/components/SequenceTemplatePicker";
 import type { TrainingProgramDocument } from "@/lib/types";
 import {
   EditWorkoutSessionDialog,
@@ -978,6 +984,7 @@ export default function AssignmentCalendarPage() {
   const [isApplyingDefaultSequence, setIsApplyingDefaultSequence] = useState(false);
   const [defaultSequenceForAssign, setDefaultSequenceForAssign] =
     useState<DefaultStudentSequenceProgram | null>(null);
+  const [selectedAssignSequenceId, setSelectedAssignSequenceId] = useState<string | null>(null);
   const [isLoadingDefaultSequenceForAssign, setIsLoadingDefaultSequenceForAssign] = useState(false);
   const [isRemovingStudentAllAssignments, setIsRemovingStudentAllAssignments] = useState(false);
 
@@ -1821,9 +1828,26 @@ export default function AssignmentCalendarPage() {
     [programs]
   );
 
+  const assignSequenceOptions = useMemo(
+    () =>
+      buildAssignSequenceOptions({
+        defaultSequence: defaultSequenceForAssign,
+        programs: programs as Array<Record<string, unknown> & { id: string }>,
+        defaultOptionLabel: t("defaultSequenceOptionLabel"),
+        listTemplates: listSequenceTemplatesFromPrograms,
+      }),
+    [defaultSequenceForAssign, programs, t]
+  );
+
+  const selectedAssignSequence = useMemo(
+    () => assignSequenceOptions.find((o) => o.id === selectedAssignSequenceId) ?? null,
+    [assignSequenceOptions, selectedAssignSequenceId]
+  );
+
   useEffect(() => {
     if (!assignWeekOpen || !db || !user) {
       setDefaultSequenceForAssign(null);
+      setSelectedAssignSequenceId(null);
       setIsLoadingDefaultSequenceForAssign(false);
       return;
     }
@@ -1843,6 +1867,30 @@ export default function AssignmentCalendarPage() {
       cancelled = true;
     };
   }, [assignWeekOpen, db, user]);
+
+  useEffect(() => {
+    if (!assignWeekOpen || !db || !user) return;
+    let cancelled = false;
+    void getDocs(collection(db, "personalTrainers", user.uid, "personalTrainingPrograms")).then((snap) => {
+      if (!cancelled) {
+        setPrograms(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [assignWeekOpen, db, user]);
+
+  useEffect(() => {
+    if (!assignWeekOpen) return;
+    if (assignSequenceOptions.length === 0) {
+      setSelectedAssignSequenceId(null);
+      return;
+    }
+    setSelectedAssignSequenceId((prev) =>
+      prev && assignSequenceOptions.some((o) => o.id === prev) ? prev : assignSequenceOptions[0].id
+    );
+  }, [assignWeekOpen, assignSequenceOptions]);
 
   // Calendar modifier: days in weeks that have program assignments (scoped to filter student when active)
   const assignedWeekDates = useMemo(() => {
@@ -2291,7 +2339,7 @@ export default function AssignmentCalendarPage() {
   };
 
   const handleApplyDefaultSequenceFromCal = async () => {
-    if (!db || !user || assignWeekStudentIds.length === 0 || !defaultSequenceForAssign) return;
+    if (!db || !user || assignWeekStudentIds.length === 0 || !selectedAssignSequence) return;
     const studentCount = assignWeekStudentIds.length;
     const portalRows = (portalStudents || []) as Array<{ id: string; email?: string }>;
     setIsApplyingDefaultSequence(true);
@@ -2310,9 +2358,10 @@ export default function AssignmentCalendarPage() {
           rosterStudents as Array<{ id: string; userId?: string; email?: string }> | null,
           portalRows
         );
-        const { appended } = await applyDefaultStudentSequenceToStudent(
+        const { appended } = await applySequenceTemplateToStudent(
           db,
           user.uid,
+          selectedAssignSequence,
           storageId,
           assignableBasePrograms
         );
@@ -2331,10 +2380,8 @@ export default function AssignmentCalendarPage() {
               : t("sequenceAssignedToast"),
       });
     } catch (e: unknown) {
-      if (e instanceof DefaultStudentSequenceNotConfiguredError) {
-        toast({ variant: "destructive", title: t("defaultSequenceNotConfigured") });
-      } else if (e instanceof Error && e.message === "DEFAULT_STUDENT_SEQUENCE_PROGRAMS_MISSING") {
-        toast({ variant: "destructive", title: t("defaultStudentSequenceProgramsMissing") });
+      if (e instanceof Error && e.message === "SEQUENCE_TEMPLATE_PROGRAMS_MISSING") {
+        toast({ variant: "destructive", title: t("sequenceTemplateProgramsMissing") });
       } else {
         const msg = e instanceof Error ? e.message : t("sequenceAssignFailed");
         toast({ variant: "destructive", title: t("sequenceAssignFailed"), description: msg });
@@ -2407,7 +2454,7 @@ export default function AssignmentCalendarPage() {
           setAssignWeekOpen(o);
           if (!o) setAssignWeekStudentIds([]);
         }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ListOrdered className="h-4 w-4 text-primary" /> {t("applyDefaultStudentSequence")}
@@ -2415,32 +2462,13 @@ export default function AssignmentCalendarPage() {
             </DialogHeader>
             <div className="space-y-3 py-2">
 
-              <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm">
-                <p className="font-medium text-foreground">{t("sequenceProgramsInOrder")}</p>
-                {isLoadingDefaultSequenceForAssign ? (
-                  <div className="flex items-center gap-2 text-muted-foreground py-1">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {t("loading")}
-                  </div>
-                ) : defaultSequenceForAssign ? (
-                  <>
-                    <p className="text-muted-foreground leading-snug">
-                      {(defaultSequenceForAssign.sourceProgramNames.length > 0
-                        ? defaultSequenceForAssign.sourceProgramNames
-                        : defaultSequenceForAssign.sourceProgramIds.map(
-                            (pid) =>
-                              assignableBasePrograms.find((p) => p.id === pid)?.name || pid
-                          )
-                      ).join(" → ")}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {defaultSequenceForAssign.sequenceRepeatCycles}× {t("sequenceTemplateCycles")}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-destructive text-xs">{t("defaultSequenceNotConfigured")}</p>
-                )}
-              </div>
+              <SequenceTemplatePicker
+                options={assignSequenceOptions}
+                selectedId={selectedAssignSequenceId}
+                onSelect={setSelectedAssignSequenceId}
+                loading={isLoadingDefaultSequenceForAssign}
+                assignablePrograms={assignableBasePrograms}
+              />
 
               {/* Student multi-select */}
               <div className="space-y-1.5">
@@ -2533,7 +2561,7 @@ export default function AssignmentCalendarPage() {
                 onClick={() => void handleApplyDefaultSequenceFromCal()}
                 disabled={
                   assignWeekStudentIds.length === 0 ||
-                  !defaultSequenceForAssign ||
+                  !selectedAssignSequence ||
                   isApplyingDefaultSequence ||
                   isLoadingDefaultSequenceForAssign
                 }

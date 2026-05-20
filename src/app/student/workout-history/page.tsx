@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,6 @@ import { useUser, useFirestore } from "@/firebase";
 import { cn } from "@/lib/utils";
 import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
-import { studentLocalCalendarDateKeyMs } from "@/lib/session-attendance-streak";
 import {
   CheckCircle2,
   Clock,
@@ -148,72 +147,56 @@ export default function StudentWorkoutHistoryPage() {
   const [editSessionBodyFatPercent, setEditSessionBodyFatPercent] = useState("");
   const [isSavingSession, setIsSavingSession] = useState(false);
 
-  useEffect(() => {
+  const fetchHistory = useCallback(async () => {
     if (!db || !user) {
       setIsLoading(false);
       return;
     }
     const uid = user.uid;
+    setIsLoading(true);
+    try {
+      const studentSnap = await getDoc(doc(db, "students", uid));
+      if (!studentSnap.exists()) return;
 
-    let cancelled = false;
-    async function fetchHistory() {
-      setIsLoading(true);
-      try {
-        const studentSnap = await getDoc(doc(db, "students", uid));
-        if (!studentSnap.exists()) return;
+      const tid = studentSnap.data()?.trainerId as string | undefined;
+      if (!tid) return;
+      const rid = (studentSnap.data()?.rosterDocId as string | undefined) || uid;
 
-        const tid = studentSnap.data()?.trainerId as string | undefined;
-        if (!tid) return;
-        const rid = (studentSnap.data()?.rosterDocId as string | undefined) || uid;
-        if (cancelled) return;
+      setTrainerId(tid);
+      setResolvedStudentId(rid);
 
-        setTrainerId(tid);
-        setResolvedStudentId(rid);
+      const sessionsSnap = await getDocs(
+        collection(db, "personalTrainers", tid, "students", rid, "workoutSessions")
+      );
 
-        const sessionsSnap = await getDocs(
-          collection(db, "personalTrainers", tid, "students", rid, "workoutSessions")
-        );
-        if (cancelled) return;
-
-        const completedSessions = sessionsSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as WorkoutSession))
-          .filter((s) => parseCompletedAtMs(s.completedAt as unknown) != null)
-          .sort(
-            (a, b) =>
-              (parseCompletedAtMs(b.completedAt as unknown) ?? 0) -
-              (parseCompletedAtMs(a.completedAt as unknown) ?? 0)
-          );
-
-        const byDay = new Map<string, WorkoutSession>();
-        for (const s of completedSessions) {
-          const ms = parseCompletedAtMs(s.completedAt as unknown);
-          if (ms == null) continue;
-          const dayKey = studentLocalCalendarDateKeyMs(ms);
-          const prev = byDay.get(dayKey);
-          const prevMs = prev ? parseCompletedAtMs(prev.completedAt as unknown) : null;
-          if (!prev || prevMs == null || ms > prevMs) {
-            byDay.set(dayKey, s);
-          }
-        }
-        const dedupedSessions = [...byDay.values()].sort(
+      const completedSessions = sessionsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as WorkoutSession))
+        .filter((s) => parseCompletedAtMs(s.completedAt as unknown) != null)
+        .sort(
           (a, b) =>
             (parseCompletedAtMs(b.completedAt as unknown) ?? 0) -
             (parseCompletedAtMs(a.completedAt as unknown) ?? 0)
         );
 
-        setCompletedWorkouts(dedupedSessions);
-      } catch (error) {
-        console.error("Failed to load workout history", error);
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
+      setCompletedWorkouts(completedSessions);
+    } catch (error) {
+      console.error("Failed to load workout history", error);
+    } finally {
+      setIsLoading(false);
     }
+  }, [db, user]);
 
-    fetchHistory();
-    return () => {
-      cancelled = true;
+  useEffect(() => {
+    void fetchHistory();
+  }, [fetchHistory]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void fetchHistory();
     };
-  }, [db, user?.uid]);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [fetchHistory]);
 
   const startEditSession = (session: WorkoutSession) => {
     const exercises = (session.exercises || []).map((ex) => ({
@@ -315,9 +298,10 @@ export default function StudentWorkoutHistoryPage() {
             </div>
             <div className="space-y-2">
               {completedWorkouts.map((session) => {
-                const completedAtRaw = session.completedAt?.trim();
+                const completedMs = parseCompletedAtMs(session.completedAt as unknown);
                 const fallbackDate = session.date?.trim();
-                const completedDate = completedAtRaw || fallbackDate;
+                const completedDate =
+                  completedMs != null ? new Date(completedMs).toISOString() : fallbackDate || "";
                 const isExpanded = expandedSessionId === session.id;
                 const isEditing = editingSessionId === session.id;
                 const exList = isEditing ? editSessionExercises : (session.exercises || []);
@@ -344,7 +328,9 @@ export default function StudentWorkoutHistoryPage() {
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
                               <Clock className="h-3 w-3 shrink-0" aria-hidden />{" "}
                               <span className="font-medium text-foreground/80">{t("workoutHistoryLastSessionOn")}:</span>{" "}
-                              {new Date(completedDate).toLocaleDateString()}
+                              {completedMs != null
+                                ? `${new Date(completedMs).toLocaleDateString()} ${new Date(completedMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                                : new Date(completedDate).toLocaleDateString()}
                             </p>
                           )}
                           <SessionFeedbackSummary session={session} t={t} />
@@ -362,7 +348,9 @@ export default function StudentWorkoutHistoryPage() {
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
                               <Clock className="h-3 w-3 shrink-0" aria-hidden />{" "}
                               <span className="font-medium text-foreground/80">{t("workoutHistoryLastSessionOn")}:</span>{" "}
-                              {new Date(completedDate).toLocaleDateString()}
+                              {completedMs != null
+                                ? `${new Date(completedMs).toLocaleDateString()} ${new Date(completedMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                                : new Date(completedDate).toLocaleDateString()}
                             </p>
                           )}
                         </div>
