@@ -116,6 +116,9 @@ firestore (root)
 - `email`: Trainer's email address
 - `photoUrl`: Profile picture URL
 - `dateJoined`: When the trainer registered
+- `availability`: Weekly schedule — per weekday (`sunday` … `saturday`): `{ enabled, ranges: [{ startTime, endTime }] }` (times as `HH:mm`)
+- `vacationPeriods`: Date-specific time off — array of `{ id, startDate, endDate, label }` with inclusive `YYYY-MM-DD` bounds and a required short description; overrides weekly hours for new bookings
+- `slotDurationMin`, `maxStudentsPerSlot`: Calendar block settings (minutes per slot, default capacity)
 
 **Access Pattern**: 
 - Trainers can read/write their own document

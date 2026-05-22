@@ -24,12 +24,22 @@ import { useI18n } from "@/lib/i18n";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
-import {
-  fetchRosterPaymentStatusMap,
-  ensureRosterPendingPaymentsForCurrentMonth,
-  ensureRosterPendingNextPeriodIfWindow,
-} from "@/lib/roster-payment-status";
+import { fetchRosterPaymentStatusMap, nextBillingPeriod } from "@/lib/roster-payment-status";
 import { normalizedPaymentPaid } from "@/lib/student-payment-due";
+import {
+  callCreateNextPeriodPayments,
+  callRemoveNextPeriodPayments,
+} from "@/lib/roster-next-period-payments-client";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type StudentRow = Record<string, unknown> & { id: string; _onRoster?: boolean };
 
@@ -136,6 +146,10 @@ function DashboardContent() {
   const [dashboardPaymentStatusMap, setDashboardPaymentStatusMap] = useState<
     Record<string, { status: string; period: string }>
   >({});
+  const [billingBulkConfirm, setBillingBulkConfirm] = useState<"create" | "remove" | null>(null);
+  const [billingBulkLoading, setBillingBulkLoading] = useState(false);
+
+  const nextPaymentPeriod = nextBillingPeriod();
 
   const fetchDashboardPayments = useCallback(async () => {
     if (!db || !user || !rosterStudents?.length) {
@@ -143,8 +157,6 @@ function DashboardContent() {
       return;
     }
     const ids = rosterStudents.map((s: StudentRow & { id: string }) => s.id).filter(Boolean);
-    await ensureRosterPendingPaymentsForCurrentMonth(db, user.uid, ids);
-    await ensureRosterPendingNextPeriodIfWindow(db, user.uid, ids);
     const map = await fetchRosterPaymentStatusMap(db, user.uid, ids);
     setDashboardPaymentStatusMap(map);
   }, [db, user, rosterStudents]);
@@ -152,6 +164,39 @@ function DashboardContent() {
   useEffect(() => {
     fetchDashboardPayments();
   }, [fetchDashboardPayments]);
+
+  const runBillingBulkAction = async () => {
+    if (!user?.uid || !billingBulkConfirm) return;
+    setBillingBulkLoading(true);
+    try {
+      if (billingBulkConfirm === "create") {
+        const res = await callCreateNextPeriodPayments(user.uid);
+        toast({
+          title: t("dashboardNextPeriodCreateSuccess")
+            .replace("{processed}", String(res.processed ?? 0))
+            .replace("{period}", res.period || nextPaymentPeriod),
+        });
+      } else {
+        const res = await callRemoveNextPeriodPayments(user.uid);
+        toast({
+          title: t("dashboardNextPeriodRemoveSuccess")
+            .replace("{deleted}", String(res.deleted ?? 0))
+            .replace("{period}", res.period || nextPaymentPeriod),
+        });
+      }
+      setBillingBulkConfirm(null);
+      await fetchDashboardPayments();
+    } catch (e) {
+      console.error(e);
+      toast({
+        variant: "destructive",
+        title: t("dashboardNextPeriodBulkFailed"),
+        description: e instanceof Error ? e.message : undefined,
+      });
+    } finally {
+      setBillingBulkLoading(false);
+    }
+  };
 
   const filteredDashboardRoster = useMemo(() => {
     let rows = rosterOnlySorted;
@@ -393,9 +438,38 @@ function DashboardContent() {
                 <CardTitle>{t("students")}</CardTitle>
                 <CardDescription>{t("studentsCardDescription")}</CardDescription>
               </div>
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/students">{t("openDirectory")}</Link>
-              </Button>
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={billingBulkLoading || !user?.uid}
+                  onClick={() => setBillingBulkConfirm("create")}
+                >
+                  {billingBulkLoading && billingBulkConfirm === "create" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    t("dashboardCreateNextPeriodPayments").replace("{period}", nextPaymentPeriod)
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={billingBulkLoading || !user?.uid}
+                  onClick={() => setBillingBulkConfirm("remove")}
+                >
+                  {billingBulkLoading && billingBulkConfirm === "remove" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    t("dashboardRemoveNextPeriodPayments").replace("{period}", nextPaymentPeriod)
+                  )}
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/students">{t("openDirectory")}</Link>
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {isLoading ? (
@@ -687,6 +761,52 @@ function DashboardContent() {
             )}
           </DialogContent>
         </Dialog>
+
+        <AlertDialog
+          open={billingBulkConfirm !== null}
+          onOpenChange={(open) => {
+            if (!open && !billingBulkLoading) setBillingBulkConfirm(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {billingBulkConfirm === "create"
+                  ? t("dashboardNextPeriodCreateConfirmTitle")
+                  : t("dashboardNextPeriodRemoveConfirmTitle")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {billingBulkConfirm === "create"
+                  ? t("dashboardNextPeriodCreateConfirmDescription").replace(
+                      "{period}",
+                      nextPaymentPeriod
+                    )
+                  : t("dashboardNextPeriodRemoveConfirmDescription").replace(
+                      "{period}",
+                      nextPaymentPeriod
+                    )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={billingBulkLoading}>{t("cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={billingBulkLoading}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void runBillingBulkAction();
+                }}
+              >
+                {billingBulkLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : billingBulkConfirm === "create" ? (
+                  t("confirm")
+                ) : (
+                  t("delete")
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </Navigation>
   );

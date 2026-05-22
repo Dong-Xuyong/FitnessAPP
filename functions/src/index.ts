@@ -168,3 +168,8 @@ export const enforcePaymentBlocking = onSchedule(
 );
 
 export { syncShopPaymentOnRegistrationWrite, syncShopPaymentCallable } from "./shop-billing-sync";
+export { ensureNextPeriodPayments } from "./ensure-next-period-payments";
+export {
+  createNextPeriodPaymentsCallable,
+  removeNextPeriodPaymentsCallable,
+} from "./roster-next-period-payments";

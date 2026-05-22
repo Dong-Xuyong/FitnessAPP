@@ -20,11 +20,7 @@ import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection } from "firebase/firestore";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
-import {
-  fetchRosterPaymentStatusMap,
-  ensureRosterPendingPaymentsForCurrentMonth,
-  ensureRosterPendingNextPeriodIfWindow,
-} from "@/lib/roster-payment-status";
+import { fetchRosterPaymentStatusMap } from "@/lib/roster-payment-status";
 import { normalizedPaymentPaid } from "@/lib/student-payment-due";
 
 export default function StudentsPage() {
@@ -66,8 +62,6 @@ export default function StudentsPage() {
       return;
     }
     const ids = rosterStudents.map((s: any) => s.id).filter((id: string) => Boolean(id));
-    await ensureRosterPendingPaymentsForCurrentMonth(db, user.uid, ids);
-    await ensureRosterPendingNextPeriodIfWindow(db, user.uid, ids);
     const map = await fetchRosterPaymentStatusMap(db, user.uid, ids);
     setPaymentStatusMap(map);
   }, [db, user, rosterStudents]);
