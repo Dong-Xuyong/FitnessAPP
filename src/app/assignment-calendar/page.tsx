@@ -3461,11 +3461,6 @@ export default function AssignmentCalendarPage() {
                                       <AvatarImage src={src} alt="" />
                                       <AvatarFallback className="text-[9px]">{initial}</AvatarFallback>
                                     </Avatar>
-                                    {st.workoutPlanId ? (
-                                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm ring-2 ring-background">
-                                        <Dumbbell className="h-2 w-2" aria-hidden />
-                                      </span>
-                                    ) : null}
                                   </span>
                                 );
                               })}
@@ -3576,11 +3571,6 @@ export default function AssignmentCalendarPage() {
                                       <AvatarImage src={src} alt="" />
                                       <AvatarFallback className="text-[9px]">{initial}</AvatarFallback>
                                     </Avatar>
-                                    {st.workoutPlanId ? (
-                                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm ring-2 ring-background">
-                                        <Dumbbell className="h-2 w-2" aria-hidden />
-                                      </span>
-                                    ) : null}
                                   </span>
                                 );
                               })}
