@@ -31,6 +31,17 @@ export function paymentPeriodForShopMonth(shopPeriod: string): string | null {
   return `${y}-${String(mo + 1).padStart(2, "0")}`;
 }
 
+/** Payment period `YYYY-MM` includes shop charges from the previous calendar month. */
+export function shopSourcePeriodForPaymentPeriod(paymentPeriod: string): string | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(paymentPeriod || "").trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  if (mo === 1) return `${y - 1}-12`;
+  return `${y}-${String(mo - 1).padStart(2, "0")}`;
+}
+
 export function periodDateRange(period: string): { startDate: string; endDate: string } | null {
   const m = /^(\d{4})-(\d{2})$/.exec(String(period || "").trim());
   if (!m) return null;

@@ -37,6 +37,11 @@ import {
   normalizeExerciseKey,
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
+import {
+  isDateInVacation,
+  normalizeVacationPeriods,
+  type VacationPeriod,
+} from "@/lib/trainer-availability";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -224,6 +229,7 @@ export default function StudentWorkoutsPage() {
 
   // Coach settings
   const [availability, setAvailability] = useState<Availability>({});
+  const [vacationPeriods, setVacationPeriods] = useState<VacationPeriod[]>([]);
   const [slotDurationMin, setSlotDurationMin]       = useState(30);
   const [defaultMaxStudents, setDefaultMaxStudents] = useState(4);
 
@@ -301,6 +307,7 @@ export default function StudentWorkoutsPage() {
           const td = trainerDoc.data();
           if (td.slotDurationMin)   setSlotDurationMin(td.slotDurationMin);
           if (td.maxStudentsPerSlot) setDefaultMaxStudents(td.maxStudentsPerSlot);
+          setVacationPeriods(normalizeVacationPeriods(td.vacationPeriods));
           const savedAvail = td.availability as any;
           if (savedAvail) {
             if (Array.isArray(savedAvail.workingDays)) {
@@ -480,7 +487,13 @@ export default function StudentWorkoutsPage() {
 
   const selectedDateStr = toDateStr(selectedDate);
   const selectedDaySched = availability[DAY_KEYS[selectedDate.getDay()]];
-  const isSelectedDayAvailable = !!(selectedDaySched?.enabled && selectedDaySched.ranges.length);
+  const selectedDayWeeklyAvailable = !!(selectedDaySched?.enabled && selectedDaySched.ranges.length);
+  const selectedDayOnVacation = isDateInVacation(selectedDateStr, vacationPeriods);
+  const hasBookingOnSelectedDay = sessionSlots.some(
+    (s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId)
+  );
+  const showStudentDaySchedule =
+    selectedDayWeeklyAvailable && (!selectedDayOnVacation || hasBookingOnSelectedDay);
 
   // How many consecutive 30-min blocks a single session occupies
   const slotsNeeded = Math.max(1, Math.ceil(sessionDurationMin / slotDurationMin));
@@ -516,11 +529,17 @@ export default function StudentWorkoutsPage() {
   const canBookMore =
     sessionsPerWeek == null || weeklyBookedCount < sessionsPerWeek;
 
+  const isOnVacationDay = useCallback(
+    (date: Date) => isDateInVacation(toDateStr(date), vacationPeriods),
+    [vacationPeriods]
+  );
+
   // Calendar modifiers
   const isUnavailableDay = useCallback((date: Date) => {
     const s = availability[DAY_KEYS[date.getDay()]];
-    return !s?.enabled || !s.ranges.length;
-  }, [availability]);
+    const weeklyOff = !s?.enabled || !s.ranges.length;
+    return weeklyOff || isDateInVacation(toDateStr(date), vacationPeriods);
+  }, [availability, vacationPeriods]);
 
   const bookedDates = useMemo(() => {
     if (!myId) return [];
@@ -633,6 +652,11 @@ export default function StudentWorkoutsPage() {
     const existingAtTime = slotsByTime.get(time);
     const myEntry = existingAtTime?.students.find(s => s.studentId === myId);
     const isEnrolled = !!myEntry;
+
+    if (!isEnrolled && selectedDayOnVacation) {
+      toast({ title: "O treinador está de férias neste dia", variant: "destructive" });
+      return;
+    }
 
     setIsRegistering(slotDocId(selectedDateStr, time));
     try {
@@ -801,11 +825,18 @@ export default function StudentWorkoutsPage() {
                 mode="single"
                 selected={selectedDate}
                 onSelect={d => { if (d) setSelectedDate(d); }}
-                modifiers={{ booked: bookedDates, workout: workoutDates, unavailable: isUnavailableDay }}
+                modifiers={{
+                  booked: bookedDates,
+                  workout: workoutDates,
+                  unavailable: isUnavailableDay,
+                  onVacation: isOnVacationDay,
+                }}
                 modifiersClassNames={{
                   booked:      "bg-accent/25 text-accent font-bold rounded-full",
                   workout:     "bg-primary/10 font-medium",
                   unavailable: "opacity-30 line-through text-muted-foreground",
+                  onVacation:
+                    "ring-2 ring-orange-400/80 dark:ring-orange-500 ring-offset-2 ring-offset-background rounded-full",
                 }}
                 className="rounded-md border max-w-full"
               />
@@ -817,6 +848,9 @@ export default function StudentWorkoutsPage() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-full bg-muted border inline-block" /> Indisponível
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full border-2 border-orange-400 dark:border-orange-500 inline-block" /> Férias
                 </span>
               </div>
 
@@ -872,12 +906,14 @@ export default function StudentWorkoutsPage() {
                     {selectedDate.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
                   </CardTitle>
                   <CardDescription>
-                    {isSelectedDayAvailable
+                    {showStudentDaySchedule
                       ? `${timeSlots.length} blocos de ${slotDurationMin} min · sessão ${slotsNeeded * slotDurationMin} min`
-                      : "Sem disponibilidade neste dia"}
+                      : selectedDayOnVacation
+                        ? "Treinador de férias"
+                        : "Sem disponibilidade neste dia"}
                   </CardDescription>
                 </div>
-                {isSelectedDayAvailable && selectedDaySched && (
+                {showStudentDaySchedule && selectedDaySched && (
                   <div className="flex flex-wrap gap-1 mt-1 justify-end">
                     {selectedDaySched.ranges.map((r,i) => (
                       <Badge key={i} variant="outline" className="text-xs shrink-0">
@@ -889,10 +925,14 @@ export default function StudentWorkoutsPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {!isSelectedDayAvailable ? (
+              {!showStudentDaySchedule ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-3 text-center text-muted-foreground">
                   <Clock className="h-12 w-12 opacity-20" />
-                  <p>O treinador não tem disponibilidade neste dia.</p>
+                  <p>
+                    {selectedDayOnVacation
+                      ? "O treinador está de férias neste dia."
+                      : "O treinador não tem disponibilidade neste dia."}
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-[560px] overflow-y-auto pr-1">
@@ -1049,7 +1089,7 @@ export default function StudentWorkoutsPage() {
                           <Button size="sm"
                             className="shrink-0 h-8 gap-1.5 text-xs bg-primary/90"
                             onClick={() => handleToggleSlot(time)}
-                            disabled={!!isLoading_ || !canBookMore}>
+                            disabled={!!isLoading_ || !canBookMore || selectedDayOnVacation}>
                             {isLoading_
                               ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                               : <UserPlus className="h-3.5 w-3.5" />}

@@ -14,6 +14,7 @@ import {
   type ShopCatalogItem,
   type ShopLine,
 } from "./shop-billing";
+import { maySyncFuturePaymentPeriod } from "./lisbon-billing-window";
 
 const db = getFirestore();
 
@@ -68,8 +69,13 @@ export async function syncShopPaymentForPeriod(
   trainerId: string,
   authStudentId: string,
   paymentPeriod: string,
-  shopSourcePeriod?: string
+  shopSourcePeriod?: string,
+  options?: { createSource?: string; bypassBillingWindow?: boolean }
 ): Promise<void> {
+  if (!options?.bypassBillingWindow && !maySyncFuturePaymentPeriod(paymentPeriod)) {
+    return;
+  }
+
   const rosterStudentId = await resolveRosterStudentId(trainerId, authStudentId);
   const rosterRef = db.collection("personalTrainers").doc(trainerId).collection("students").doc(rosterStudentId);
   const rosterSnap = await rosterRef.get();
@@ -145,7 +151,7 @@ export async function syncShopPaymentForPeriod(
   await paymentsCol.add({
     ...paymentPayload,
     createdAt: nowIso,
-    source: "shop_sync",
+    source: options?.createSource ?? "shop_sync",
   });
 }
 

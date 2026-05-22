@@ -112,13 +112,7 @@ import {
   fetchShopRegistrationsForPeriodCandidates,
   resolveShopRegistrationStudentIds,
 } from "@/lib/fetch-shop-registrations";
-import { callSyncShopPayment } from "@/lib/sync-shop-payment-client";
-import {
-  currentBillingPeriod,
-  ensurePendingPaymentForCurrentPeriod,
-  ensurePendingPaymentForNextPeriodIfWindow,
-  nextBillingPeriod,
-} from "@/lib/roster-payment-status";
+import { currentBillingPeriod, nextBillingPeriod } from "@/lib/roster-payment-status";
 import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import {
@@ -331,15 +325,6 @@ function BillingTab({
   }, [rosterData, billingConfigInitDone]);
 
   useEffect(() => {
-    if (!db || !user || !studentId || !rosterData) return;
-    if (String((rosterData as Record<string, unknown>).billingStatus ?? "").trim().toLowerCase() !== "active") {
-      return;
-    }
-    void ensurePendingPaymentForCurrentPeriod(db, user.uid, studentId);
-    void ensurePendingPaymentForNextPeriodIfWindow(db, user.uid, studentId);
-  }, [db, user, studentId, rosterData]);
-
-  useEffect(() => {
     if (!db || !user?.uid || !shopAuthStudentId) {
       setShopCatalogMap(new Map());
       setShopRegs([]);
@@ -388,18 +373,6 @@ function BillingTab({
       cancelled = true;
     };
   }, [db, user?.uid, shopAuthStudentId, studentId, globalStudentUid, currentShopPeriod]);
-
-  useEffect(() => {
-    if (!user?.uid || !shopAuthStudentId || !rosterData) return;
-    if (String((rosterData as Record<string, unknown>).billingStatus ?? "").trim().toLowerCase() !== "active") {
-      return;
-    }
-    void callSyncShopPayment(user.uid, shopAuthStudentId, nextPaymentPeriod, currentShopPeriod).catch(
-      (e) => {
-        console.error("auto sync shop payment", e);
-      }
-    );
-  }, [user?.uid, shopAuthStudentId, rosterData, nextPaymentPeriod, currentShopPeriod]);
 
   const handleSaveBillingConfig = () => {
     if (!db || !user) return;

@@ -114,6 +114,17 @@ const translations = {
     sessionsStreakCompact: "sess. streak",
     studentsCardDescription:
       "Your roster on the dashboard. Filter by name or payment; open directory for everyone on the student portal.",
+    dashboardCreateNextPeriodPayments: "Create {period} payments",
+    dashboardRemoveNextPeriodPayments: "Remove {period} payments",
+    dashboardNextPeriodCreateConfirmTitle: "Create next-month payments?",
+    dashboardNextPeriodCreateConfirmDescription:
+      "Create or update pending payment rows for {period} for all active students on your roster (membership + shop from the prior month).",
+    dashboardNextPeriodRemoveConfirmTitle: "Remove next-month payments?",
+    dashboardNextPeriodRemoveConfirmDescription:
+      "Delete pending payment rows for {period} for all students on your roster. Paid rows are not removed.",
+    dashboardNextPeriodCreateSuccess: "Created or updated {processed} payment(s) for {period}.",
+    dashboardNextPeriodRemoveSuccess: "Removed {deleted} pending payment(s) for {period}.",
+    dashboardNextPeriodBulkFailed: "Could not complete the bulk payment action.",
     filterAll: "All",
     dashboardRosterPaymentFilter: "Payment",
     workoutDetails: "Workout Details",
@@ -1039,6 +1050,17 @@ const translations = {
     sessionsStreakCompact: "sess. seguidas",
     studentsCardDescription:
       "A tua lista no painel. Filtra por nome ou pagamento; abre o diretório para todos os alunos do portal.",
+    dashboardCreateNextPeriodPayments: "Criar pagamentos {period}",
+    dashboardRemoveNextPeriodPayments: "Remover pagamentos {period}",
+    dashboardNextPeriodCreateConfirmTitle: "Criar pagamentos do próximo mês?",
+    dashboardNextPeriodCreateConfirmDescription:
+      "Cria ou atualiza linhas pendentes para {period} em todos os alunos ativos do teu plantel (mensalidade + loja do mês anterior).",
+    dashboardNextPeriodRemoveConfirmTitle: "Remover pagamentos do próximo mês?",
+    dashboardNextPeriodRemoveConfirmDescription:
+      "Elimina pagamentos pendentes de {period} para todos os alunos do plantel. Pagamentos já marcados como pagos não são removidos.",
+    dashboardNextPeriodCreateSuccess: "Criados ou atualizados {processed} pagamento(s) para {period}.",
+    dashboardNextPeriodRemoveSuccess: "Removidos {deleted} pagamento(s) pendentes de {period}.",
+    dashboardNextPeriodBulkFailed: "Não foi possível concluir a ação em massa.",
     filterAll: "Todos",
     dashboardRosterPaymentFilter: "Pagamento",
     workoutDetails: "Detalhes do Treino",
