@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Banknote, Dumbbell } from "lucide-react";
+import { Banknote, Dumbbell, ShoppingBag, Receipt } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useDoc, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, doc, getDocs } from "firebase/firestore";
@@ -19,11 +19,26 @@ import {
   computeShopTotalForStudentPeriod,
   paymentHasShopBreakdown,
   resolveMonthlyRate,
+  summarizeShopRegistrationsForPeriod,
   type ShopLine,
 } from "@/lib/shop-billing";
 import { useEffect, useMemo, useState } from "react";
 
 type ShopItemRow = { id: string; name?: string; price?: number; active?: boolean };
+
+function formatPeriodLabel(period: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(period.trim());
+  if (!m) return period;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function formatYmdDisplay(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return ymd;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
 
 export default function StudentBillingPage() {
   const { t } = useI18n();
@@ -102,6 +117,11 @@ export default function StudentBillingPage() {
     [monthRegs, catalogMap, currentPeriod]
   );
 
+  const monthSummary = useMemo(
+    () => summarizeShopRegistrationsForPeriod(monthRegs, catalogMap, currentPeriod),
+    [monthRegs, catalogMap, currentPeriod]
+  );
+
   useEffect(() => {
     if (!db || !trainerId || !user?.uid) {
       setShopItems([]);
@@ -175,192 +195,235 @@ export default function StudentBillingPage() {
     method === "mbway" ? "MB WAY" : method === "bank_transfer" ? "Bank Transfer" : method || "—";
 
   return (
-    <div className="space-y-6 w-full min-w-0">
-      <header>
-        <h1 className="text-3xl font-bold font-headline">{t("billing")}</h1>
-        <p className="text-muted-foreground">{t("viewPaymentStatus")}</p>
+    <div className="space-y-6 w-full min-w-0 max-w-2xl">
+      <header className="flex items-center gap-3">
+        <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-primary/10 shrink-0">
+          <Receipt className="h-5 w-5 text-primary" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold font-headline">{t("billing")}</h1>
+          <p className="text-sm text-muted-foreground">{t("viewPaymentStatus")}</p>
+        </div>
       </header>
 
+      {/* Current period summary */}
       {hasPlanInfo && (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="pt-6 pb-6">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 shrink-0">
-                <Dumbbell className="h-6 w-6 text-primary" />
+        <Card className="overflow-hidden">
+          <div className="bg-primary/5 border-b px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 shrink-0">
+                <Dumbbell className="h-5 w-5 text-primary" />
               </div>
-              <div className="flex-1 space-y-1">
-                <p className="text-xs text-muted-foreground uppercase font-bold tracking-wide">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
                   {t("currentPlan") || "Plano Atual"}
                 </p>
-                <p className="text-xl font-bold">
+                <p className="font-semibold">
                   {sessionsPerWeek ? `${sessionsPerWeek}x ${t("perWeek") || "por semana"}` : ""}
                   {sessionsPerWeek && sessionDurationMin ? " · " : ""}
                   {sessionDurationMin ? `${sessionDurationMin} min` : ""}
                 </p>
               </div>
-              <div className="text-center sm:text-right shrink-0 space-y-1">
-                <p className="text-xs text-muted-foreground uppercase font-bold tracking-wide">
-                  {t("shopBillingTotal")}
-                </p>
-                {currentPeriodIsPaid ? (
-                  <p className="text-2xl font-bold text-primary">€0.00</p>
-                ) : totalDue > 0 ? (
-                  <p className="text-2xl font-bold text-primary">€{totalDue.toFixed(2)}</p>
-                ) : (
-                  <p className="text-2xl font-bold text-primary">{t("notSet")}</p>
-                )}
-                {shopAmount > 0 && !currentPeriodIsPaid && totalDue > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    {t("shopBillingMembership")}: €{baseAmount.toFixed(2)} · {t("shopBillingShop")}: €
-                    {shopAmount.toFixed(2)}
-                  </p>
-                )}
-                {monthShopTotal > 0 && !currentPeriodIsPaid && (
-                  <p className="text-xs text-muted-foreground">
-                    {t("shopBillingAppliedToNext")
-                      .replace("{amount}", monthShopTotal.toFixed(2))
-                      .replace("{period}", nextPaymentPeriod)}
-                  </p>
-                )}
-                {currentPeriodIsPaid && (
-                  <p className="text-xs text-muted-foreground">{t("paid")}</p>
-                )}
+            </div>
+            <div className="sm:text-right shrink-0">
+              <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
+                {t("shopBillingTotal")}
+              </p>
+              <p className="text-3xl font-bold text-primary tabular-nums">
+                {currentPeriodIsPaid ? "€0.00" : totalDue > 0 ? `€${totalDue.toFixed(2)}` : t("notSet")}
+              </p>
+              {currentPeriodIsPaid && (
+                <p className="text-xs text-green-600 font-medium">{t("paid")}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Cost breakdown rows */}
+          <CardContent className="p-0">
+            <div className="divide-y">
+              {/* Membership row */}
+              <div className="flex items-center justify-between px-6 py-3">
+                <div className="flex items-center gap-2">
+                  <Dumbbell className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-sm">{t("shopBillingMembership")}</span>
+                </div>
+                <span className="text-sm font-medium tabular-nums">
+                  {baseAmount > 0 ? `€${baseAmount.toFixed(2)}` : resolvedMonthlyRate > 0 ? `€${resolvedMonthlyRate.toFixed(2)}` : "—"}
+                </span>
+              </div>
+              {/* Shop row */}
+              <div className="flex items-center justify-between px-6 py-3">
+                <div className="flex items-center gap-2">
+                  <ShoppingBag className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-sm">{t("shopBillingShop")} · {formatPeriodLabel(currentPeriod)}</span>
+                </div>
+                <span className="text-sm font-medium tabular-nums">
+                  {shopAmount > 0 ? `€${shopAmount.toFixed(2)}` : monthShopTotal > 0 ? `€${monthShopTotal.toFixed(2)}` : "€0.00"}
+                </span>
               </div>
             </div>
+            {monthShopTotal > 0 && !currentPeriodIsPaid && (
+              <div className="px-6 pb-3">
+                <p className="text-xs text-muted-foreground">
+                  {t("shopBillingAppliedToNext")
+                    .replace("{amount}", monthShopTotal.toFixed(2))
+                    .replace("{period}", nextPaymentPeriod)}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
 
+      {/* Payment instructions */}
       {typeof billing?.paymentDetails === "string" && billing.paymentDetails.trim() && (
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-3">
             <CardTitle className="text-sm">{t("paymentInstructionsTitle")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="p-4 rounded-lg bg-muted/50 border text-sm whitespace-pre-wrap">
+            <div className="p-4 rounded-xl bg-muted/40 border text-sm whitespace-pre-wrap">
               {billing.paymentDetails}
             </div>
           </CardContent>
         </Card>
       )}
 
+      {/* Shop purchases this month */}
       <Card>
-        <CardHeader>
-          <CardTitle>{t("paymentHistory")}</CardTitle>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <ShoppingBag className="h-4 w-4 text-muted-foreground" />
+                {t("shopBillingPurchases")}
+              </CardTitle>
+              <CardDescription className="text-xs mt-0.5">
+                {formatPeriodLabel(currentPeriod)}
+              </CardDescription>
+            </div>
+            {monthSummary.monthShopTotal > 0 && (
+              <span className="rounded-full bg-accent/10 px-3 py-1 text-sm font-semibold text-accent tabular-nums shrink-0">
+                €{monthSummary.monthShopTotal.toFixed(2)}
+              </span>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {monthSummary.entries.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              {t("shopBillingNoPurchases")}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {monthSummary.entries.map((entry) => {
+                const reg = monthRegs.find((r) => String(r.date ?? "") === entry.date);
+                const lines = (reg?.lines ?? []).filter((l) => {
+                  const qty = Math.floor(Number(l.quantity) || 0);
+                  return qty > 0 && catalogMap.get(l.itemId);
+                });
+                return (
+                  <div key={entry.date} className="rounded-xl border bg-muted/20 overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-muted/40 border-b">
+                      <p className="text-sm font-semibold">{formatYmdDisplay(entry.date)}</p>
+                      <span className="text-sm font-bold tabular-nums">€{entry.dayTotal.toFixed(2)}</span>
+                    </div>
+                    <div className="divide-y">
+                      {lines.map((line) => {
+                        const item = catalogMap.get(line.itemId);
+                        const qty = Math.floor(Number(line.quantity) || 0);
+                        const lineTotal = Number(item?.price ?? 0) * qty;
+                        return (
+                          <div key={line.itemId} className="flex items-center justify-between gap-3 px-4 py-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[10px] font-bold text-accent">
+                                {qty}
+                              </span>
+                              <span className="text-sm truncate">{item?.name ?? line.itemId}</span>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0 text-xs text-muted-foreground tabular-nums">
+                              <span>€{Number(item?.price ?? 0).toFixed(2)} × {qty}</span>
+                              <span className="font-semibold text-foreground">€{lineTotal.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Payment history */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2">
+            <Banknote className="h-4 w-4 text-muted-foreground" />
+            {t("paymentHistory")}
+          </CardTitle>
           <CardDescription>{t("paymentsRecordedByCoach")}</CardDescription>
         </CardHeader>
         <CardContent>
           {sortedPayments.length > 0 ? (
-            <>
-              <div className="md:hidden space-y-3">
-                {sortedPayments.map((p: any) => (
-                  <div
-                    key={p.id}
-                    className="rounded-lg border bg-card/50 p-4 space-y-3 text-sm min-w-0"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2 gap-y-1">
-                      <div className="min-w-0">
-                        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
-                          {t("period")}
-                        </p>
-                        <p className="font-semibold break-words">{p.period || "—"}</p>
+            <div className="flex flex-col gap-3">
+              {sortedPayments.map((p: any) => {
+                const isPaid = normalizedPaymentPaid(p.status);
+                const isPending = normalizedPaymentPending(p.status);
+                return (
+                  <div key={p.id} className="rounded-xl border bg-muted/20 overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 bg-muted/40 border-b">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold">{formatPeriodLabel(p.period) || p.period || "—"}</p>
+                        <Badge
+                          variant={isPaid ? "default" : "outline"}
+                          className={
+                            isPaid
+                              ? "bg-green-100 text-green-800 normal-case text-[10px] px-1.5 py-0"
+                              : isPending
+                                ? "bg-yellow-100 text-yellow-800 normal-case text-[10px] px-1.5 py-0"
+                                : "text-[10px] px-1.5 py-0"
+                          }
+                        >
+                          {isPaid ? t("paid") : isPending ? t("pending") : String(p.status ?? "—")}
+                        </Badge>
                       </div>
-                      <p className="text-lg font-bold text-primary shrink-0">€{p.amount || 0}</p>
+                      <span className="text-base font-bold tabular-nums">€{Number(p.amount ?? 0).toFixed(2)}</span>
                     </div>
-                    {paymentHasShopBreakdown(p) && (
-                      <p className="text-xs text-muted-foreground">
-                        {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)} ·{" "}
-                        {t("shopBillingShop")}: €{Number(p.shopAmount ?? 0).toFixed(2)}
-                      </p>
-                    )}
-                    <div className="grid grid-cols-1 gap-2 text-xs sm:text-sm">
-                      <div>
-                        <p className="text-muted-foreground">{t("method")}</p>
-                        <p className="capitalize break-words">{paymentMethodLabel(p.method)}</p>
+                    <div className="divide-y">
+                      {paymentHasShopBreakdown(p) && (
+                        <>
+                          <div className="flex items-center justify-between px-4 py-2 text-sm">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Dumbbell className="h-3.5 w-3.5" />
+                              <span>{t("shopBillingMembership")}</span>
+                            </div>
+                            <span className="tabular-nums">€{Number(p.baseAmount ?? 0).toFixed(2)}</span>
+                          </div>
+                          <div className="flex items-center justify-between px-4 py-2 text-sm">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <ShoppingBag className="h-3.5 w-3.5" />
+                              <span>{t("shopBillingShop")}</span>
+                            </div>
+                            <span className="tabular-nums">€{Number(p.shopAmount ?? 0).toFixed(2)}</span>
+                          </div>
+                        </>
+                      )}
+                      <div className="flex items-center justify-between px-4 py-2 text-sm text-muted-foreground">
+                        <span>{t("method")}</span>
+                        <span className="capitalize">{paymentMethodLabel(p.method)}</span>
                       </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-muted-foreground">{t("status")}</p>
-                          <Badge
-                            variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
-                            className={
-                              normalizedPaymentPaid(p.status)
-                                ? "bg-green-100 text-green-800 normal-case mt-1"
-                                : normalizedPaymentPending(p.status)
-                                  ? "bg-yellow-100 text-yellow-800 normal-case mt-1"
-                                  : "mt-1"
-                            }
-                          >
-                            {normalizedPaymentPaid(p.status)
-                              ? t("paid")
-                              : normalizedPaymentPending(p.status)
-                                ? t("pending")
-                                : String(p.status ?? "—")}
-                          </Badge>
-                        </div>
-                        <div className="text-right min-w-0">
-                          <p className="text-muted-foreground">{t("datePaid")}</p>
-                          <p className="font-medium">
-                            {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}
-                          </p>
-                        </div>
+                      <div className="flex items-center justify-between px-4 py-2 text-sm text-muted-foreground">
+                        <span>{t("datePaid")}</span>
+                        <span>{p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}</span>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-              <div className="hidden md:block w-full min-w-0 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("period")}</TableHead>
-                      <TableHead>{t("amount")}</TableHead>
-                      <TableHead>{t("method")}</TableHead>
-                      <TableHead>{t("status")}</TableHead>
-                      <TableHead>{t("datePaid")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedPayments.map((p: any) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.period || "—"}</TableCell>
-                        <TableCell>
-                          <div>€{p.amount || 0}</div>
-                          {paymentHasShopBreakdown(p) && (
-                            <p className="text-xs text-muted-foreground font-normal">
-                              {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)} ·{" "}
-                              {t("shopBillingShop")}: €{Number(p.shopAmount ?? 0).toFixed(2)}
-                            </p>
-                          )}
-                        </TableCell>
-                        <TableCell className="capitalize">{paymentMethodLabel(p.method)}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
-                            className={
-                              normalizedPaymentPaid(p.status)
-                                ? "bg-green-100 text-green-800 normal-case"
-                                : normalizedPaymentPending(p.status)
-                                  ? "bg-yellow-100 text-yellow-800 normal-case"
-                                  : ""
-                            }
-                          >
-                            {normalizedPaymentPaid(p.status)
-                              ? t("paid")
-                              : normalizedPaymentPending(p.status)
-                                ? t("pending")
-                                : String(p.status ?? "—")}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
+                );
+              })}
+            </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <Banknote className="h-8 w-8 mx-auto mb-2 opacity-20" />
