@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -36,6 +36,7 @@ import {
   ChevronUp,
   Scale,
   ListOrdered,
+  GripVertical,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
@@ -58,7 +59,23 @@ import {
   where,
   getDocs,
   limit,
+  writeBatch,
 } from "firebase/firestore";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -130,8 +147,11 @@ function getAssignedWorkoutTimestamp(plan: any): number {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
-/** Management tab: sequence steps by index within group; sequence groups before loose plans; else by assign time. */
+/** Management tab: manual sort order first (when set), then sequence steps by index within group; sequence groups before loose plans; else by assign time. */
 function compareActiveAssignedPlans(a: any, b: any): number {
+  const ma = a.manualSortOrder ?? Infinity;
+  const mb = b.manualSortOrder ?? Infinity;
+  if (ma !== mb) return ma - mb;
   const ga = a.sequenceGroupId ? String(a.sequenceGroupId) : "";
   const gb = b.sequenceGroupId ? String(b.sequenceGroupId) : "";
   if (ga && gb) {
@@ -907,6 +927,189 @@ const STUDENT_DETAIL_TABS = [
 ] as const;
 type StudentDetailTab = (typeof STUDENT_DETAIL_TABS)[number];
 
+interface SortableWorkoutPlanItemProps {
+  plan: any;
+  completedWorkoutPlanIds: Set<string>;
+  expandedAssignedPlanId: string | null;
+  setExpandedAssignedPlanId: React.Dispatch<React.SetStateAction<string | null>>;
+  portalOnly: boolean;
+  deletingWorkoutPlanId: string | null;
+  setConfirmDeletePlanId: (id: string) => void;
+  editingAssignedExerciseKey: string | null;
+  setEditingAssignedExerciseKey: (key: string | null) => void;
+  editingAssignedExerciseNote: string;
+  setEditingAssignedExerciseNote: (note: string) => void;
+  isSavingAssignedExerciseNote: boolean;
+  handleSaveAssignedExerciseNote: (plan: any, index: number, note: string) => void;
+  t: (key: string) => string;
+}
+
+function SortableWorkoutPlanItem({
+  plan,
+  completedWorkoutPlanIds,
+  expandedAssignedPlanId,
+  setExpandedAssignedPlanId,
+  portalOnly,
+  deletingWorkoutPlanId,
+  setConfirmDeletePlanId,
+  editingAssignedExerciseKey,
+  setEditingAssignedExerciseKey,
+  editingAssignedExerciseNote,
+  setEditingAssignedExerciseNote,
+  isSavingAssignedExerciseNote,
+  handleSaveAssignedExerciseNote,
+  t,
+}: SortableWorkoutPlanItemProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: plan.id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="border rounded-lg bg-background">
+      <div className="p-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground shrink-0 touch-none p-0.5 -ml-0.5 rounded hover:text-foreground"
+            aria-label="Reorder"
+            tabIndex={-1}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          <Dumbbell className="h-4 w-4 text-primary shrink-0" />
+          <div className="min-w-0">
+            <span className="text-sm font-medium block truncate">{plan.title || "Untitled"}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          {plan.sequenceGroupId ? (
+            <Badge
+              variant={
+                isSequenceStepEffectiveUnlocked(plan, completedWorkoutPlanIds)
+                  ? "outline"
+                  : "destructive"
+              }
+            >
+              {isSequenceStepEffectiveUnlocked(plan, completedWorkoutPlanIds)
+                ? t("sequenceUnlockedBadge")
+                : t("sequenceLockedBadge")}
+            </Badge>
+          ) : null}
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            onClick={() =>
+              setExpandedAssignedPlanId((current) => (current === plan.id ? null : plan.id))
+            }
+            title="Expand details"
+          >
+            {expandedAssignedPlanId === plan.id ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={() => setConfirmDeletePlanId(plan.id)}
+            disabled={portalOnly || deletingWorkoutPlanId === plan.id}
+          >
+            {deletingWorkoutPlanId === plan.id ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {expandedAssignedPlanId === plan.id && (
+        <div className="px-3 pb-3 border-t bg-muted/10">
+          <div className="pt-3 space-y-2">
+            {(plan.exercises || []).length > 0 ? (
+              (plan.exercises || []).map((exercise: any, index: number) => (
+                <div key={index} className="rounded-md border bg-background p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">
+                      {exercise.exerciseName || exercise.name || `Exercise ${index + 1}`}
+                    </p>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 text-muted-foreground hover:text-primary shrink-0"
+                      onClick={() => {
+                        const noteKey = `${plan.id}-${index}`;
+                        setEditingAssignedExerciseKey(noteKey);
+                        setEditingAssignedExerciseNote(String(exercise.notes || ""));
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {editingAssignedExerciseKey === `${plan.id}-${index}` ? (
+                    <div className="space-y-2 mt-2">
+                      <Textarea
+                        value={editingAssignedExerciseNote}
+                        onChange={(event) => setEditingAssignedExerciseNote(event.target.value)}
+                        rows={3}
+                        className="text-xs"
+                        placeholder={t("placeholderAssignedExerciseNote")}
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs gap-1.5"
+                          onClick={() =>
+                            handleSaveAssignedExerciseNote(plan, index, editingAssignedExerciseNote)
+                          }
+                          disabled={isSavingAssignedExerciseNote}
+                        >
+                          {isSavingAssignedExerciseNote ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Save className="h-3 w-3" />
+                          )}
+                          {t("save")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            setEditingAssignedExerciseKey(null);
+                            setEditingAssignedExerciseNote("");
+                          }}
+                        >
+                          {t("cancel")}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
+                      {exercise.notes || (
+                        <span className="italic">No notes yet. Click pencil to edit.</span>
+                      )}
+                    </p>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">{t("noExercisesDefined")}</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StudentDetailPage({ id }: { id: string }) {
   const { user } = useUser();
   const db = useFirestore();
@@ -956,6 +1159,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
     goalType: "",
   });
   const [expandedAssignedPlanId, setExpandedAssignedPlanId] = useState<string | null>(null);
+  const [localPlanOrder, setLocalPlanOrder] = useState<string[] | null>(null);
   const [editingAssignedExerciseKey, setEditingAssignedExerciseKey] = useState<string | null>(null);
   const [editingAssignedExerciseNote, setEditingAssignedExerciseNote] = useState("");
   const [isSavingAssignedExerciseNote, setIsSavingAssignedExerciseNote] = useState(false);
@@ -971,6 +1175,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [clearStudentPlansConfirm, setClearStudentPlansConfirm] = useState("");
   const [isClearingStudentPlans, setIsClearingStudentPlans] = useState(false);
   const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
+  const [coachingNotesOpen, setCoachingNotesOpen] = useState(false);
+  const [goalsOpen, setGoalsOpen] = useState(false);
 
   const studentRef = useMemoFirebase(() => {
     if (!db || !user || !id) return null;
@@ -1183,6 +1389,16 @@ export default function StudentDetailPage({ id }: { id: string }) {
       .sort(compareActiveAssignedPlans);
   }, [workoutPlans, workoutSessions]);
 
+  const displayedPlans = useMemo(() => {
+    if (!localPlanOrder) return sortedWorkoutPlans;
+    const byId = new Map(sortedWorkoutPlans.map((p: any) => [p.id, p]));
+    return localPlanOrder.map((planId) => byId.get(planId)).filter(Boolean);
+  }, [localPlanOrder, sortedWorkoutPlans]);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
   useEffect(() => {
     const expand = searchParams.get("expandPlan")?.trim();
     const tab = searchParams.get("tab");
@@ -1375,9 +1591,26 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const handleDeleteWorkoutPlan = async (planId: string) => {
     if (!db || !user) return;
 
+    // Compute the new first plan before removal so we can unlock it if needed
+    const remaining = displayedPlans.filter((p: any) => p.id !== planId);
+    const newFirst = remaining[0] as any | undefined;
+
     setDeletingWorkoutPlanId(planId);
     try {
       await deleteSequencePlanWithChainRepair(db, user.uid, id, planId);
+
+      // After deletion, the chain-repair only knows about sequenceNextPlanId (original order).
+      // After a manual reorder the new display-first may differ — unlock it explicitly.
+      if (newFirst?.id && newFirst.sequenceGroupId && newFirst.studentUnlocked === false) {
+        await updateDoc(
+          doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", newFirst.id),
+          { studentUnlocked: true }
+        );
+      }
+
+      // Keep localPlanOrder consistent so subsequent drags use the correct id list
+      setLocalPlanOrder((prev) => (prev ? prev.filter((pid) => pid !== planId) : null));
+
       toast({ title: t("assignedWorkoutRemoved") });
     } catch (error: any) {
       toast({
@@ -1416,6 +1649,23 @@ export default function StudentDetailPage({ id }: { id: string }) {
       setIsClearingStudentPlans(false);
     }
   }, [db, user, clearStudentPlansConfirm, studentAssignmentCandidateIds, t, toast]);
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !db || !user) return;
+    const ids = (localPlanOrder ?? sortedWorkoutPlans.map((p: any) => p.id)) as string[];
+    const oldIndex = ids.indexOf(active.id as string);
+    const newIndex = ids.indexOf(over.id as string);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const newOrder = arrayMove(ids, oldIndex, newIndex);
+    setLocalPlanOrder(newOrder);
+    const batch = writeBatch(db);
+    newOrder.forEach((planId, idx) => {
+      const planRef = doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", planId);
+      batch.update(planRef, { manualSortOrder: idx, studentUnlocked: idx === 0 });
+    });
+    await batch.commit();
+  };
 
   const handleSaveAssignedExerciseNote = async (
     plan: any,
@@ -1483,6 +1733,27 @@ export default function StudentDetailPage({ id }: { id: string }) {
       });
     }
   }, [effectiveRoster, globalStudent]);
+
+  const coachingNotesSummary = useMemo(() => {
+    const text = coachingNotes.trim();
+    if (!text) return "—";
+    const oneLine = text.replace(/\s+/g, " ");
+    return oneLine.length > 72 ? `${oneLine.slice(0, 72)}…` : oneLine;
+  }, [coachingNotes]);
+
+  const goalsSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (editStats.goalWeightKg.trim()) {
+      parts.push(`${editStats.goalWeightKg} kg`);
+    }
+    if (editStats.goalBodyFatPercent.trim()) {
+      parts.push(`${editStats.goalBodyFatPercent}%`);
+    }
+    if (editStats.goalType.trim()) {
+      parts.push(editStats.goalType.trim());
+    }
+    return parts.length > 0 ? parts.join(" · ") : "—";
+  }, [editStats]);
 
   const handleAddToRoster = () => {
     if (!db || !user || !globalStudent || !id) return;
@@ -2201,32 +2472,52 @@ export default function StudentDetailPage({ id }: { id: string }) {
             <div className="grid lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-6">
                 <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <TrendingDown className="h-5 w-5 text-primary" />
-                      {t("trainerNotes")}
-                    </CardTitle>
-                    <CardDescription>{t("privateNotes")}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Textarea 
-                      placeholder={t("placeholderCoachingNotes")}
-                      className="min-h-[250px] text-base leading-relaxed"
-                      value={coachingNotes}
-                      onChange={(e) => setCoachingNotes(e.target.value)}
-                      disabled={portalOnly}
-                    />
-                  </CardContent>
-                  <CardFooter className="bg-muted/5 border-t">
-                    <Button 
-                      className="gap-2 ml-auto" 
-                      onClick={handleUpdateStudent}
-                      disabled={isSaving || portalOnly}
-                    >
-                      {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                      {t("saveCoachingNotes")}
-                    </Button>
-                  </CardFooter>
+                  <Collapsible open={coachingNotesOpen} onOpenChange={setCoachingNotesOpen}>
+                    <CardHeader className="pb-3">
+                      <CollapsibleTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex w-full min-w-0 items-start gap-2 rounded-md text-left outline-none ring-offset-background hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring -m-1 p-1"
+                        >
+                          <TrendingDown className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <CardTitle className="text-base">{t("trainerNotes")}</CardTitle>
+                            {coachingNotesOpen ? (
+                              <CardDescription>{t("privateNotes")}</CardDescription>
+                            ) : (
+                              <p className="text-sm text-muted-foreground truncate">{coachingNotesSummary}</p>
+                            )}
+                          </div>
+                          {coachingNotesOpen ? (
+                            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground mt-1" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground mt-1" />
+                          )}
+                        </button>
+                      </CollapsibleTrigger>
+                    </CardHeader>
+                    <CollapsibleContent>
+                      <CardContent className="pt-0">
+                        <Textarea
+                          placeholder={t("placeholderCoachingNotes")}
+                          className="min-h-[250px] text-base leading-relaxed"
+                          value={coachingNotes}
+                          onChange={(e) => setCoachingNotes(e.target.value)}
+                          disabled={portalOnly}
+                        />
+                      </CardContent>
+                      <CardFooter className="bg-muted/5 border-t">
+                        <Button
+                          className="gap-2 ml-auto"
+                          onClick={handleUpdateStudent}
+                          disabled={isSaving || portalOnly}
+                        >
+                          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                          {t("saveCoachingNotes")}
+                        </Button>
+                      </CardFooter>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </Card>
 
                 <Card className="bg-primary/5 border-primary/20">
@@ -2358,143 +2649,37 @@ export default function StudentDetailPage({ id }: { id: string }) {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {sortedWorkoutPlans.length > 0 ? (
-                      sortedWorkoutPlans.map((plan: any) => (
-                        <div key={plan.id} className="border rounded-lg bg-background">
-                          <div className="p-3 flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Dumbbell className="h-4 w-4 text-primary shrink-0" />
-                              <div className="min-w-0">
-                                <span className="text-sm font-medium block truncate">{plan.title || "Untitled"}</span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                              {plan.sequenceGroupId ? (
-                                <Badge
-                                  variant={
-                                    isSequenceStepEffectiveUnlocked(plan, completedWorkoutPlanIds)
-                                      ? "outline"
-                                      : "destructive"
-                                  }
-                                >
-                                  {isSequenceStepEffectiveUnlocked(plan, completedWorkoutPlanIds)
-                                    ? t("sequenceUnlockedBadge")
-                                    : t("sequenceLockedBadge")}
-                                </Badge>
-                              ) : null}
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8"
-                                onClick={() =>
-                                  setExpandedAssignedPlanId((current) => (current === plan.id ? null : plan.id))
-                                }
-                                title="Expand details"
-                              >
-                                {expandedAssignedPlanId === plan.id ? (
-                                  <ChevronUp className="h-4 w-4" />
-                                ) : (
-                                  <ChevronDown className="h-4 w-4" />
-                                )}
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => setConfirmDeletePlanId(plan.id)}
-                                disabled={portalOnly || deletingWorkoutPlanId === plan.id}
-                              >
-                                {deletingWorkoutPlanId === plan.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-
-                          {expandedAssignedPlanId === plan.id && (
-                            <div className="px-3 pb-3 border-t bg-muted/10">
-                              <div className="pt-3 space-y-2">
-                                {(plan.exercises || []).length > 0 ? (
-                                  (plan.exercises || []).map((exercise: any, index: number) => (
-                                    <div key={index} className="rounded-md border bg-background p-2">
-                                      <div className="flex items-center justify-between gap-2">
-                                        <p className="text-sm font-medium">
-                                          {exercise.exerciseName || exercise.name || `Exercise ${index + 1}`}
-                                        </p>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-6 w-6 text-muted-foreground hover:text-primary shrink-0"
-                                          onClick={() => {
-                                            const noteKey = `${plan.id}-${index}`;
-                                            setEditingAssignedExerciseKey(noteKey);
-                                            setEditingAssignedExerciseNote(String(exercise.notes || ""));
-                                          }}
-                                        >
-                                          <Pencil className="h-3.5 w-3.5" />
-                                        </Button>
-                                      </div>
-                                      {editingAssignedExerciseKey === `${plan.id}-${index}` ? (
-                                        <div className="space-y-2 mt-2">
-                                          <Textarea
-                                            value={editingAssignedExerciseNote}
-                                            onChange={(event) => setEditingAssignedExerciseNote(event.target.value)}
-                                            rows={3}
-                                            className="text-xs"
-                                            placeholder={t("placeholderAssignedExerciseNote")}
-                                          />
-                                          <div className="flex gap-2">
-                                            <Button
-                                              size="sm"
-                                              className="h-7 text-xs gap-1.5"
-                                              onClick={() =>
-                                                handleSaveAssignedExerciseNote(
-                                                  plan,
-                                                  index,
-                                                  editingAssignedExerciseNote
-                                                )
-                                              }
-                                              disabled={isSavingAssignedExerciseNote}
-                                            >
-                                              {isSavingAssignedExerciseNote ? (
-                                                <Loader2 className="h-3 w-3 animate-spin" />
-                                              ) : (
-                                                <Save className="h-3 w-3" />
-                                              )}
-                                              {t("save")}
-                                            </Button>
-                                            <Button
-                                              size="sm"
-                                              variant="outline"
-                                              className="h-7 text-xs"
-                                              onClick={() => {
-                                                setEditingAssignedExerciseKey(null);
-                                                setEditingAssignedExerciseNote("");
-                                              }}
-                                            >
-                                              {t("cancel")}
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
-                                          {exercise.notes || (
-                                            <span className="italic">No notes yet. Click pencil to edit.</span>
-                                          )}
-                                        </p>
-                                      )}
-                                    </div>
-                                  ))
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">{t("noExercisesDefined")}</p>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))
+                    {displayedPlans.length > 0 ? (
+                      <DndContext
+                        sensors={dndSensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleDragEnd}
+                      >
+                        <SortableContext
+                          items={displayedPlans.map((p: any) => p.id)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          {displayedPlans.map((plan: any) => (
+                            <SortableWorkoutPlanItem
+                              key={plan.id}
+                              plan={plan}
+                              completedWorkoutPlanIds={completedWorkoutPlanIds}
+                              expandedAssignedPlanId={expandedAssignedPlanId}
+                              setExpandedAssignedPlanId={setExpandedAssignedPlanId}
+                              portalOnly={portalOnly}
+                              deletingWorkoutPlanId={deletingWorkoutPlanId}
+                              setConfirmDeletePlanId={setConfirmDeletePlanId}
+                              editingAssignedExerciseKey={editingAssignedExerciseKey}
+                              setEditingAssignedExerciseKey={setEditingAssignedExerciseKey}
+                              editingAssignedExerciseNote={editingAssignedExerciseNote}
+                              setEditingAssignedExerciseNote={setEditingAssignedExerciseNote}
+                              isSavingAssignedExerciseNote={isSavingAssignedExerciseNote}
+                              handleSaveAssignedExerciseNote={handleSaveAssignedExerciseNote}
+                              t={t}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
                     ) : (
                       <p className="text-sm text-muted-foreground">{t("noWorkoutsAssigned")}</p>
                     )}
@@ -2504,49 +2689,71 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
               <div className="space-y-6">
                 <Card>
-                  <CardHeader>
-                    <CardTitle>{t("adjustGoals")}</CardTitle>
-                    <CardDescription>{t("updateTargetMetrics")}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>{t("goalWeight")}</Label>
-                      <Input 
-                        type="number" 
-                        value={editStats.goalWeightKg}
-                        onChange={(e) => setEditStats({...editStats, goalWeightKg: e.target.value})}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>{t("goalBodyFatPercent")}</Label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min={0}
-                        max={100}
-                        value={editStats.goalBodyFatPercent}
-                        onChange={(e) =>
-                          setEditStats({ ...editStats, goalBodyFatPercent: e.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>{t("goalType")}</Label>
-                      <Input 
-                        placeholder="e.g. Muscle Gain"
-                        value={editStats.goalType}
-                        onChange={(e) => setEditStats({...editStats, goalType: e.target.value})}
-                      />
-                    </div>
-                    <Button 
-                      variant="outline" 
-                      className="w-full"
-                      onClick={handleUpdateStudent}
-                      disabled={isSaving || portalOnly}
-                    >
-                      {t("updateTargets")}
-                    </Button>
-                  </CardContent>
+                  <Collapsible open={goalsOpen} onOpenChange={setGoalsOpen}>
+                    <CardHeader className="pb-3">
+                      <CollapsibleTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex w-full min-w-0 items-start gap-2 rounded-md text-left outline-none ring-offset-background hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring -m-1 p-1"
+                        >
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <CardTitle className="text-base">{t("adjustGoals")}</CardTitle>
+                            {goalsOpen ? (
+                              <CardDescription>{t("updateTargetMetrics")}</CardDescription>
+                            ) : (
+                              <p className="text-sm text-muted-foreground truncate">{goalsSummary}</p>
+                            )}
+                          </div>
+                          {goalsOpen ? (
+                            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground mt-1" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground mt-1" />
+                          )}
+                        </button>
+                      </CollapsibleTrigger>
+                    </CardHeader>
+                    <CollapsibleContent>
+                      <CardContent className="space-y-4 pt-0">
+                        <div className="space-y-2">
+                          <Label>{t("goalWeight")}</Label>
+                          <Input
+                            type="number"
+                            value={editStats.goalWeightKg}
+                            onChange={(e) => setEditStats({ ...editStats, goalWeightKg: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>{t("goalBodyFatPercent")}</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min={0}
+                            max={100}
+                            value={editStats.goalBodyFatPercent}
+                            onChange={(e) =>
+                              setEditStats({ ...editStats, goalBodyFatPercent: e.target.value })
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>{t("goalType")}</Label>
+                          <Input
+                            placeholder="e.g. Muscle Gain"
+                            value={editStats.goalType}
+                            onChange={(e) => setEditStats({ ...editStats, goalType: e.target.value })}
+                          />
+                        </div>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={handleUpdateStudent}
+                          disabled={isSaving || portalOnly}
+                        >
+                          {t("updateTargets")}
+                        </Button>
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </Card>
               </div>
             </div>
