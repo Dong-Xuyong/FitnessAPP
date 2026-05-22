@@ -70,6 +70,16 @@ import {
 import { clearAllTrainerWorkoutPlans } from "@/lib/firestore/clear-trainer-assignments";
 import { cn } from "@/lib/utils";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
+import {
+  coachDayShowsSchedule,
+  dayIsWeeklyAvailable,
+  formatVacationPeriodRange,
+  isDateInVacation,
+  normalizeVacationPeriods,
+  upcomingVacationPeriods,
+  vacationPeriodsOverlap,
+  type VacationPeriod,
+} from "@/lib/trainer-availability";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -958,11 +968,16 @@ export default function AssignmentCalendarPage() {
 
   // Availability
   const [availability, setAvailability] = useState<Availability>(DEFAULT_AVAILABILITY);
+  const [vacationPeriods, setVacationPeriods] = useState<VacationPeriod[]>([]);
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [draft, setDraft] = useState<Availability>(DEFAULT_AVAILABILITY);
+  const [draftVacationPeriods, setDraftVacationPeriods] = useState<VacationPeriod[]>([]);
   const [isSavingAvailability, setIsSavingAvailability] = useState(false);
   const [applyAllStart, setApplyAllStart] = useState("");
   const [applyAllEnd, setApplyAllEnd] = useState("");
+  const [vacationDraftStart, setVacationDraftStart] = useState("");
+  const [vacationDraftEnd, setVacationDraftEnd] = useState("");
+  const [vacationDraftLabel, setVacationDraftLabel] = useState("");
 
   // Slot settings
   const [slotDurationMin, setSlotDurationMin] = useState(30);
@@ -1175,6 +1190,7 @@ export default function AssignmentCalendarPage() {
 
         if (data?.maxStudentsPerSlot) setDefaultMaxStudents(data.maxStudentsPerSlot);
         if (data?.slotDurationMin) setSlotDurationMin(data.slotDurationMin);
+        setVacationPeriods(normalizeVacationPeriods(data?.vacationPeriods));
       } catch {}
     }
     load();
@@ -1248,8 +1264,16 @@ export default function AssignmentCalendarPage() {
 
   const selectedDayKey = DAY_KEYS[selectedDate.getDay()];
   const selectedDaySchedule = availability[selectedDayKey];
-  const isSelectedDayAvailable = !!selectedDaySchedule?.enabled;
   const selectedDateStr = toDateStr(selectedDate);
+  const selectedDayWeeklyAvailable = dayIsWeeklyAvailable(selectedDate, availability);
+  const selectedDayOnVacation = isDateInVacation(selectedDateStr, vacationPeriods);
+  const hasSlotsOnSelectedDay = sessionSlots.some((s) => s.date === selectedDateStr);
+  const showCoachDaySchedule = coachDayShowsSchedule({
+    weeklyAvailable: selectedDayWeeklyAvailable,
+    onVacation: selectedDayOnVacation,
+    hasExistingSlots: hasSlotsOnSelectedDay,
+  });
+  const blockNewBookingsOnSelectedDay = selectedDayOnVacation;
 
   const timeSlots = useMemo(
     () => generateSlotsForDay(selectedDaySchedule, slotDurationMin),
@@ -1907,12 +1931,23 @@ export default function AssignmentCalendarPage() {
     );
   }, [weekAssignments, filterStudentId]);
 
+  const isOnVacationDay = useCallback(
+    (date: Date) => isDateInVacation(toDateStr(date), vacationPeriods),
+    [vacationPeriods]
+  );
+
   const isUnavailableDay = useCallback(
     (date: Date) => {
       const sched = availability[DAY_KEYS[date.getDay()]];
-      return !sched?.enabled || !sched.ranges.length;
+      const weeklyOff = !sched?.enabled || !sched.ranges.length;
+      return weeklyOff || isDateInVacation(toDateStr(date), vacationPeriods);
     },
-    [availability]
+    [availability, vacationPeriods]
+  );
+
+  const previewVacationPeriods = useMemo(
+    () => upcomingVacationPeriods(vacationPeriods, selectedDateStr).slice(0, 3),
+    [vacationPeriods, selectedDateStr]
   );
 
   const getWeeklyCount = useCallback(
@@ -1948,9 +1983,46 @@ export default function AssignmentCalendarPage() {
     const merged: Availability = { ...DEFAULT_AVAILABILITY };
     DAY_KEYS.forEach((d) => { if (availability[d]) merged[d] = migrateDaySchedule(availability[d]); });
     setDraft(merged);
+    setDraftVacationPeriods([...vacationPeriods]);
     setApplyAllStart("");
     setApplyAllEnd("");
+    setVacationDraftStart("");
+    setVacationDraftEnd("");
+    setVacationDraftLabel("");
     setAvailabilityOpen(true);
+  };
+
+  const addDraftVacationPeriod = () => {
+    const startDate = vacationDraftStart.trim().slice(0, 10);
+    const endDate = (vacationDraftEnd.trim() || vacationDraftStart).slice(0, 10);
+    const label = vacationDraftLabel.trim();
+    if (!startDate || !endDate) {
+      toast({ title: "Indica a data de início e fim", variant: "destructive" });
+      return;
+    }
+    if (endDate < startDate) {
+      toast({ title: "A data de fim deve ser igual ou posterior à de início", variant: "destructive" });
+      return;
+    }
+    if (!label) {
+      toast({ title: "Indica uma descrição para este intervalo", variant: "destructive" });
+      return;
+    }
+    const candidate = { id: crypto.randomUUID(), startDate, endDate, label };
+    if (draftVacationPeriods.some((p) => vacationPeriodsOverlap(p, candidate))) {
+      toast({ title: "Este intervalo sobrepõe-se a férias já definidas", variant: "destructive" });
+      return;
+    }
+    setDraftVacationPeriods((prev) =>
+      [...prev, candidate].sort((a, b) => a.startDate.localeCompare(b.startDate))
+    );
+    setVacationDraftStart("");
+    setVacationDraftEnd("");
+    setVacationDraftLabel("");
+  };
+
+  const removeDraftVacationPeriod = (id: string) => {
+    setDraftVacationPeriods((prev) => prev.filter((p) => p.id !== id));
   };
 
   const toggleDraftDay = (day: string) =>
@@ -1999,10 +2071,27 @@ export default function AssignmentCalendarPage() {
 
   const handleSaveAvailability = async () => {
     if (!db || !user) return;
+    if (draftVacationPeriods.some((p) => !String(p.label || "").trim())) {
+      toast({ title: "Cada intervalo de férias precisa de uma descrição", variant: "destructive" });
+      return;
+    }
+    for (let i = 0; i < draftVacationPeriods.length; i++) {
+      for (let j = i + 1; j < draftVacationPeriods.length; j++) {
+        if (vacationPeriodsOverlap(draftVacationPeriods[i], draftVacationPeriods[j])) {
+          toast({ title: "Existem intervalos de férias sobrepostos", variant: "destructive" });
+          return;
+        }
+      }
+    }
     setIsSavingAvailability(true);
     try {
-      await setDoc(doc(db, "personalTrainers", user.uid), { availability: draft }, { merge: true });
+      await setDoc(
+        doc(db, "personalTrainers", user.uid),
+        { availability: draft, vacationPeriods: draftVacationPeriods },
+        { merge: true }
+      );
       setAvailability(draft);
+      setVacationPeriods(draftVacationPeriods);
       setAvailabilityOpen(false);
       toast({ title: "Disponibilidade guardada" });
     } catch {
@@ -2034,6 +2123,10 @@ export default function AssignmentCalendarPage() {
 
   const openManageSlot = (time: string) => {
     const existing = slotsByTime.get(time) ?? null;
+    if (blockNewBookingsOnSelectedDay && !(existing?.students?.length)) {
+      toast({ title: "Dia de férias — não é possível criar novos blocos", variant: "destructive" });
+      return;
+    }
     setManagingSlot({ date: selectedDateStr, startTime: time, slot: existing });
     setAddStudentId("");
     setSelectedPlanId("");
@@ -2076,6 +2169,10 @@ export default function AssignmentCalendarPage() {
 
   const handleAddStudent = async () => {
     if (!managingSlot || !addStudentId || !db || !user) return;
+    if (isDateInVacation(managingSlot.date, vacationPeriods)) {
+      toast({ title: "Dia de férias — não é possível inscrever novos alunos", variant: "destructive" });
+      return;
+    }
     setIsAddingStudent(true);
     const { date, startTime } = managingSlot;
     const docId = slotDocId(date, startTime);
@@ -2172,12 +2269,15 @@ export default function AssignmentCalendarPage() {
 
   const handleCoachToggleStudent = async (time: string) => {
     if (!db || !user || !filterStudentId) return;
-    const startIdx = timeSlots.indexOf(time);
-    if (startIdx === -1) return;
-
     const slot = slotsByTime.get(time);
     const entry = slot?.students.find((s) => s.studentId === filterStudentId);
     const isEnrolled = !!entry;
+    if (!isEnrolled && blockNewBookingsOnSelectedDay) {
+      toast({ title: "Dia de férias — não é possível inscrever", variant: "destructive" });
+      return;
+    }
+    const startIdx = timeSlots.indexOf(time);
+    if (startIdx === -1) return;
 
     const docKey = slotDocId(selectedDateStr, time);
     setIsTogglingSlot(docKey);
@@ -2650,6 +2750,78 @@ export default function AssignmentCalendarPage() {
                   );
                 })}
               </div>
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Férias / dias indisponíveis
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Início</Label>
+                    <Input
+                      type="date"
+                      value={vacationDraftStart}
+                      onChange={(e) => setVacationDraftStart(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Fim</Label>
+                    <Input
+                      type="date"
+                      value={vacationDraftEnd}
+                      onChange={(e) => setVacationDraftEnd(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Descrição</Label>
+                  <Input
+                    value={vacationDraftLabel}
+                    onChange={(e) => setVacationDraftLabel(e.target.value)}
+                    placeholder="ex. Férias de verão"
+                    className="h-8 text-sm"
+                    required
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-8"
+                  onClick={addDraftVacationPeriod}
+                  disabled={!vacationDraftStart.trim() || !vacationDraftLabel.trim()}
+                >
+                  Adicionar intervalo
+                </Button>
+                {draftVacationPeriods.length > 0 ? (
+                  <ul className="space-y-2">
+                    {draftVacationPeriods.map((p) => (
+                      <li
+                        key={p.id}
+                        className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-xs"
+                      >
+                        <span className="min-w-0">
+                          <span className="font-medium">{formatVacationPeriodRange(p)}</span>
+                          {p.label ? (
+                            <span className="block text-muted-foreground truncate">{p.label}</span>
+                          ) : null}
+                        </span>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeDraftVacationPeriod(p.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">Sem férias marcadas</p>
+                )}
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setAvailabilityOpen(false)}>{t("cancel")}</Button>
@@ -2667,7 +2839,9 @@ export default function AssignmentCalendarPage() {
             {managingSlot && (() => {
               const slotStudents = managingSlot.slot?.students ?? [];
               const maxS = slotMaxOverride || defaultMaxStudents;
-              const canAdd = slotStudents.length < maxS;
+              const canAdd =
+                slotStudents.length < maxS &&
+                !isDateInVacation(managingSlot.date, vacationPeriods);
               return (
                 <>
                   <DialogHeader>
@@ -3007,6 +3181,7 @@ export default function AssignmentCalendarPage() {
                 modifiers={{
                   hasSlots: slotDates,
                   unavailable: isUnavailableDay,
+                  onVacation: isOnVacationDay,
                   hasProgram: assignedWeekDates,
                   pendingAttendance: pendingAttendanceDates,
                 }}
@@ -3014,6 +3189,8 @@ export default function AssignmentCalendarPage() {
                   hasSlots:   "bg-accent/20 text-accent font-semibold rounded-full",
                   hasProgram: "bg-primary/10 font-medium",
                   unavailable: "opacity-40 line-through text-muted-foreground",
+                  onVacation:
+                    "ring-2 ring-orange-400/80 dark:ring-orange-500 ring-offset-2 ring-offset-background rounded-full",
                   pendingAttendance:
                     "ring-2 ring-amber-500/90 dark:ring-amber-400 ring-offset-2 ring-offset-background relative z-[1] rounded-full",
                 }}
@@ -3033,6 +3210,10 @@ export default function AssignmentCalendarPage() {
                 <span className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-full bg-muted border inline-block" />
                   Indisponível
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full border-2 border-orange-400 dark:border-orange-500 inline-block" />
+                  Férias
                 </span>
               </div>
 
@@ -3088,6 +3269,23 @@ export default function AssignmentCalendarPage() {
                         </div>
                       );
                     })}
+                    <div className="border-t pt-2 mt-2 space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Férias
+                      </p>
+                      {previewVacationPeriods.length > 0 ? (
+                        previewVacationPeriods.map((p) => (
+                          <p key={p.id} className="text-xs text-orange-700 dark:text-orange-400 font-medium">
+                            {formatVacationPeriodRange(p)}
+                            {p.label ? (
+                              <span className="text-muted-foreground font-normal"> · {p.label}</span>
+                            ) : null}
+                          </p>
+                        ))
+                      ) : (
+                        <p className="text-xs italic text-muted-foreground">Sem férias marcadas</p>
+                      )}
+                    </div>
                   </CollapsibleContent>
                 </div>
               </Collapsible>
@@ -3155,14 +3353,16 @@ export default function AssignmentCalendarPage() {
                     {selectedDate.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
                   </CardTitle>
                   <CardDescription>
-                    {isSelectedDayAvailable
+                    {showCoachDaySchedule
                       ? isFilterActive
                         ? `${timeSlots.length} blocos de ${slotDurationMin} min · sessão ${effectiveSlotDuration} min`
                         : `${timeSlots.length} blocos · ${slotDurationMin} min cada · máx. ${defaultMaxStudents} alunos`
-                      : "Dia indisponível"}
+                      : selectedDayOnVacation
+                        ? "Dia de férias"
+                        : "Dia indisponível"}
                   </CardDescription>
                 </div>
-                {isSelectedDayAvailable && selectedDaySchedule && (
+                {showCoachDaySchedule && selectedDaySchedule && (
                   <div className="flex flex-wrap gap-1 mt-1">
                     {selectedDaySchedule.ranges.map((r, i) => (
                       <Badge key={i} variant="outline" className="text-xs">
@@ -3178,12 +3378,18 @@ export default function AssignmentCalendarPage() {
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
-              ) : !isSelectedDayAvailable ? (
+              ) : !showCoachDaySchedule ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center gap-4 text-muted-foreground">
                   <Clock className="h-12 w-12 opacity-20" />
                   <div>
-                    <p className="font-medium">Dia sem disponibilidade</p>
-                    <p className="text-sm">Define o horário para este dia nas definições de disponibilidade.</p>
+                    <p className="font-medium">
+                      {selectedDayOnVacation ? "Dia de férias" : "Dia sem disponibilidade"}
+                    </p>
+                    <p className="text-sm">
+                      {selectedDayOnVacation
+                        ? "Marcaste este dia como indisponível. As marcações já existentes continuam visíveis noutros dias do intervalo."
+                        : "Define o horário para este dia nas definições de disponibilidade."}
+                    </p>
                   </div>
                   <Button size="sm" variant="outline" className="gap-1.5 mt-2" onClick={openAvailability}>
                     <Settings2 className="h-3.5 w-3.5" /> Editar disponibilidade
@@ -3307,7 +3513,8 @@ export default function AssignmentCalendarPage() {
                         ) : isContinuation ? null : !isFull ? (
                           <Button size="sm"
                             className="shrink-0 h-8 gap-1.5 text-xs bg-primary/90"
-                            onClick={() => handleCoachToggleStudent(time)} disabled={busy}>
+                            onClick={() => handleCoachToggleStudent(time)}
+                            disabled={busy || blockNewBookingsOnSelectedDay}>
                             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
                             Inscrever
                           </Button>
