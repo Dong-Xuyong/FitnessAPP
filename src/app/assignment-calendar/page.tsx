@@ -383,6 +383,9 @@ function CalendarDayRosterRow({
         } else {
           programLabel = t("calendarRosterSlotPlanNotOnProfile");
         }
+      } else if (slotMeta?.isCompleted && unlockedId && unlockedId !== slotPlanId) {
+        programLabel =
+          String(unlockedMeta?.title || "").trim() || unlockedTitle || slotTitle || t("calendarRosterSlotPlanNotOnProfile");
       } else if (slotTitle) {
         programLabel = slotTitle;
       } else if (sessionLogTitleForSubtitle) {
@@ -431,6 +434,7 @@ function CalendarDayRosterRow({
   const nextProgramLine =
     slotPlanId &&
     slotMeta?.isCompleted &&
+    bucket !== "active" &&
     unlockedId &&
     unlockedId !== slotPlanId &&
     (String(unlockedMeta?.title || "").trim() || unlockedTitle)
