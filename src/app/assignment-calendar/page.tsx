@@ -1816,15 +1816,16 @@ export default function AssignmentCalendarPage() {
       }
 
       let intoCompleted = false;
+      const hasSameDaySession = Boolean(sessionCompletedOnSelectedDayByFid[fid]);
       if (slotPlanId) {
         const sk = `${fid}__${slotPlanId}`;
         const slotMeta = rosterPlanMetaByKey[sk];
-        if (slotMeta?.isCompleted || sessionCompletedSlotPlanByKey[sk]) {
+        if (sessionCompletedSlotPlanByKey[sk] || (slotMeta?.isCompleted && hasSameDaySession)) {
           intoCompleted = true;
         }
       } else {
         const uMeta = rosterPlanMetaByKey[`${fid}__${unlockedId}`];
-        if (uMeta?.isCompleted) intoCompleted = true;
+        if (uMeta?.isCompleted && hasSameDaySession) intoCompleted = true;
       }
 
       if (!intoCompleted && sessionCompletedOnSelectedDayByFid[fid]) {
