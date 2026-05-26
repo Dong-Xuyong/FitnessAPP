@@ -924,21 +924,7 @@ export default function StudentWorkoutsPage() {
           {/* ── Right column: Day schedule ──────────────────────────────── */}
           <Card className="lg:col-span-3">
             <CardHeader className="pb-3">
-              {weekPlansOrdered.length > 0 && (
-                <div className="flex items-center gap-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 mb-3">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 shrink-0">
-                    <Dumbbell className="h-3.5 w-3.5 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[11px] text-muted-foreground leading-none mb-0.5">{workoutsPlansSectionTitle}</p>
-                    <p className="text-sm font-semibold text-primary truncate">
-                      {weekPlansOrdered.length === 1
-                        ? weekPlansOrdered[0].title
-                        : `${weekPlansOrdered.length} programas nesta semana`}
-                    </p>
-                  </div>
-                </div>
-              )}
+
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <CardTitle className="capitalize text-xl leading-tight">

@@ -434,7 +434,7 @@ function CalendarDayRosterRow({
   const nextProgramLine =
     slotPlanId &&
     slotMeta?.isCompleted &&
-    bucket !== "active" &&
+    bucket === "active" &&
     unlockedId &&
     unlockedId !== slotPlanId &&
     (String(unlockedMeta?.title || "").trim() || unlockedTitle)
