@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test:sequence": "npx tsx --test src/lib/workout-plan-sequence.test.ts",
     "test:excel": "npx tsx --test src/lib/coach-library-excel.test.ts",
-    "test:shop": "npx tsx --test src/lib/shop-billing.test.ts"
+    "test:shop": "npx tsx --test src/lib/shop-billing.test.ts",
+    "test:enrollment": "npx tsx --test src/lib/session-slot-enrollment.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

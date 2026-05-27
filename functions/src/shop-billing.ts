@@ -1,6 +1,13 @@
 /** Mirrors src/lib/shop-billing.ts for Cloud Functions (no cross-package import). */
 
+import type { CollectionReference } from "firebase-admin/firestore";
+
 export type ShopLine = { itemId: string; quantity: number };
+
+export type BillableShopLine = ShopLine & {
+  billingStatus?: "unpaid" | "paid";
+  paidInPaymentId?: string;
+};
 
 export type ShopCatalogItem = {
   name: string;
@@ -8,10 +15,123 @@ export type ShopCatalogItem = {
   active?: boolean;
 };
 
+export type ShopPurchaseLike = {
+  id?: string;
+  date?: string;
+  time?: string;
+  itemId?: string;
+  quantity?: number;
+  billingStatus?: "unpaid" | "paid";
+  paidInPaymentId?: string;
+};
+
+/** @deprecated Legacy day-grouped doc with lines[] */
 export type ShopRegistrationLike = {
   date?: string;
-  lines?: ShopLine[];
+  time?: string;
+  lines?: BillableShopLine[];
 };
+
+export function isShopPurchasePaid(purchase: ShopPurchaseLike): boolean {
+  return purchase.billingStatus === "paid";
+}
+
+export function isShopPurchaseUnpaid(purchase: ShopPurchaseLike): boolean {
+  return !isShopPurchasePaid(purchase);
+}
+
+export function isLegacyShopRegistrationDoc(data: Record<string, unknown>): boolean {
+  return Array.isArray(data.lines) && data.itemId == null;
+}
+
+export function expandLegacyRegistrationDoc(
+  data: Record<string, unknown>
+): ShopPurchaseLike[] {
+  const date = String(data.date ?? "").trim();
+  const time = data.time != null ? String(data.time).trim() : undefined;
+  const lines = normalizeRegistrationLines(
+    Array.isArray(data.lines) ? (data.lines as BillableShopLine[]) : []
+  );
+  return lines.map((line) => ({
+    date,
+    time,
+    itemId: line.itemId,
+    quantity: line.quantity,
+    billingStatus: line.billingStatus,
+    paidInPaymentId: line.paidInPaymentId,
+  }));
+}
+
+export function normalizeShopPurchaseDoc(
+  data: Record<string, unknown>,
+  id?: string
+): ShopPurchaseLike | null {
+  const itemId = String(data.itemId ?? "").trim();
+  const quantity = clampLineQuantity(data.quantity);
+  if (!itemId || quantity <= 0) return null;
+  const date = String(data.date ?? "").trim();
+  const time = data.time != null ? String(data.time).trim() : undefined;
+  const billable = data as BillableShopLine;
+  if (isShopLinePaid(billable)) {
+    return {
+      id,
+      date,
+      time,
+      itemId,
+      quantity,
+      billingStatus: "paid",
+      paidInPaymentId: billable.paidInPaymentId
+        ? String(billable.paidInPaymentId)
+        : undefined,
+    };
+  }
+  return { id, date, time, itemId, quantity, billingStatus: "unpaid" };
+}
+
+export function normalizeShopPurchasesFromDoc(
+  data: Record<string, unknown>,
+  id?: string
+): ShopPurchaseLike[] {
+  if (isLegacyShopRegistrationDoc(data)) {
+    return expandLegacyRegistrationDoc(data).map((p) => (id ? { ...p, id } : p));
+  }
+  const purchase = normalizeShopPurchaseDoc(data, id);
+  return purchase ? [purchase] : [];
+}
+
+export function purchaseAsBillableLine(purchase: ShopPurchaseLike): BillableShopLine | null {
+  const itemId = String(purchase.itemId ?? "").trim();
+  const quantity = clampLineQuantity(purchase.quantity);
+  if (!itemId || quantity <= 0) return null;
+  if (isShopPurchasePaid(purchase)) {
+    return {
+      itemId,
+      quantity,
+      billingStatus: "paid",
+      paidInPaymentId: purchase.paidInPaymentId
+        ? String(purchase.paidInPaymentId)
+        : undefined,
+    };
+  }
+  return { itemId, quantity, billingStatus: "unpaid" };
+}
+
+export function computePurchaseTotal(
+  purchase: ShopPurchaseLike,
+  catalogById: Map<string, ShopCatalogItem>
+): number {
+  const line = purchaseAsBillableLine(purchase);
+  if (!line) return 0;
+  return computeLineTotal(line, catalogById);
+}
+
+export function isShopLinePaid(line: BillableShopLine): boolean {
+  return line.billingStatus === "paid";
+}
+
+export function isShopLineUnpaid(line: BillableShopLine): boolean {
+  return !isShopLinePaid(line);
+}
 
 export function periodFromShopDate(date: string): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || "").trim());
@@ -21,8 +141,8 @@ export function periodFromShopDate(date: string): string | null {
   return `${m[1]}-${m[2]}`;
 }
 
-export function paymentPeriodForShopMonth(shopPeriod: string): string | null {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(shopPeriod || "").trim());
+export function nextBillingPeriodYm(period: string): string | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(period || "").trim());
   if (!m) return null;
   const y = Number(m[1]);
   const mo = Number(m[2]);
@@ -31,15 +151,313 @@ export function paymentPeriodForShopMonth(shopPeriod: string): string | null {
   return `${y}-${String(mo + 1).padStart(2, "0")}`;
 }
 
-/** Payment period `YYYY-MM` includes shop charges from the previous calendar month. */
-export function shopSourcePeriodForPaymentPeriod(paymentPeriod: string): string | null {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(paymentPeriod || "").trim());
+export function resolveTargetPaymentPeriodForNewPurchase(
+  purchaseMonth: string,
+  purchaseMonthHasPendingPayment: boolean
+): string {
+  if (purchaseMonthHasPendingPayment) return purchaseMonth;
+  return nextBillingPeriodYm(purchaseMonth) ?? purchaseMonth;
+}
+
+function canonicalPeriodYm(raw: unknown): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  const m = /^(\d{4})-(\d{1,2})$/.exec(s);
   if (!m) return null;
-  const y = Number(m[1]);
   const mo = Number(m[2]);
-  if (mo < 1 || mo > 12) return null;
-  if (mo === 1) return `${y - 1}-12`;
-  return `${y}-${String(mo - 1).padStart(2, "0")}`;
+  if (!Number.isFinite(mo) || mo < 1 || mo > 12) return null;
+  return `${m[1]}-${String(mo).padStart(2, "0")}`;
+}
+
+function paymentPeriodsMatch(
+  a: string | null | undefined,
+  b: string | null | undefined
+): boolean {
+  if (a == null || b == null) return false;
+  const ca = canonicalPeriodYm(a) ?? String(a).trim();
+  const cb = canonicalPeriodYm(b) ?? String(b).trim();
+  return ca === cb;
+}
+
+export type PaymentPeriodLike = { period?: string; status?: unknown };
+
+export type PaymentSettlementLike = {
+  period?: string;
+  status?: unknown;
+  shopAmount?: unknown;
+};
+
+export function isPaymentSettledWithShopCharge(
+  settlement: PaymentSettlementLike | undefined
+): boolean {
+  if (!settlement) return false;
+  return isPaidStatus(settlement.status) && Number(settlement.shopAmount ?? 0) > 0;
+}
+
+export function isPaymentPeriodClosedPaid(
+  period: string,
+  payments: readonly PaymentPeriodLike[]
+): boolean {
+  const rows = payments.filter((p) => canonicalPeriodYm(p.period) === period);
+  if (!rows.length) return false;
+  if (rows.some((p) => isPendingStatus(p.status))) return false;
+  return rows.some((p) => isPaidStatus(p.status));
+}
+
+export function resolveBillableShopPaymentPeriod(
+  purchaseMonth: string,
+  hasPendingForMonth: (ym: string) => boolean,
+  isClosedPaid: (ym: string) => boolean
+): string {
+  let period = resolveTargetPaymentPeriodForNewPurchase(
+    purchaseMonth,
+    hasPendingForMonth(purchaseMonth)
+  );
+  while (isClosedPaid(period)) {
+    const next = nextBillingPeriodYm(period);
+    if (!next || next === period) break;
+    period = next;
+  }
+  return period;
+}
+
+export function buildShopBillingPeriodContextFromPayments(
+  payments: readonly PaymentPeriodLike[]
+): {
+  hasPendingForMonth: (ym: string) => boolean;
+  isClosedPaid: (ym: string) => boolean;
+  billablePeriodForPurchaseMonth: (purchaseMonth: string) => string;
+} {
+  const hasPendingForMonth = (ym: string) =>
+    payments.some(
+      (p) => canonicalPeriodYm(p.period) === ym && isPendingStatus(p.status)
+    );
+  const isClosedPaid = (ym: string) => isPaymentPeriodClosedPaid(ym, payments);
+  const billablePeriodForPurchaseMonth = (purchaseMonth: string) =>
+    resolveBillableShopPaymentPeriod(purchaseMonth, hasPendingForMonth, isClosedPaid);
+  return { hasPendingForMonth, isClosedPaid, billablePeriodForPurchaseMonth };
+}
+
+/**
+ * Billing context when marking/repairing a specific payment period as paid.
+ * Treats `paymentPeriodBeingMarked` as still open so lines that were billed to
+ * that period remain matchable even after later months are also closed.
+ */
+export function buildShopBillingPeriodContextForMarkPaid(
+  payments: readonly PaymentPeriodLike[],
+  paymentPeriodBeingMarked: string
+): {
+  billablePeriodForPurchaseMonth: (purchaseMonth: string) => string;
+} {
+  const marked = canonicalPeriodYm(paymentPeriodBeingMarked) ?? paymentPeriodBeingMarked;
+  const hasPendingForMonth = (ym: string) => {
+    // Purchases in the payment month bill to that period while it is being closed.
+    if (ym === marked) return true;
+    return payments.some(
+      (p) => canonicalPeriodYm(p.period) === ym && isPendingStatus(p.status)
+    );
+  };
+  const isClosedPaid = (ym: string) => {
+    if (ym === marked) return false;
+    return isPaymentPeriodClosedPaid(ym, payments);
+  };
+  const billablePeriodForPurchaseMonth = (purchaseMonth: string) =>
+    resolveBillableShopPaymentPeriod(purchaseMonth, hasPendingForMonth, isClosedPaid);
+  return { billablePeriodForPurchaseMonth };
+}
+
+export function effectiveShopPaymentPeriodForRegistrationDate(
+  regDate: string | undefined,
+  billablePeriodForPurchaseMonth: (purchaseMonth: string) => string
+): string | null {
+  const purchaseMonth = regDate ? periodFromShopDate(regDate) : null;
+  if (!purchaseMonth) return null;
+  return billablePeriodForPurchaseMonth(purchaseMonth);
+}
+
+/** Current effective payment period for a shop registration date (live cascade). */
+export function shopLineBillablePaymentPeriod(
+  regDate: string | undefined,
+  payments: readonly PaymentPeriodLike[]
+): string | null {
+  const { billablePeriodForPurchaseMonth } = buildShopBillingPeriodContextFromPayments(payments);
+  return effectiveShopPaymentPeriodForRegistrationDate(regDate, billablePeriodForPurchaseMonth);
+}
+
+/**
+ * Repair/backfill only: mark lines paid for `paymentPeriod` when the live cascade
+ * still bills that registration to the same period (not deferred to a future month).
+ */
+export function shouldMarkShopLinePaidForPaymentRepair(
+  regDate: string | undefined,
+  paymentPeriod: string,
+  payments: readonly PaymentPeriodLike[]
+): boolean {
+  const current = shopLineBillablePaymentPeriod(regDate, payments);
+  return paymentPeriodsMatch(current, paymentPeriod);
+}
+
+/** Reset paid lines linked to a past payment when live cascade bills them forward. */
+export function revertShopPurchasePaidForFuturePeriods(
+  purchase: ShopPurchaseLike,
+  payments: readonly PaymentPeriodLike[],
+  paymentIdToPeriod: ReadonlyMap<string, string>,
+  paymentIdToSettlement?: ReadonlyMap<string, PaymentSettlementLike>
+): ShopPurchaseLike {
+  if (!isShopPurchasePaid(purchase) || !purchase.paidInPaymentId) return purchase;
+  const paymentId = String(purchase.paidInPaymentId);
+  const settlement = paymentIdToSettlement?.get(paymentId);
+  if (isPaymentSettledWithShopCharge(settlement)) return purchase;
+  const paidPeriod = paymentIdToPeriod.get(paymentId);
+  if (!paidPeriod) return purchase;
+  const currentBillable = shopLineBillablePaymentPeriod(purchase.date, payments);
+  if (currentBillable == null || paymentPeriodsMatch(currentBillable, paidPeriod)) return purchase;
+  return { ...purchase, billingStatus: "unpaid", paidInPaymentId: undefined };
+}
+
+/** @deprecated Use revertShopPurchasePaidForFuturePeriods */
+export function revertShopRegistrationLinesPaidForFuturePeriods(
+  registration: ShopRegistrationLike,
+  payments: readonly PaymentPeriodLike[],
+  paymentIdToPeriod: ReadonlyMap<string, string>
+): BillableShopLine[] {
+  const lines = registration.lines;
+  if (!lines?.length) return [];
+  const normalized = normalizeRegistrationLines(lines);
+  const currentBillable = shopLineBillablePaymentPeriod(registration.date, payments);
+
+  return normalized.map((line) => {
+    if (!isShopLinePaid(line) || !line.paidInPaymentId) return line;
+    const paidPeriod = paymentIdToPeriod.get(String(line.paidInPaymentId));
+    if (!paidPeriod) return line;
+    if (currentBillable == null || currentBillable === paidPeriod) return line;
+    return {
+      itemId: line.itemId,
+      quantity: line.quantity,
+      billingStatus: "unpaid" as const,
+    };
+  });
+}
+
+function clampLineQuantity(qty: unknown): number {
+  return Math.max(0, Math.min(999, Math.floor(Number(qty) || 0)));
+}
+
+export function normalizeBillableLine(line: BillableShopLine | ShopLine): BillableShopLine | null {
+  const itemId = String(line.itemId || "").trim();
+  const quantity = clampLineQuantity(line.quantity);
+  if (!itemId || quantity <= 0) return null;
+  const billable = line as BillableShopLine;
+  if (isShopLinePaid(billable)) {
+    return {
+      itemId,
+      quantity,
+      billingStatus: "paid",
+      paidInPaymentId: billable.paidInPaymentId ? String(billable.paidInPaymentId) : undefined,
+    };
+  }
+  return {
+    itemId,
+    quantity,
+    billingStatus: "unpaid",
+  };
+}
+
+export function normalizeRegistrationLines(
+  lines: (BillableShopLine | ShopLine)[] | undefined
+): BillableShopLine[] {
+  if (!lines?.length) return [];
+  const out: BillableShopLine[] = [];
+  for (const line of lines) {
+    const normalized = normalizeBillableLine(line);
+    if (normalized) out.push(normalized);
+  }
+  return out;
+}
+
+export function markShopPurchasePaidForPayment(
+  purchase: ShopPurchaseLike,
+  paymentPeriod: string,
+  paymentId: string,
+  billablePeriodForPurchaseMonth: (purchaseMonth: string) => string
+): ShopPurchaseLike {
+  if (isShopPurchasePaid(purchase)) return purchase;
+  const effective = effectiveShopPaymentPeriodForRegistrationDate(
+    purchase.date,
+    billablePeriodForPurchaseMonth
+  );
+  if (effective == null || !paymentPeriodsMatch(effective, paymentPeriod)) return purchase;
+  return { ...purchase, billingStatus: "paid", paidInPaymentId: paymentId };
+}
+
+/** @deprecated Use markShopPurchasePaidForPayment */
+export function markShopRegistrationLinesPaidForPayment(
+  registration: ShopRegistrationLike,
+  paymentPeriod: string,
+  paymentId: string,
+  billablePeriodForPurchaseMonth: (purchaseMonth: string) => string
+): BillableShopLine[] {
+  const lines = registration.lines;
+  if (!lines?.length) return [];
+  const effective = effectiveShopPaymentPeriodForRegistrationDate(
+    registration.date,
+    billablePeriodForPurchaseMonth
+  );
+  const normalized = normalizeRegistrationLines(lines);
+  if (effective == null || effective !== paymentPeriod) return normalized;
+  return normalized.map((line) => {
+    if (isShopLinePaid(line)) return line;
+    return {
+      itemId: line.itemId,
+      quantity: line.quantity,
+      billingStatus: "paid" as const,
+      paidInPaymentId: paymentId,
+    };
+  });
+}
+
+export function computeLineTotal(
+  line: BillableShopLine,
+  catalogById: Map<string, ShopCatalogItem>
+): number {
+  const item = catalogById.get(line.itemId);
+  if (!item || item.active === false) return 0;
+  const qty = clampLineQuantity(line.quantity);
+  const price = Number(item.price);
+  if (!Number.isFinite(price) || price < 0 || qty <= 0) return 0;
+  return roundMoney(price * qty);
+}
+
+export function computeUnpaidShopForPaymentPeriod(
+  purchases: ShopPurchaseLike[],
+  catalogById: Map<string, ShopCatalogItem>,
+  paymentPeriod: string,
+  defaultTargetByRegDate: (purchaseMonth: string) => string
+): number {
+  let total = 0;
+  for (const purchase of purchases) {
+    if (!isShopPurchaseUnpaid(purchase)) continue;
+    const purchaseMonth = purchase.date ? periodFromShopDate(purchase.date) : null;
+    const effective =
+      purchaseMonth != null ? defaultTargetByRegDate(purchaseMonth) : paymentPeriod;
+    if (effective !== paymentPeriod) continue;
+    total += computePurchaseTotal(purchase, catalogById);
+  }
+  return roundMoney(total);
+}
+
+export function collectTargetPaymentPeriodsFromRegistrations(
+  purchases: ShopPurchaseLike[],
+  defaultTargetByRegDate: (purchaseMonth: string) => string
+): string[] {
+  const periods = new Set<string>();
+  for (const purchase of purchases) {
+    if (!isShopPurchaseUnpaid(purchase)) continue;
+    const purchaseMonth = purchase.date ? periodFromShopDate(purchase.date) : null;
+    if (!purchaseMonth) continue;
+    periods.add(defaultTargetByRegDate(purchaseMonth));
+  }
+  return [...periods];
 }
 
 export function periodDateRange(period: string): { startDate: string; endDate: string } | null {
@@ -70,25 +488,11 @@ export function computeRegistrationDayTotal(
     if (!itemId) continue;
     const item = catalogById.get(itemId);
     if (!item || item.active === false) continue;
-    const qty = Math.max(0, Math.min(999, Math.floor(Number(line.quantity) || 0)));
+    const qty = clampLineQuantity(line.quantity);
     if (qty <= 0) continue;
     const price = Number(item.price);
     if (!Number.isFinite(price) || price < 0) continue;
     total += price * qty;
-  }
-  return roundMoney(total);
-}
-
-export function computeShopTotalForStudentPeriod(
-  registrations: ShopRegistrationLike[],
-  catalogById: Map<string, ShopCatalogItem>,
-  period: string
-): number {
-  let total = 0;
-  for (const reg of registrations) {
-    const p = reg.date ? periodFromShopDate(reg.date) : null;
-    if (p !== period) continue;
-    total += computeRegistrationDayTotal(reg.lines, catalogById);
   }
   return roundMoney(total);
 }
@@ -132,6 +536,15 @@ export function isPaidStatus(s: unknown): boolean {
 }
 
 export function isPendingStatus(s: unknown): boolean {
-  const t = String(s ?? "").toLowerCase().trim();
+  if (s == null || s === "") return true;
+  const t = String(s).toLowerCase().trim();
   return t === "pending" || t === "pendente";
+}
+
+export async function purchaseMonthHasPendingPayment(
+  paymentsCol: CollectionReference,
+  purchaseMonth: string
+): Promise<boolean> {
+  const snap = await paymentsCol.where("period", "==", purchaseMonth).get();
+  return snap.docs.some((p) => isPendingStatus(p.data().status) || !p.data().status);
 }

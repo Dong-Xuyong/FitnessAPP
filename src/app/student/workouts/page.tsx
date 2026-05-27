@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   Dumbbell, Clock, Play, Loader2, AlertTriangle,
   CalendarDays, Users, UserPlus, UserMinus, ChevronDown, ChevronUp, StickyNote,
+  CheckCircle2, Lock, CalendarCheck, TrendingUp, Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore } from "@/firebase";
@@ -38,8 +39,16 @@ import {
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
 import {
+  dayHasOpenBlocks,
+  getEffectiveSessionDurationMin,
   isDateInVacation,
+  isNewBookingBlocked,
+  normalizeOpenAvailabilityBlocks,
   normalizeVacationPeriods,
+  openBlocksForDate,
+  resolveDaySlotTimes,
+  studentDayBookable,
+  type OpenAvailabilityBlock,
   type VacationPeriod,
 } from "@/lib/trainer-availability";
 
@@ -102,24 +111,6 @@ function areConsecutiveBlocks(times: string[], dur: number): boolean {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function generateSlotTimes(start: string, end: string, dur: number): string[] {
-  const slots: string[] = [];
-  let [h, m] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  const endTotal = eh * 60 + em;
-  while (h * 60 + m < endTotal) {
-    slots.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
-    m += dur; h += Math.floor(m/60); m = m % 60;
-  }
-  return slots;
-}
-
-function generateSlotsForDay(sched: DaySchedule | undefined, dur: number): string[] {
-  if (!sched?.enabled || !sched.ranges.length) return [];
-  const all = sched.ranges.flatMap(r => generateSlotTimes(r.startTime, r.endTime, dur));
-  return [...new Set(all)].sort();
-}
 
 function addMin(time: string, min: number): string {
   const [h, m] = time.split(":").map(Number);
@@ -230,6 +221,7 @@ export default function StudentWorkoutsPage() {
   // Coach settings
   const [availability, setAvailability] = useState<Availability>({});
   const [vacationPeriods, setVacationPeriods] = useState<VacationPeriod[]>([]);
+  const [openAvailabilityBlocks, setOpenAvailabilityBlocks] = useState<OpenAvailabilityBlock[]>([]);
   const [slotDurationMin, setSlotDurationMin]       = useState(30);
   const [defaultMaxStudents, setDefaultMaxStudents] = useState(4);
 
@@ -308,6 +300,7 @@ export default function StudentWorkoutsPage() {
           if (td.slotDurationMin)   setSlotDurationMin(td.slotDurationMin);
           if (td.maxStudentsPerSlot) setDefaultMaxStudents(td.maxStudentsPerSlot);
           setVacationPeriods(normalizeVacationPeriods(td.vacationPeriods));
+          setOpenAvailabilityBlocks(normalizeOpenAvailabilityBlocks(td.openAvailabilityBlocks));
           const savedAvail = td.availability as any;
           if (savedAvail) {
             if (Array.isArray(savedAvail.workingDays)) {
@@ -489,18 +482,58 @@ export default function StudentWorkoutsPage() {
   const selectedDaySched = availability[DAY_KEYS[selectedDate.getDay()]];
   const selectedDayWeeklyAvailable = !!(selectedDaySched?.enabled && selectedDaySched.ranges.length);
   const selectedDayOnVacation = isDateInVacation(selectedDateStr, vacationPeriods);
+  const openBlocksOnSelectedDay = useMemo(
+    () => openBlocksForDate(selectedDateStr, openAvailabilityBlocks),
+    [selectedDateStr, openAvailabilityBlocks]
+  );
   const hasBookingOnSelectedDay = sessionSlots.some(
     (s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId)
   );
-  const showStudentDaySchedule =
-    selectedDayWeeklyAvailable && (!selectedDayOnVacation || hasBookingOnSelectedDay);
-
-  // How many consecutive 30-min blocks a single session occupies
-  const slotsNeeded = Math.max(1, Math.ceil(sessionDurationMin / slotDurationMin));
 
   const timeSlots = useMemo(
-    () => generateSlotsForDay(selectedDaySched, slotDurationMin),
-    [selectedDaySched, slotDurationMin]
+    () =>
+      resolveDaySlotTimes({
+        dateStr: selectedDateStr,
+        weeklySched: selectedDaySched,
+        openBlocks: openAvailabilityBlocks,
+        slotDurationMin,
+      }),
+    [selectedDateStr, selectedDaySched, openAvailabilityBlocks, slotDurationMin]
+  );
+
+  const showStudentDaySchedule =
+    studentDayBookable({
+      weeklyAvailable: selectedDayWeeklyAvailable,
+      onVacation: selectedDayOnVacation,
+      hasResolvableSlots: timeSlots.length > 0,
+    }) || (selectedDayOnVacation && hasBookingOnSelectedDay);
+
+  const getSessionDurationForTime = useCallback(
+    (_time: string) =>
+      getEffectiveSessionDurationMin({
+        rosterDurationMin: sessionDurationMin,
+        slotDurationMin,
+      }),
+    [sessionDurationMin, slotDurationMin]
+  );
+
+  const getSlotsNeededForTime = useCallback(
+    (time: string) => {
+      const dur = getSessionDurationForTime(time);
+      return Math.max(1, Math.ceil(dur / slotDurationMin));
+    },
+    [getSessionDurationForTime, slotDurationMin]
+  );
+
+  const isBookingBlockedAtTime = useCallback(
+    (time: string) =>
+      isNewBookingBlocked({
+        dateStr: selectedDateStr,
+        time,
+        vacationPeriods,
+        openBlocks: openAvailabilityBlocks,
+      }),
+    [selectedDateStr, vacationPeriods, openAvailabilityBlocks]
   );
 
   const slotsByTime = useMemo(() => {
@@ -536,10 +569,12 @@ export default function StudentWorkoutsPage() {
 
   // Calendar modifiers
   const isUnavailableDay = useCallback((date: Date) => {
+    const dateStr = toDateStr(date);
+    if (dayHasOpenBlocks(dateStr, openAvailabilityBlocks)) return false;
+    if (isDateInVacation(dateStr, vacationPeriods)) return false;
     const s = availability[DAY_KEYS[date.getDay()]];
-    const weeklyOff = !s?.enabled || !s.ranges.length;
-    return weeklyOff || isDateInVacation(toDateStr(date), vacationPeriods);
-  }, [availability, vacationPeriods]);
+    return !s?.enabled || !s.ranges.length;
+  }, [availability, vacationPeriods, openAvailabilityBlocks]);
 
   const bookedDates = useMemo(() => {
     if (!myId) return [];
@@ -653,10 +688,13 @@ export default function StudentWorkoutsPage() {
     const myEntry = existingAtTime?.students.find(s => s.studentId === myId);
     const isEnrolled = !!myEntry;
 
-    if (!isEnrolled && selectedDayOnVacation) {
+    if (!isEnrolled && isBookingBlockedAtTime(time)) {
       toast({ title: "O treinador está de férias neste dia", variant: "destructive" });
       return;
     }
+
+    const slotsNeededForTime = getSlotsNeededForTime(time);
+    const sessionDurForTime = getSessionDurationForTime(time);
 
     setIsRegistering(slotDocId(selectedDateStr, time));
     try {
@@ -671,9 +709,9 @@ export default function StudentWorkoutsPage() {
           });
           return;
         }
-        // ── Unregister: free exactly the consecutive blocks that were booked ──
-        // Build by time arithmetic so non-adjacent slots (different ranges) are never touched.
-        const blocksToFree = Array.from({ length: slotsNeeded }, (_, i) =>
+        const enrolledDur = myEntry.sessionDurationMin ?? sessionDurForTime;
+        const freeCount = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
+        const blocksToFree = Array.from({ length: freeCount }, (_, i) =>
           addMin(sessionStart, i * slotDurationMin)
         );
 
@@ -720,9 +758,15 @@ export default function StudentWorkoutsPage() {
           });
           return;
         }
-        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsNeeded);
-        if (blocksToBook.length < slotsNeeded || !areConsecutiveBlocks(blocksToBook, slotDurationMin)) {
-          toast({ title: `Não há blocos consecutivos suficientes para uma sessão de ${sessionDurationMin} min neste horário.`, variant: "destructive" });
+        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
+        if (
+          blocksToBook.length < slotsNeededForTime ||
+          !areConsecutiveBlocks(blocksToBook, slotDurationMin)
+        ) {
+          toast({
+            title: `Não há blocos consecutivos suficientes para uma sessão de ${sessionDurForTime} min neste horário.`,
+            variant: "destructive",
+          });
           return;
         }
 
@@ -749,7 +793,7 @@ export default function StudentWorkoutsPage() {
                 isSequenceStepEffectiveUnlocked(w, completedPlanIds)
             )
             .sort((a, b) => (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0))[0];
-        const totalSessionMin = slotsNeeded * slotDurationMin;
+        const totalSessionMin = sessionDurForTime;
         const nextSlots = [...sessionSlots];
 
         for (const t of blocksToBook) {
@@ -795,174 +839,216 @@ export default function StudentWorkoutsPage() {
   }
 
   return (
-      <div className="space-y-6">
-        <header>
+    <div className="space-y-6">
+
+      {/* ── Page header ─────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
           <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground text-sm mt-0.5">
             {isOpenAccess ? t("trainingAccessModeOpen") : "Agenda de sessões com o teu treinador"}
           </p>
-        </header>
-
-        {isOpenAccess ? (
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">{t("studentOpenAccessWorkoutsIntro")}</p>
-            </CardContent>
-          </Card>
-        ) : (
-        <div className="grid lg:grid-cols-5 gap-6 items-start">
-
-          {/* Left: Calendar + weekly booking limit */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-primary" /> Horário do Treinador
-              </CardTitle>
-              <CardDescription>Seleciona um dia para ver os blocos disponíveis</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={d => { if (d) setSelectedDate(d); }}
-                modifiers={{
-                  booked: bookedDates,
-                  workout: workoutDates,
-                  unavailable: isUnavailableDay,
-                  onVacation: isOnVacationDay,
-                }}
-                modifiersClassNames={{
-                  booked:      "bg-accent/25 text-accent font-bold rounded-full",
-                  workout:     "bg-primary/10 font-medium",
-                  unavailable: "opacity-30 line-through text-muted-foreground",
-                  onVacation:
-                    "ring-2 ring-orange-400/80 dark:ring-orange-500 ring-offset-2 ring-offset-background rounded-full",
-                }}
-                className="rounded-md border max-w-full"
-              />
-
-              {/* Legend */}
-              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-accent/30 inline-block" /> Inscrito
+        </div>
+        {!isOpenAccess && sessionsPerWeek != null && (
+          <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-2.5 shadow-sm shrink-0">
+            <div className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${
+              weeklyBookedCount >= weeklyAllowance
+                ? "bg-destructive/10 text-destructive"
+                : "bg-primary/10 text-primary"
+            }`}>
+              <CalendarCheck className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-[11px] text-muted-foreground leading-none mb-1">{t("studentSessionBookingsThisWeek")}</p>
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-bold tabular-nums ${weeklyBookedCount >= weeklyAllowance ? "text-destructive" : "text-foreground"}`}>
+                  {weeklyBookedCount}<span className="text-muted-foreground font-normal">/{weeklyAllowance}</span>
                 </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-muted border inline-block" /> Indisponível
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full border-2 border-orange-400 dark:border-orange-500 inline-block" /> Férias
-                </span>
+                <Progress
+                  value={(weeklyBookedCount / weeklyAllowanceDisplay) * 100}
+                  className="h-1.5 w-20"
+                />
               </div>
+            </div>
+            {!canBookMore && (
+              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 ml-1" />
+            )}
+          </div>
+        )}
+      </div>
 
-              {sessionsPerWeek != null && (
-                <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-semibold">{t("studentSessionBookingsThisWeek")}</span>
-                    <span
-                      className={`font-bold tabular-nums ${weeklyBookedCount >= weeklyAllowance ? "text-destructive" : "text-primary"}`}
-                    >
+      {isOpenAccess ? (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">{t("studentOpenAccessWorkoutsIntro")}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid lg:grid-cols-5 gap-5 items-start">
+
+          {/* ── Left column: Calendar ───────────────────────────────────── */}
+          <div className="lg:col-span-2 space-y-4">
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CalendarDays className="h-4 w-4 text-primary" /> Horário do Treinador
+                </CardTitle>
+                <CardDescription className="text-xs">Seleciona um dia para ver os blocos disponíveis</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-3">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={d => { if (d) setSelectedDate(d); }}
+                  modifiers={{
+                    booked: bookedDates,
+                    workout: workoutDates,
+                    unavailable: isUnavailableDay,
+                    onVacation: isOnVacationDay,
+                  }}
+                  modifiersClassNames={{
+                    booked:      "bg-accent/25 text-accent font-bold rounded-full",
+                    workout:     "bg-primary/10 font-medium",
+                    unavailable: "opacity-30 line-through text-muted-foreground",
+                    onVacation:
+                      "ring-2 ring-orange-400/80 dark:ring-orange-500 ring-offset-2 ring-offset-background rounded-full",
+                  }}
+                  className="rounded-md max-w-full"
+                />
+
+                {/* Legend */}
+                <div className="grid grid-cols-3 gap-1.5 pt-1 border-t">
+                  <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-full bg-accent/40 shrink-0" /> Inscrito
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-full bg-muted border shrink-0" /> Indisponível
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-full border-2 border-orange-400 shrink-0" /> Férias
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Weekly sessions summary card */}
+            {sessionsPerWeek != null && (
+              <Card className={`border ${weeklyBookedCount >= weeklyAllowance ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}`}>
+                <CardContent className="p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className={`h-4 w-4 ${weeklyBookedCount >= weeklyAllowance ? "text-destructive" : "text-primary"}`} />
+                      <span className="text-sm font-semibold">{t("studentSessionBookingsThisWeek")}</span>
+                    </div>
+                    <span className={`text-lg font-bold tabular-nums ${weeklyBookedCount >= weeklyAllowance ? "text-destructive" : "text-primary"}`}>
                       {weeklyBookedCount}/{weeklyAllowance}
                     </span>
                   </div>
                   <Progress value={(weeklyBookedCount / weeklyAllowanceDisplay) * 100} className="h-2" />
-                  {!canBookMore && (
-                    <p className="text-xs text-destructive flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3 shrink-0" /> {t("studentWeeklySessionLimitReached")}
+                  {!canBookMore ? (
+                    <p className="text-xs text-destructive flex items-center gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {t("studentWeeklySessionLimitReached")}
                     </p>
-                  )}
-                  {canBookMore && weeklyBookedCount > 0 && (
+                  ) : weeklyBookedCount > 0 ? (
                     <p className="text-xs text-muted-foreground">
                       {t("studentSessionsRemainingToBookThisWeek").replace(
                         "{remaining}",
                         String(weeklyAllowance - weeklyBookedCount)
                       )}
                     </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Ainda sem sessões reservadas esta semana.</p>
                   )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            )}
+          </div>
 
-          {/* Right: Day schedule */}
+          {/* ── Right column: Day schedule ──────────────────────────────── */}
           <Card className="lg:col-span-3">
-            <CardHeader>
-              {/* Week selected on calendar — same filter as program list below */}
-              {weekPlansOrdered.length > 0 && (
-                <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 mb-2">
-                  <Dumbbell className="h-4 w-4 text-primary shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">{workoutsPlansSectionTitle}</p>
-                    <p className="text-sm font-semibold text-primary">
-                      {weekPlansOrdered.length === 1
-                        ? weekPlansOrdered[0].title
-                        : `${weekPlansOrdered.length} programas nesta semana`}
-                    </p>
-                  </div>
-                </div>
-              )}
+            <CardHeader className="pb-3">
+
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <CardTitle className="capitalize text-xl">
+                  <CardTitle className="capitalize text-xl leading-tight">
                     {selectedDate.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="mt-0.5">
                     {showStudentDaySchedule
-                      ? `${timeSlots.length} blocos de ${slotDurationMin} min · sessão ${slotsNeeded * slotDurationMin} min`
+                      ? `${timeSlots.length} blocos · sessão ${sessionDurationMin} min`
                       : selectedDayOnVacation
                         ? "Treinador de férias"
                         : "Sem disponibilidade neste dia"}
                   </CardDescription>
                 </div>
-                {showStudentDaySchedule && selectedDaySched && (
+                {showStudentDaySchedule && (
                   <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                    {selectedDaySched.ranges.map((r,i) => (
-                      <Badge key={i} variant="outline" className="text-xs shrink-0">
-                        {r.startTime} – {r.endTime}
+                    {selectedDayWeeklyAvailable &&
+                      selectedDaySched?.ranges.map((r, i) => (
+                        <Badge key={`w-${i}`} variant="outline" className="text-xs shrink-0 font-mono">
+                          {r.startTime}–{r.endTime}
+                        </Badge>
+                      ))}
+                    {openBlocksOnSelectedDay.map((b) => (
+                      <Badge
+                        key={b.id}
+                        variant="outline"
+                        className="text-xs shrink-0 font-mono border-teal-500/50 text-teal-700 dark:text-teal-400"
+                      >
+                        {b.startTime}–{b.endTime}
                       </Badge>
                     ))}
                   </div>
                 )}
               </div>
             </CardHeader>
-            <CardContent>
+
+            <CardContent className="pt-0">
               {!showStudentDaySchedule ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-3 text-center text-muted-foreground">
-                  <Clock className="h-12 w-12 opacity-20" />
-                  <p>
-                    {selectedDayOnVacation
-                      ? "O treinador está de férias neste dia."
-                      : "O treinador não tem disponibilidade neste dia."}
-                  </p>
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted/50">
+                    <Clock className="h-8 w-8 opacity-30" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">
+                      {selectedDayOnVacation ? "Treinador de férias" : "Sem disponibilidade"}
+                    </p>
+                    <p className="text-xs mt-1">
+                      {selectedDayOnVacation
+                        ? "O treinador está de férias neste dia."
+                        : "Escolhe outro dia no calendário."}
+                    </p>
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-1.5 max-h-[560px] overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 -mx-1 px-1">
                   {timeSlots.map(time => {
                     const slot = slotsByTime.get(time);
                     const maxS = slot?.maxStudents ?? defaultMaxStudents;
                     const count = slot?.students.length ?? 0;
                     const mySlotEntry = slot?.students.find(s => s.studentId === myId);
                     const isEnrolled = !!mySlotEntry;
+                    const slotsNeededForTime = getSlotsNeededForTime(time);
+                    const sessionMinForTime = getSessionDurationForTime(time);
 
                     // A slot is a continuation only if it is strictly adjacent to sessionStart
-                    // (i.e. an exact multiple of slotDurationMin away, within the session window).
-                    // Slots in a different time range (e.g. 12:00 when sessionStart is 09:00)
-                    // are independent bookings and must NOT be collapsed into "continuação".
                     const isContinuation = isEnrolled
                       && mySlotEntry.sessionStart !== undefined
                       && mySlotEntry.sessionStart !== time
                       && (() => {
+                        const enrolledDur = mySlotEntry.sessionDurationMin ?? sessionMinForTime;
+                        const needed = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
                         const [sh, sm] = mySlotEntry.sessionStart!.split(":").map(Number);
                         const [th, tm] = time.split(":").map(Number);
                         const diff = (th * 60 + tm) - (sh * 60 + sm);
-                        return diff > 0 && diff < slotsNeeded * slotDurationMin && diff % slotDurationMin === 0;
+                        return diff > 0 && diff < needed * slotDurationMin && diff % slotDurationMin === 0;
                       })();
                     const isSessionStart = isEnrolled && !isContinuation;
 
-                    // For non-enrolled: need slotsNeeded truly consecutive free slots to book
                     const startIdx = timeSlots.indexOf(time);
-                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeeded);
+                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
                     const hasEnoughBlocks = !isEnrolled
-                      && blocksForSession.length === slotsNeeded
+                      && blocksForSession.length === slotsNeededForTime
                       && areConsecutiveBlocks(blocksForSession, slotDurationMin);
                     const allBlocksFree = hasEnoughBlocks && blocksForSession.every(t2 => {
                       const s2 = slotsByTime.get(t2);
@@ -980,93 +1066,114 @@ export default function StudentWorkoutsPage() {
                       sessionStartsAtForCancel.getTime() - Date.now() <= SESSION_SIGNUP_CUTOFF_MS;
                     const docId = slotDocId(selectedDateStr, time);
                     const isLoading_ = isRegistering === docId ||
-                      // also show loading on continuation while session-start is processing
                       (isContinuation && isRegistering === slotDocId(selectedDateStr, mySlotEntry?.sessionStart ?? time));
 
-                    // Cannot start a session here (tail of day / range shorter than slotsNeeded × slot length)
                     if (!isEnrolled && !isContinuation && !hasEnoughBlocks) return null;
 
+                    /* ── Slot card ── */
                     return (
                       <div
                         key={time}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${
+                        className={`relative flex items-center gap-3 rounded-xl border px-4 py-3 transition-all ${
                           isSessionStart
-                            ? "border-accent/60 bg-accent/10"
+                            ? "border-accent/50 bg-accent/10 shadow-sm"
                             : isContinuation
-                            ? "border-accent/30 bg-accent/5 ml-4"  // indented continuation
-                            : isFull
-                            ? "border-border bg-muted/10 opacity-60"
-                            : "border-border bg-transparent hover:bg-muted/20"
+                            ? "border-accent/20 bg-accent/5 ml-5 border-dashed"
+                            : isFull || isBookingCutoffPassed
+                            ? "border-border bg-muted/20 opacity-60"
+                            : "border-border bg-card hover:bg-muted/30 hover:border-primary/30 cursor-pointer"
                         }`}
                       >
-                        {/* Time — always 30-min block duration */}
-                        <div className="flex flex-col items-end min-w-[58px] shrink-0">
-                          <span className={`text-sm font-bold tabular-nums ${isContinuation ? "text-accent/60" : ""}`}>{time}</span>
-                          <span className="text-[10px] text-muted-foreground tabular-nums">{addMin(time, slotDurationMin)}</span>
-                        </div>
-
-                        {/* Colour bar */}
-                        <div className={`w-0.5 h-8 rounded-full shrink-0 ${
-                          isEnrolled ? "bg-accent" : isFull ? "bg-muted-foreground/30" : "bg-border"
+                        {/* Status stripe on left edge */}
+                        <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-full ${
+                          isSessionStart ? "bg-accent"
+                          : isContinuation ? "bg-accent/40"
+                          : isFull || isBookingCutoffPassed ? "bg-muted-foreground/20"
+                          : "bg-primary/40"
                         }`} />
 
-                        {/* Capacity (hide on continuation to reduce noise) */}
+                        {/* Time block */}
+                        <div className="flex flex-col items-center min-w-[52px] shrink-0 pl-1">
+                          <span className={`text-base font-bold tabular-nums leading-none ${
+                            isSessionStart ? "text-accent" : isContinuation ? "text-accent/50" : "text-foreground"
+                          }`}>{time}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums mt-0.5">{addMin(time, slotDurationMin)}</span>
+                        </div>
+
+                        {/* Main info */}
+                        <div className="flex-1 min-w-0">
+                          {isContinuation ? (
+                            <span className="text-xs text-accent/60 italic">↳ continuação da sessão</span>
+                          ) : (
+                            <>
+                              {/* Peer avatars */}
+                              {count > 0 && slot && (
+                                <div className="flex -space-x-1.5 mb-1.5">
+                                  {slot.students.map((st) => (
+                                    <span key={st.studentId} title={st.studentName} className="inline-flex shrink-0">
+                                      <Avatar className="h-6 w-6 border-2 border-background">
+                                        <AvatarImage src={slotStudentAvatarSrc(st)} alt="" />
+                                        <AvatarFallback className="text-[8px]">
+                                          {initialsFromStudentName(st.studentName)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Status line */}
+                              {isSessionStart ? (
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-accent shrink-0" />
+                                    <p className="text-xs font-semibold text-accent">
+                                      Inscrito · {mySlotEntry?.sessionDurationMin ?? sessionMinForTime} min
+                                    </p>
+                                  </div>
+                                  {mySlotEntry?.workoutTitle && (
+                                    <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                                      <Dumbbell className="h-3 w-3 shrink-0" /> {mySlotEntry.workoutTitle}
+                                    </p>
+                                  )}
+                                  {isCancelCutoffPassed && (
+                                    <p className="text-xs text-destructive/70">{t("sessionCancelClosedDesc")}</p>
+                                  )}
+                                </div>
+                              ) : isBookingCutoffPassed ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Lock className="h-3 w-3 text-muted-foreground/60 shrink-0" />
+                                  <span className="text-xs text-muted-foreground">Inscrição fecha 1h antes</span>
+                                </div>
+                              ) : isFull ? (
+                                <span className="text-xs text-muted-foreground">Bloco cheio</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground font-medium">
+                                  {maxS - count === 1
+                                    ? "1 lugar disponível"
+                                    : `${maxS - count} lugares disponíveis`}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+
+                        {/* Capacity pill (hide on continuation) */}
                         {!isContinuation && (
-                          <div className={`flex items-center gap-1 text-xs font-semibold shrink-0 tabular-nums ${
-                            isEnrolled ? "text-accent" : "text-muted-foreground"
+                          <div className={`flex items-center gap-1 text-xs shrink-0 tabular-nums px-1.5 py-0.5 rounded-full ${
+                            isSessionStart
+                              ? "bg-accent/20 text-accent font-semibold"
+                              : "text-muted-foreground"
                           }`}>
-                            <Users className="h-3.5 w-3.5" /> {count}/{maxS}
+                            <Users className="h-3 w-3" /> {count}/{maxS}
                           </div>
                         )}
 
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          {!isContinuation && count > 0 && slot && (
-                            <div className="flex -space-x-2 mb-1.5" aria-label="Inscritos neste bloco">
-                              {slot.students.map((st) => (
-                                <span key={st.studentId} title={st.studentName} className="inline-flex shrink-0">
-                                  <Avatar className="h-7 w-7 border-2 border-background">
-                                    <AvatarImage src={slotStudentAvatarSrc(st)} alt="" />
-                                    <AvatarFallback className="text-[9px]">
-                                      {initialsFromStudentName(st.studentName)}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {isContinuation ? (
-                            <span className="text-xs text-accent/70 italic">↳ continuação da sessão</span>
-                          ) : isSessionStart ? (
-                            <div className="space-y-0.5">
-                              <p className="text-xs font-semibold text-accent">
-                                Inscrito · sessão {slotsNeeded * slotDurationMin} min
-                              </p>
-                              {mySlotEntry?.workoutTitle && (
-                                <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
-                                  <Dumbbell className="h-3 w-3 shrink-0" /> {mySlotEntry.workoutTitle}
-                                </p>
-                              )}
-                              {isCancelCutoffPassed && (
-                                <p className="text-xs text-destructive/70">{t("sessionCancelClosedDesc")}</p>
-                              )}
-                            </div>
-                          ) : isBookingCutoffPassed ? (
-                            <span className="text-xs text-muted-foreground">Inscrição fecha 1h antes</span>
-                          ) : isFull ? (
-                            <span className="text-xs text-muted-foreground">Bloco cheio</span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              {maxS - count} lugar(es) disponível(is)
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Action: Sair until 1h before start; locked badge afterwards */}
+                        {/* CTA */}
                         {isSessionStart ? (
                           isCancelCutoffPassed ? (
-                            <Badge variant="secondary" className="shrink-0 text-xs">
-                              {t("sessionCancelClosedBadge")}
+                            <Badge variant="secondary" className="shrink-0 text-xs gap-1">
+                              <Lock className="h-3 w-3" /> {t("sessionCancelClosedBadge")}
                             </Badge>
                           ) : (
                             <Button
@@ -1076,28 +1183,24 @@ export default function StudentWorkoutsPage() {
                               onClick={() => handleToggleSlot(time)}
                               disabled={!!isLoading_}
                             >
-                              {isLoading_ ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <UserMinus className="h-3.5 w-3.5" />
-                              )}
+                              {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserMinus className="h-3.5 w-3.5" />}
                               {t("sessionBookingLeave")}
                             </Button>
                           )
                         ) : isContinuation ? null
                           : !isFull && !isBookingCutoffPassed ? (
-                          <Button size="sm"
-                            className="shrink-0 h-8 gap-1.5 text-xs bg-primary/90"
+                          <Button
+                            size="sm"
+                            className="shrink-0 h-8 gap-1.5 text-xs"
                             onClick={() => handleToggleSlot(time)}
-                            disabled={!!isLoading_ || !canBookMore || selectedDayOnVacation}>
-                            {isLoading_
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <UserPlus className="h-3.5 w-3.5" />}
+                            disabled={!!isLoading_ || !canBookMore || isBookingBlockedAtTime(time)}
+                          >
+                            {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
                             Inscrever
                           </Button>
                         ) : (
-                          <Badge variant="secondary" className="shrink-0 text-xs">
-                            {isBookingCutoffPassed ? "Fechado" : "Cheio"}
+                          <Badge variant="secondary" className="shrink-0 text-xs gap-1">
+                            {isBookingCutoffPassed ? <><Lock className="h-3 w-3" /> Fechado</> : "Cheio"}
                           </Badge>
                         )}
                       </div>
@@ -1108,136 +1211,143 @@ export default function StudentWorkoutsPage() {
             </CardContent>
           </Card>
         </div>
-        )}
+      )}
 
-        {trainerId ? (
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold">
+      {/* ── Workout plans section ──────────────────────────────────────── */}
+      {trainerId ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-primary" />
+            <h2 className="text-base font-semibold">
               {isOpenAccess ? t("myWorkouts") : workoutsPlansSectionTitle}
             </h2>
-            {plansToShow.length > 0 ? (
-              <div className="space-y-2">
-                {plansToShow.map((w) => {
-                  const isExpanded = expandedWorkoutId === w.id;
-                  const weekDate = w.weekStart
-                    ? new Date(w.weekStart + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })
-                    : w.assignedAt
-                    ? new Date(w.assignedAt).toLocaleDateString()
-                    : null;
+          </div>
+          {plansToShow.length > 0 ? (
+            <div className="space-y-2">
+              {plansToShow.map((w) => {
+                const isExpanded = expandedWorkoutId === w.id;
+                const weekDate = w.weekStart
+                  ? new Date(w.weekStart + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })
+                  : w.assignedAt
+                  ? new Date(w.assignedAt).toLocaleDateString()
+                  : null;
 
-                  const canStartThisWeek = planPresentAccess.get(w.id) === true;
-                  const panelId = `student-workout-plan-${w.id}`;
-                  return (
-                    <div key={w.id} className="rounded-lg border overflow-hidden bg-card">
-                      {canStartThisWeek ? (
-                        <>
-                          <div
-                            className={`flex items-center gap-2 px-3 py-2.5 ${
-                              isExpanded ? "border-b" : ""
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              id={`${panelId}-toggle`}
-                              aria-expanded={isExpanded}
-                              aria-controls={panelId}
-                              className="flex flex-1 min-w-0 items-center gap-3 rounded-md py-0.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                              onClick={() => setExpandedWorkoutId(isExpanded ? null : w.id)}
-                            >
-                              <Dumbbell className="h-4 w-4 text-primary shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-semibold truncate">{w.title}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {w.exercises?.length || 0} exercícios
-                                  {weekDate ? ` · semana de ${weekDate}` : ""}
-                                </p>
-                              </div>
-                              <span className="shrink-0 text-muted-foreground" aria-hidden>
-                                {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                              </span>
-                            </button>
-                            <Button size="sm" className="shrink-0 h-7 bg-accent text-accent-foreground gap-1.5 text-xs" asChild>
-                              <Link href={`/student/workouts/${w.id}/session`}>
-                                <Play className="h-3 w-3" /> Iniciar
-                              </Link>
-                            </Button>
+                const canStartThisWeek = planPresentAccess.get(w.id) === true;
+                const panelId = `student-workout-plan-${w.id}`;
+                return (
+                  <div key={w.id} className={`rounded-xl border overflow-hidden bg-card transition-shadow ${canStartThisWeek ? "shadow-sm hover:shadow-md" : "opacity-70"}`}>
+                    {canStartThisWeek ? (
+                      <>
+                        <div className={`flex items-center gap-3 px-4 py-3 ${isExpanded ? "border-b bg-muted/20" : ""}`}>
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/15 shrink-0">
+                            <Dumbbell className="h-4 w-4 text-accent" />
                           </div>
-
-                          {isExpanded && (
-                            <div id={panelId} role="region" aria-labelledby={`${panelId}-toggle`} className="divide-y">
-                              {(w.exercises || []).length === 0 ? (
-                                <p className="text-sm text-muted-foreground text-center py-4">Sem exercícios.</p>
-                              ) : (w.exercises || []).map((ex: any, idx: number) => {
-                                const prescribed =
-                                  ex.sets && ex.reps
-                                    ? `${ex.sets}×${ex.reps}`
-                                    : null;
-                                const exKey = normalizeExerciseKey(String(ex.exerciseName || ""));
-                                const lastPerf =
-                                  lastPerfByPlanId[w.id]?.[exKey] ?? lastPerfByExercise[exKey];
-                                const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
-                                  weighted: (weight, reps) =>
-                                    t("lastSessionPerformance")
-                                      .replace("{weight}", String(weight))
-                                      .replace("{reps}", String(reps)),
-                                  bodyweight: (reps) =>
-                                    t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
-                                });
-                                return (
-                                <div key={idx} className="px-4 py-3 space-y-1.5">
-                                  <p className="text-sm font-semibold">{ex.exerciseName}</p>
-                                  {prescribed ? (
-                                    <p className="text-xs text-muted-foreground">
-                                      {t("prescribedSetsReps")}: {prescribed}
-                                    </p>
-                                  ) : null}
-                                  {lastHint ? (
-                                    <p className="text-xs font-medium text-primary/90">{lastHint}</p>
-                                  ) : null}
-                                  {ex.notes ? (
-                                    <div className="flex items-start gap-1.5">
-                                      <StickyNote className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                                      <p className="text-xs text-muted-foreground whitespace-pre-line">{ex.notes}</p>
-                                    </div>
-                                  ) : !prescribed && !lastHint ? (
-                                    <p className="text-xs text-muted-foreground italic">Sem notas do treinador.</p>
-                                  ) : null}
-                                </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className="flex items-center gap-2 px-3 py-2.5">
-                          <div className="flex flex-1 min-w-0 items-start gap-3">
-                            <Dumbbell className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
-                            <p className="text-sm text-muted-foreground leading-snug">
-                              {t("studentWorkoutsLockedPlanMessage")}
-                            </p>
-                          </div>
-                          <Button
+                          <button
                             type="button"
-                            size="sm"
-                            variant="secondary"
-                            className="shrink-0 h-7 gap-1.5 text-xs"
-                            disabled
-                            title={t("studentTrainingRequiresPresentDescription")}
+                            id={`${panelId}-toggle`}
+                            aria-expanded={isExpanded}
+                            aria-controls={panelId}
+                            className="flex flex-1 min-w-0 flex-col text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-sm"
+                            onClick={() => setExpandedWorkoutId(isExpanded ? null : w.id)}
                           >
-                            <Play className="h-3 w-3" /> Iniciar
+                            <span className="text-sm font-semibold truncate leading-snug">{w.title}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {w.exercises?.length || 0} exercícios
+                              {weekDate ? ` · semana de ${weekDate}` : ""}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedWorkoutId(isExpanded ? null : w.id)}
+                            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                            aria-hidden
+                          >
+                            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                          </button>
+                          <Button size="sm" className="shrink-0 h-8 gap-1.5 text-xs bg-accent text-accent-foreground hover:bg-accent/90" asChild>
+                            <Link href={`/student/workouts/${w.id}/session`}>
+                              <Play className="h-3.5 w-3.5" /> Iniciar
+                            </Link>
                           </Button>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("studentWorkoutsNoPlansForSelectedWeek")}</p>
-            )}
-          </div>
-        ) : null}
 
-      </div>
+                        {isExpanded && (
+                          <div id={panelId} role="region" aria-labelledby={`${panelId}-toggle`} className="divide-y">
+                            {(w.exercises || []).length === 0 ? (
+                              <p className="text-sm text-muted-foreground text-center py-6">Sem exercícios definidos.</p>
+                            ) : (w.exercises || []).map((ex: any, idx: number) => {
+                              const prescribed = ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : null;
+                              const exKey = normalizeExerciseKey(String(ex.exerciseName || ""));
+                              const lastPerf = lastPerfByPlanId[w.id]?.[exKey] ?? lastPerfByExercise[exKey];
+                              const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
+                                weighted: (weight, reps) =>
+                                  t("lastSessionPerformance").replace("{weight}", String(weight)).replace("{reps}", String(reps)),
+                                bodyweight: (reps) =>
+                                  t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+                              });
+                              return (
+                                <div key={idx} className="px-4 py-3 flex gap-3 items-start">
+                                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground shrink-0 mt-0.5">
+                                    {idx + 1}
+                                  </div>
+                                  <div className="space-y-0.5 min-w-0 flex-1">
+                                    <p className="text-sm font-semibold">{ex.exerciseName}</p>
+                                    {prescribed && (
+                                      <p className="text-xs text-muted-foreground">
+                                        {t("prescribedSetsReps")}: <span className="font-medium text-foreground">{prescribed}</span>
+                                      </p>
+                                    )}
+                                    {lastHint && (
+                                      <p className="text-xs font-medium text-primary/90">{lastHint}</p>
+                                    )}
+                                    {ex.notes ? (
+                                      <div className="flex items-start gap-1.5 mt-1">
+                                        <StickyNote className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                                        <p className="text-xs text-muted-foreground whitespace-pre-line">{ex.notes}</p>
+                                      </div>
+                                    ) : !prescribed && !lastHint ? (
+                                      <p className="text-xs text-muted-foreground italic">Sem notas do treinador.</p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted shrink-0">
+                          <Lock className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        <p className="text-sm text-muted-foreground leading-snug flex-1 min-w-0">
+                          {t("studentWorkoutsLockedPlanMessage")}
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0 h-8 gap-1.5 text-xs"
+                          disabled
+                          title={t("studentTrainingRequiresPresentDescription")}
+                        >
+                          <Play className="h-3.5 w-3.5" /> Iniciar
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed bg-muted/20 p-8 text-center">
+              <Dumbbell className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">{t("studentWorkoutsNoPlansForSelectedWeek")}</p>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+    </div>
   );
 }

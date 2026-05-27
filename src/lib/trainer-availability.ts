@@ -12,6 +12,13 @@ export type VacationPeriod = {
   label?: string;
 };
 
+export type OpenAvailabilityBlock = {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+};
+
 const DAY_KEYS = [
   "sunday",
   "monday",
@@ -98,13 +105,145 @@ export function dayIsWeeklyAvailable(date: Date, availability: Availability): bo
   return !!sched?.enabled && !!sched.ranges.length;
 }
 
+function parseHm(time: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(time || "").trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function normalizeHm(time: string): string {
+  const mins = parseHm(time);
+  if (mins == null) return "09:00";
+  return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+}
+
+/** Generate slot start-times from `startTime` (inclusive) until `endTime` (exclusive). */
+export function generateSlotTimes(startTime: string, endTime: string, slotDurationMin: number): string[] {
+  const step = Math.max(1, Math.floor(slotDurationMin));
+  const startMins = parseHm(startTime);
+  const endMins = parseHm(endTime);
+  if (startMins == null || endMins == null || startMins >= endMins) return [];
+  const slots: string[] = [];
+  for (let t = startMins; t < endMins; t += step) {
+    slots.push(`${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`);
+  }
+  return slots;
+}
+
+export function generateSlotsForDay(
+  sched: DaySchedule | undefined,
+  slotDurationMin: number
+): string[] {
+  if (!sched?.enabled || !sched.ranges.length) return [];
+  const all = sched.ranges.flatMap((r) =>
+    generateSlotTimes(r.startTime, r.endTime, slotDurationMin)
+  );
+  return [...new Set(all)].sort();
+}
+
+export function normalizeOpenAvailabilityBlocks(raw: unknown): OpenAvailabilityBlock[] {
+  if (!Array.isArray(raw)) return [];
+  const out: OpenAvailabilityBlock[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const date = String(row.date || "").trim().slice(0, 10);
+    if (!date || !parseYmd(date)) continue;
+    const startTime = normalizeHm(String(row.startTime || ""));
+    const endTime = normalizeHm(String(row.endTime || ""));
+    const startMins = parseHm(startTime);
+    const endMins = parseHm(endTime);
+    if (startMins == null || endMins == null || startMins >= endMins) continue;
+    const id = String(row.id || "").trim() || `${date}_${startTime}_${endTime}`;
+    out.push({ id, date, startTime, endTime });
+  }
+  return out;
+}
+
+export function openBlocksForDate(
+  dateStr: string,
+  blocks: OpenAvailabilityBlock[]
+): OpenAvailabilityBlock[] {
+  const key = String(dateStr || "").trim().slice(0, 10);
+  return blocks.filter((b) => b.date === key);
+}
+
+export function timeWithinOpenBlock(time: string, block: OpenAvailabilityBlock): boolean {
+  const t = parseHm(time);
+  const start = parseHm(block.startTime);
+  const end = parseHm(block.endTime);
+  if (t == null || start == null || end == null) return false;
+  return t >= start && t < end;
+}
+
+export function openBlockAtTime(
+  dateStr: string,
+  time: string,
+  blocks: OpenAvailabilityBlock[]
+): OpenAvailabilityBlock | undefined {
+  return openBlocksForDate(dateStr, blocks).find((b) => timeWithinOpenBlock(time, b));
+}
+
+function timeWithinAnyOpenBlock(
+  time: string,
+  blocksOnDate: OpenAvailabilityBlock[]
+): boolean {
+  return blocksOnDate.some((b) => timeWithinOpenBlock(time, b));
+}
+
+/** Weekly slots outside open-block windows, plus slots from each open block on the date. */
+export function resolveDaySlotTimes(args: {
+  dateStr: string;
+  weeklySched: DaySchedule | undefined;
+  openBlocks: OpenAvailabilityBlock[];
+  slotDurationMin: number;
+}): string[] {
+  const { dateStr, weeklySched, openBlocks, slotDurationMin } = args;
+  const onDate = openBlocksForDate(dateStr, openBlocks);
+  const weeklySlots = generateSlotsForDay(weeklySched, slotDurationMin).filter(
+    (t) => !timeWithinAnyOpenBlock(t, onDate)
+  );
+  const openSlots = onDate.flatMap((b) =>
+    generateSlotTimes(b.startTime, b.endTime, slotDurationMin)
+  );
+  return [...new Set([...weeklySlots, ...openSlots])].sort();
+}
+
+export function dayHasOpenBlocks(dateStr: string, blocks: OpenAvailabilityBlock[]): boolean {
+  return openBlocksForDate(dateStr, blocks).length > 0;
+}
+
+export function getEffectiveSessionDurationMin(args: {
+  rosterDurationMin: number;
+  slotDurationMin: number;
+}): number {
+  const roster = args.rosterDurationMin;
+  if (Number.isFinite(roster) && roster > 0) return roster;
+  return Math.max(1, args.slotDurationMin);
+}
+
+export function isNewBookingBlocked(args: {
+  dateStr: string;
+  time: string;
+  vacationPeriods: VacationPeriod[];
+  openBlocks: OpenAvailabilityBlock[];
+}): boolean {
+  if (!isDateInVacation(args.dateStr, args.vacationPeriods)) return false;
+  return !openBlockAtTime(args.dateStr, args.time, args.openBlocks);
+}
+
 export function coachDayShowsSchedule(args: {
   weeklyAvailable: boolean;
   onVacation: boolean;
   hasExistingSlots: boolean;
+  hasResolvableSlots?: boolean;
 }): boolean {
+  if (args.hasResolvableSlots) return true;
   const { weeklyAvailable, onVacation, hasExistingSlots } = args;
-  if (!weeklyAvailable) return false;
+  if (!weeklyAvailable) return hasExistingSlots;
   if (onVacation) return hasExistingSlots;
   return true;
 }
@@ -112,8 +251,34 @@ export function coachDayShowsSchedule(args: {
 export function studentDayBookable(args: {
   weeklyAvailable: boolean;
   onVacation: boolean;
+  hasResolvableSlots?: boolean;
 }): boolean {
+  if (args.hasResolvableSlots) return true;
   return args.weeklyAvailable && !args.onVacation;
+}
+
+/** Upcoming open blocks on or after today, sorted by date then start time. */
+export function upcomingOpenAvailabilityBlocks(
+  blocks: OpenAvailabilityBlock[],
+  todayStr: string = toDateStr(new Date()),
+  limit = 5
+): OpenAvailabilityBlock[] {
+  return [...blocks]
+    .filter((b) => b.date >= todayStr)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
+    .slice(0, limit);
+}
+
+export function formatOpenBlockLabel(
+  block: Pick<OpenAvailabilityBlock, "date" | "startTime" | "endTime">,
+  locale: "pt" | "en" = "pt"
+): string {
+  const loc = locale === "pt" ? pt : undefined;
+  const d = parseYmd(block.date);
+  const datePart = d
+    ? format(d, "d MMM yyyy", loc ? { locale: loc } : undefined)
+    : block.date;
+  return `${datePart} · ${block.startTime}–${block.endTime}`;
 }
 
 export function formatVacationPeriodRange(

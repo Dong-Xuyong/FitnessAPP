@@ -18,6 +18,8 @@ import type { Milestone } from "@/lib/types";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { countMonthlyWorkoutPlanCompletions } from "@/lib/student-monthly-workout-completion";
+import { useStudentBillingData } from "@/hooks/use-student-billing-data";
+import { StudentPendingPaymentCard } from "@/components/student-billing/StudentPendingPaymentCard";
 
 type DashTab = "home" | "progress" | "milestones";
 
@@ -31,6 +33,10 @@ export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const { t } = useI18n();
+  const { currentPeriodPending, paymentMethod, loading: billingLoading } = useStudentBillingData(
+    db,
+    user?.uid
+  );
 
   const [activeTab, setActiveTab] = useState<DashTab>("home");
 
@@ -253,6 +259,13 @@ export default function StudentDashboardPage() {
               {t("goalPrefix")}{studentData.goalType?.replace("_", " ") || "—"}
             </p>
           </header>
+
+          {!billingLoading && currentPeriodPending ? (
+            <StudentPendingPaymentCard
+              payment={currentPeriodPending}
+              paymentMethod={paymentMethod}
+            />
+          ) : null}
 
           <div className="grid md:grid-cols-3 gap-6">
             <Card className="md:col-span-2 bg-primary text-primary-foreground">

@@ -160,9 +160,6 @@ export function studentHasCoachPresentAccessForPlan(
       if (seenLogical.has(logicalKey)) continue;
       seenLogical.add(logicalKey);
 
-      const rowPlan = st.workoutPlanId;
-      if (rowPlan && rowPlan !== workoutPlanId) continue;
-
       const slotDateKey = (slot.date || "").substring(0, 10);
       if (!slotDateKey || slotDateKey !== todayKey) continue;
       return true;

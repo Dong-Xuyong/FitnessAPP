@@ -1,7 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { isPaidStatus, isPendingStatus, resolveMonthlyRate, shopSourcePeriodForPaymentPeriod } from "./shop-billing";
+import { isPaidStatus, isPendingStatus, resolveMonthlyRate } from "./shop-billing";
 import {
   currentBillingPeriod,
   isWithinLastThreeDaysOfMonth,
@@ -69,11 +69,6 @@ export const ensureNextPeriodPayments = onSchedule(
     }
 
     const paymentPeriod = nextBillingPeriod(lisbon);
-    const shopSourcePeriod = shopSourcePeriodForPaymentPeriod(paymentPeriod);
-    if (!shopSourcePeriod) {
-      logger.warn("ensureNextPeriodPayments: invalid payment period", { paymentPeriod });
-      return;
-    }
 
     const trainersSnap = await db.collection("personalTrainers").get();
     let processed = 0;
@@ -106,7 +101,6 @@ export const ensureNextPeriodPayments = onSchedule(
             trainerId,
             authUid,
             paymentPeriod,
-            shopSourcePeriod,
             { createSource: "auto_next_month_scheduled" }
           );
           processed += 1;
@@ -125,7 +119,6 @@ export const ensureNextPeriodPayments = onSchedule(
     logger.info("ensureNextPeriodPayments completed", {
       lisbon,
       paymentPeriod,
-      shopSourcePeriod,
       processed,
       skipped,
       errors,

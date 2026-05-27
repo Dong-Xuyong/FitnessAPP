@@ -136,6 +136,170 @@ service cloud.firestore {
         (lines.size() < 20 || shopLineElementValid(lines[19]));
     }
 
+    function shopBillingStatusValid(status) {
+      return status == 'unpaid' || status == 'paid';
+    }
+
+    /** Lines with optional billing fields (coach mark-paid, student unpaid merge). */
+    function shopBillableLineElementValid(line) {
+      return line.itemId is string &&
+        line.itemId.size() > 0 &&
+        line.itemId.size() <= 128 &&
+        shopLineQtyValid(line.quantity) &&
+        (
+          (
+            line.keys().hasOnly(['itemId', 'quantity', 'billingStatus']) &&
+            line.billingStatus is string &&
+            shopBillingStatusValid(line.billingStatus)
+          ) ||
+          (
+            line.keys().hasOnly(['itemId', 'quantity', 'billingStatus', 'paidInPaymentId']) &&
+            line.billingStatus is string &&
+            shopBillingStatusValid(line.billingStatus) &&
+            line.paidInPaymentId is string &&
+            line.paidInPaymentId.size() <= 128
+          )
+        );
+    }
+
+    function shopBillableLinesListValid(lines) {
+      return lines is list &&
+        lines.size() <= 20 &&
+        (lines.size() < 1 || shopBillableLineElementValid(lines[0])) &&
+        (lines.size() < 2 || shopBillableLineElementValid(lines[1])) &&
+        (lines.size() < 3 || shopBillableLineElementValid(lines[2])) &&
+        (lines.size() < 4 || shopBillableLineElementValid(lines[3])) &&
+        (lines.size() < 5 || shopBillableLineElementValid(lines[4])) &&
+        (lines.size() < 6 || shopBillableLineElementValid(lines[5])) &&
+        (lines.size() < 7 || shopBillableLineElementValid(lines[6])) &&
+        (lines.size() < 8 || shopBillableLineElementValid(lines[7])) &&
+        (lines.size() < 9 || shopBillableLineElementValid(lines[8])) &&
+        (lines.size() < 10 || shopBillableLineElementValid(lines[9])) &&
+        (lines.size() < 11 || shopBillableLineElementValid(lines[10])) &&
+        (lines.size() < 12 || shopBillableLineElementValid(lines[11])) &&
+        (lines.size() < 13 || shopBillableLineElementValid(lines[12])) &&
+        (lines.size() < 14 || shopBillableLineElementValid(lines[13])) &&
+        (lines.size() < 15 || shopBillableLineElementValid(lines[14])) &&
+        (lines.size() < 16 || shopBillableLineElementValid(lines[15])) &&
+        (lines.size() < 17 || shopBillableLineElementValid(lines[16])) &&
+        (lines.size() < 18 || shopBillableLineElementValid(lines[17])) &&
+        (lines.size() < 19 || shopBillableLineElementValid(lines[18])) &&
+        (lines.size() < 20 || shopBillableLineElementValid(lines[19]));
+    }
+
+    /** Student may write unpaid billable lines or preserve existing paid rows. */
+    function shopStudentLineElementValid(line) {
+      return shopLineElementValid(line) ||
+        (
+          line.keys().hasOnly(['itemId', 'quantity', 'billingStatus']) &&
+          line.billingStatus == 'unpaid' &&
+          line.itemId is string &&
+          line.itemId.size() > 0 &&
+          line.itemId.size() <= 128 &&
+          shopLineQtyValid(line.quantity)
+        ) ||
+        (
+          line.keys().hasOnly(['itemId', 'quantity', 'billingStatus']) &&
+          line.billingStatus == 'paid' &&
+          line.itemId is string &&
+          line.itemId.size() > 0 &&
+          line.itemId.size() <= 128 &&
+          shopLineQtyValid(line.quantity)
+        ) ||
+        (
+          line.keys().hasOnly(['itemId', 'quantity', 'billingStatus', 'paidInPaymentId']) &&
+          line.billingStatus == 'paid' &&
+          line.itemId is string &&
+          line.itemId.size() > 0 &&
+          line.itemId.size() <= 128 &&
+          shopLineQtyValid(line.quantity) &&
+          line.paidInPaymentId is string &&
+          line.paidInPaymentId.size() > 0 &&
+          line.paidInPaymentId.size() <= 128
+        );
+    }
+
+    function shopSubRegistrationPayloadKeysValid() {
+      return request.resource.data.keys().hasOnly(['studentId', 'trainerId', 'date', 'time', 'itemId', 'quantity', 'billingStatus', 'updatedAt']);
+    }
+
+    function shopPurchaseItemIdValid(itemId) {
+      return itemId is string && itemId.size() > 0 && itemId.size() <= 128;
+    }
+
+    function shopRegistrationTimeValid(time) {
+      return time is string && time.matches('^[0-9]{2}:[0-9]{2}:[0-9]{2}$');
+    }
+
+    function shopSubStudentOwnsPurchase(personalTrainerId) {
+      return canStudentAccessTrainerStudentPath(personalTrainerId, resource.data.studentId);
+    }
+
+    function shopSubStudentCreateValid(personalTrainerId, regId) {
+      return isSignedIn() &&
+        shopSubStudentLinkedToTrainer(personalTrainerId) &&
+        canStudentAccessTrainerStudentPath(personalTrainerId, request.auth.uid) &&
+        shopSubRegistrationPayloadKeysValid() &&
+        request.resource.data.studentId == request.auth.uid &&
+        request.resource.data.trainerId == personalTrainerId &&
+        request.resource.data.date is string &&
+        request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        shopRegistrationTimeValid(request.resource.data.time) &&
+        shopPurchaseItemIdValid(request.resource.data.itemId) &&
+        shopLineQtyValid(request.resource.data.quantity) &&
+        request.resource.data.billingStatus == 'unpaid' &&
+        (
+          (request.resource.data.updatedAt is string) ||
+          (request.resource.data.updatedAt is timestamp)
+        );
+    }
+
+    function shopSubCoachBillingUpdateValid(personalTrainerId) {
+      return isOwner(personalTrainerId) &&
+        resource != null &&
+        resource.data.trainerId == personalTrainerId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['billingStatus', 'paidInPaymentId', 'updatedAt']) &&
+        isFieldUnchanged('studentId') &&
+        isFieldUnchanged('trainerId') &&
+        isFieldUnchanged('date') &&
+        isFieldUnchanged('time') &&
+        isFieldUnchanged('itemId') &&
+        isFieldUnchanged('quantity') &&
+        (
+          request.resource.data.billingStatus == 'paid' ||
+          request.resource.data.billingStatus == 'unpaid'
+        ) &&
+        (
+          (request.resource.data.updatedAt is string) ||
+          (request.resource.data.updatedAt is timestamp)
+        );
+    }
+
+    function shopStudentLinesListValid(lines) {
+      return lines is list &&
+        lines.size() <= 20 &&
+        (lines.size() < 1 || shopStudentLineElementValid(lines[0])) &&
+        (lines.size() < 2 || shopStudentLineElementValid(lines[1])) &&
+        (lines.size() < 3 || shopStudentLineElementValid(lines[2])) &&
+        (lines.size() < 4 || shopStudentLineElementValid(lines[3])) &&
+        (lines.size() < 5 || shopStudentLineElementValid(lines[4])) &&
+        (lines.size() < 6 || shopStudentLineElementValid(lines[5])) &&
+        (lines.size() < 7 || shopStudentLineElementValid(lines[6])) &&
+        (lines.size() < 8 || shopStudentLineElementValid(lines[7])) &&
+        (lines.size() < 9 || shopStudentLineElementValid(lines[8])) &&
+        (lines.size() < 10 || shopStudentLineElementValid(lines[9])) &&
+        (lines.size() < 11 || shopStudentLineElementValid(lines[10])) &&
+        (lines.size() < 12 || shopStudentLineElementValid(lines[11])) &&
+        (lines.size() < 13 || shopStudentLineElementValid(lines[12])) &&
+        (lines.size() < 14 || shopStudentLineElementValid(lines[13])) &&
+        (lines.size() < 15 || shopStudentLineElementValid(lines[14])) &&
+        (lines.size() < 16 || shopStudentLineElementValid(lines[15])) &&
+        (lines.size() < 17 || shopStudentLineElementValid(lines[16])) &&
+        (lines.size() < 18 || shopStudentLineElementValid(lines[17])) &&
+        (lines.size() < 19 || shopStudentLineElementValid(lines[18])) &&
+        (lines.size() < 20 || shopStudentLineElementValid(lines[19]));
+    }
+
     function shopItemPriceValid(price) {
       return price is number && price >= 0 && price <= 9999;
     }
@@ -157,7 +321,7 @@ service cloud.firestore {
         );
     }
 
-    /** Shop logs live under `personalTrainers/{tid}/shopRegistrations/{authUid}_{YYYY-MM-DD}`. */
+    /** @deprecated Legacy day-grouped docs; migration removes these. */
     function shopSubRegDocIdForStudent(regId) {
       return regId.matches('^' + request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}$');
     }
@@ -167,44 +331,9 @@ service cloud.firestore {
         get(/databases/$(database)/documents/students/$(request.auth.uid)).data.trainerId == personalTrainerId;
     }
 
-    function shopSubStudentCreateValid(personalTrainerId, regId) {
-      return isSignedIn() &&
-        shopSubStudentLinkedToTrainer(personalTrainerId) &&
-        canStudentAccessTrainerStudentPath(personalTrainerId, request.auth.uid) &&
-        shopSubRegDocIdForStudent(regId) &&
-        regId == request.auth.uid + '_' + request.resource.data.date &&
-        request.resource.data.keys().hasOnly(['studentId', 'trainerId', 'date', 'lines', 'updatedAt']) &&
-        request.resource.data.studentId == request.auth.uid &&
-        request.resource.data.trainerId == personalTrainerId &&
-        request.resource.data.date is string &&
-        request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
-        shopLinesListValid(request.resource.data.lines) &&
-        (
-          (request.resource.data.updatedAt is string) ||
-          (request.resource.data.updatedAt is timestamp)
-        );
-    }
-
+    /** Legacy update path removed — purchases are append-only for students. */
     function shopSubStudentUpdateValid(personalTrainerId, regId) {
-      return isSignedIn() &&
-        resource != null &&
-        shopSubStudentLinkedToTrainer(personalTrainerId) &&
-        canStudentAccessTrainerStudentPath(personalTrainerId, request.auth.uid) &&
-        resource.data.studentId == request.auth.uid &&
-        regId == request.auth.uid + '_' + resource.data.date &&
-        request.resource.data.keys().hasOnly(['studentId', 'trainerId', 'date', 'lines', 'updatedAt']) &&
-        isFieldUnchanged('studentId') &&
-        isFieldUnchanged('trainerId') &&
-        isFieldUnchanged('date') &&
-        request.resource.data.studentId == request.auth.uid &&
-        request.resource.data.trainerId == personalTrainerId &&
-        request.resource.data.trainerId == resource.data.trainerId &&
-        request.resource.data.date == resource.data.date &&
-        shopLinesListValid(request.resource.data.lines) &&
-        (
-          (request.resource.data.updatedAt is string) ||
-          (request.resource.data.updatedAt is timestamp)
-        );
+      return false;
     }
 
     /** Student unlocks the next step in a sequence (only `studentUnlocked` false → true). */
@@ -318,28 +447,19 @@ service cloud.firestore {
           (
             isSignedIn() &&
             shopSubStudentLinkedToTrainer(personalTrainerId) &&
-            resource.data.trainerId == personalTrainerId &&
-            resource.data.studentId == request.auth.uid
+            canStudentAccessTrainerStudentPath(personalTrainerId, resource.data.studentId)
           );
 
         allow get: if isOwner(personalTrainerId) ||
           (
             isSignedIn() &&
             resource != null &&
-            resource.data.trainerId == personalTrainerId &&
-            resource.data.studentId == request.auth.uid &&
-            canStudentAccessTrainerStudentPath(personalTrainerId, request.auth.uid)
-          ) ||
-          (
-            isSignedIn() &&
-            resource == null &&
-            shopSubRegDocIdForStudent(regId) &&
-            shopSubStudentLinkedToTrainer(personalTrainerId) &&
-            canStudentAccessTrainerStudentPath(personalTrainerId, request.auth.uid)
+            shopSubStudentOwnsPurchase(personalTrainerId) &&
+            shopSubStudentLinkedToTrainer(personalTrainerId)
           );
 
         allow create: if shopSubStudentCreateValid(personalTrainerId, regId);
-        allow update: if shopSubStudentUpdateValid(personalTrainerId, regId);
+        allow update: if shopSubCoachBillingUpdateValid(personalTrainerId);
         allow delete: if isOwner(personalTrainerId);
       }
     

@@ -10,7 +10,6 @@ import {
   Dumbbell,
   History,
   LogOut,
-  Play,
   CreditCard,
   User,
   Store,
@@ -53,6 +52,97 @@ function splitName(rawName?: string): { firstName?: string; fullName?: string } 
   return { firstName: first, fullName: value };
 }
 
+function StudentLocaleToggle({
+  locale,
+  setLocale,
+  collapsed = false,
+}: {
+  locale: string;
+  setLocale: (locale: "en" | "pt") => void;
+  collapsed?: boolean;
+}) {
+  const trigger = (
+    <DropdownMenuTrigger asChild>
+      <Button variant="outline" size="icon" className="shrink-0">
+        <Globe className="h-4 w-4" />
+        <span className="sr-only">Language</span>
+      </Button>
+    </DropdownMenuTrigger>
+  );
+
+  const menu = (
+    <DropdownMenuContent align={collapsed ? "center" : "start"} side={collapsed ? "right" : "top"}>
+      <DropdownMenuItem onClick={() => setLocale("en")} className={locale === "en" ? "font-bold" : ""}>
+        English
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setLocale("pt")} className={locale === "pt" ? "font-bold" : ""}>
+        Português
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
+  if (collapsed) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="icon" className="w-full shrink-0">
+            <Globe className="h-4 w-4" />
+            <span className="sr-only">Language</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="center">
+          <DropdownMenuItem onClick={() => setLocale("en")} className={locale === "en" ? "font-bold" : ""}>
+            English
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setLocale("pt")} className={locale === "pt" ? "font-bold" : ""}>
+            Português
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      {trigger}
+      {menu}
+    </DropdownMenu>
+  );
+}
+
+function StudentSidebarUtilityControls({
+  locale,
+  setLocale,
+  collapsed = false,
+}: {
+  locale: string;
+  setLocale: (locale: "en" | "pt") => void;
+  collapsed?: boolean;
+}) {
+  if (collapsed) {
+    return (
+      <div className="flex flex-col items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <ThemeToggle />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">Toggle dark mode</TooltipContent>
+        </Tooltip>
+        <StudentLocaleToggle locale={locale} setLocale={setLocale} collapsed />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <ThemeToggle />
+      <StudentLocaleToggle locale={locale} setLocale={setLocale} />
+    </div>
+  );
+}
+
 function StudentSidebarIdentity({
   profile,
   user,
@@ -66,10 +156,18 @@ function StudentSidebarIdentity({
   collapsed?: boolean;
   onNavigate?: () => void;
 }) {
-  const displayName = profile?.fullName || profile?.firstName || user?.displayName || "Student";
-  const avatarSrc =
-    profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || "s1"}/100/100`;
-  const fallback = profile?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "U";
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+
+  const displayName = hydrated
+    ? profile?.fullName || profile?.firstName || user?.displayName || "Student"
+    : "Student";
+  const avatarSrc = hydrated
+    ? profile?.photoUrl || user?.photoURL || `https://picsum.photos/seed/${user?.uid || "s1"}/100/100`
+    : "https://picsum.photos/seed/s1/100/100";
+  const fallback = hydrated
+    ? profile?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "U"
+    : "U";
 
   if (collapsed && layout === "vertical") {
     return (
@@ -112,7 +210,9 @@ function StudentSidebarIdentity({
         <AvatarFallback className={layout === "vertical" ? "text-lg" : "text-sm"}>{fallback}</AvatarFallback>
       </Avatar>
       <div className={cn("min-w-0", layout === "horizontal" && "flex-1", textAlign)}>
-        <p className="text-sm font-semibold leading-snug truncate">{displayName}</p>
+        <p className="text-sm font-semibold leading-snug truncate" suppressHydrationWarning>
+          {displayName}
+        </p>
       </div>
     </Link>
   );
@@ -261,7 +361,12 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <div className={cn("border-t mt-auto shrink-0 space-y-1", desktopSidebarCollapsed ? "p-2" : "p-4")}>
+          <div className={cn("border-t mt-auto shrink-0 space-y-2", desktopSidebarCollapsed ? "p-2" : "p-4")}>
+            <StudentSidebarUtilityControls
+              locale={locale}
+              setLocale={setLocale}
+              collapsed={desktopSidebarCollapsed}
+            />
             {desktopSidebarCollapsed ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -331,7 +436,8 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
-          <div className="p-4 pb-8 border-t mt-auto">
+          <div className="p-4 pb-8 border-t mt-auto space-y-3">
+            <StudentSidebarUtilityControls locale={locale} setLocale={setLocale} />
             <Button
               variant="ghost"
               className="w-full justify-start gap-3 text-muted-foreground"
@@ -348,46 +454,15 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
       </Sheet>
 
         <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", mainMargin)}>
-        <header className="h-16 border-b bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden shrink-0"
-              onClick={() => setMobileOpen(true)}
-              aria-label="Open menu"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="text-lg font-semibold capitalize">
-              {t("myDashboard")}
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeToggle />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon">
-                  <Globe className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setLocale("en")} className={locale === "en" ? "font-bold" : ""}>
-                  English
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setLocale("pt")} className={locale === "pt" ? "font-bold" : ""}>
-                  Português
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button className="hidden sm:flex gap-2 bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-              <Link href="/student/workouts">
-                <Play className="h-4 w-4" />
-                {t("startWorkout")}
-              </Link>
-            </Button>
-          </div>
-        </header>
+        <Button
+          variant="outline"
+          size="icon"
+          className="md:hidden fixed top-3 left-3 z-50 shadow-sm bg-background/95 backdrop-blur"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
 
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
           {reminder.show && !isBlocked ? (

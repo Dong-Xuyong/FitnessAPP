@@ -79,6 +79,44 @@ export function normalizedPaymentPending(raw: unknown): boolean {
   return s === "pending" || s === "pendente";
 }
 
+type PaymentPeriodRow = { period?: string; status?: string };
+
+/**
+ * Pending payment to highlight on the student dashboard:
+ * 1) current calendar month, else
+ * 2) nearest future pending (e.g. June row created in late May), else
+ * 3) most recent past unpaid period (overdue).
+ */
+export function selectDashboardPendingPayment<T extends PaymentPeriodRow>(
+  payments: T[],
+  now = new Date()
+): T | null {
+  const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const pending = payments.filter((p) => normalizedPaymentPending(p.status));
+  if (!pending.length) return null;
+
+  const ym = (p: PaymentPeriodRow) => canonicalBillingPeriodYm(p.period);
+
+  const currentMatch = pending.find((p) => ym(p) === current);
+  if (currentMatch) return currentMatch;
+
+  const future = pending
+    .filter((p) => {
+      const pYm = ym(p);
+      return pYm && pYm > current;
+    })
+    .sort((a, b) => (ym(a) ?? "").localeCompare(ym(b) ?? ""));
+  if (future[0]) return future[0];
+
+  const past = pending
+    .filter((p) => {
+      const pYm = ym(p);
+      return pYm && pYm < current;
+    })
+    .sort((a, b) => (ym(b) ?? "").localeCompare(ym(a) ?? ""));
+  return past[0] ?? null;
+}
+
 export function isPeriodPaid(
   payments: Array<{ period?: string; status?: string }>,
   period: string

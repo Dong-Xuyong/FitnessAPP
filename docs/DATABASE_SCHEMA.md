@@ -117,6 +117,7 @@ firestore (root)
 - `photoUrl`: Profile picture URL
 - `dateJoined`: When the trainer registered
 - `availability`: Weekly schedule — per weekday (`sunday` … `saturday`): `{ enabled, ranges: [{ startTime, endTime }] }` (times as `HH:mm`)
+- `openAvailabilityBlocks`: Date-specific extra availability — array of `{ id, date, startTime, endTime }` (`date` as `YYYY-MM-DD`, times as `HH:mm`). Within each block’s time window, slot generation and new bookings use that window instead of overlapping weekly ranges, and vacation does not block new bookings in that window. Session length for bookings follows each student’s roster `sessionDurationMin`. Outside the window, weekly schedule and vacation rules apply unchanged.
 - `vacationPeriods`: Date-specific time off — array of `{ id, startDate, endDate, label }` with inclusive `YYYY-MM-DD` bounds and a required short description; overrides weekly hours for new bookings
 - `slotDurationMin`, `maxStudentsPerSlot`: Calendar block settings (minutes per slot, default capacity)
 
@@ -160,21 +161,26 @@ firestore (root)
 ---
 
 ### `/personalTrainers/{trainerId}/shopRegistrations/{regId}` Documents
-**Purpose**: Daily shop purchase log per student. Doc id: `{authUid}_{YYYY-MM-DD}`.
+**Purpose**: One Firestore document per product purchase. Doc id is auto-generated.
 
 **Key Fields**:
-- `studentId`, `trainerId`, `date` (`YYYY-MM-DD`)
-- `lines`: `[{ itemId, quantity }]` (quantity 0–999)
+- `studentId`, `trainerId`, `date` (`YYYY-MM-DD`), `time` (`HH:mm:ss` local — per purchase)
+- `itemId`, `quantity`
+- `billingStatus`: `unpaid` (default) or `paid` after the coach marks the monthly payment paid
+- `paidInPaymentId` (optional, when paid)
+- Effective payment month is **derived** from `date` and payment cascade (same as before)
 - `updatedAt`: ISO timestamp
 
-Shop charges for a calendar month roll into the student’s **pending** payment for that `YYYY-MM` period (see Cloud Function `syncShopPaymentOnRegistrationWrite`).
+Legacy docs with a `lines[]` array (one doc per day) are migrated via `migrateShopRegistrationsCallable`.
+
+Unpaid lines are summed into the matching pending `payments` row (`shopAmount`). Cloud Function `syncShopPaymentOnRegistrationWrite` recalculates totals; `markShopPaidOnPaymentWrite` flags lines paid when a payment is marked paid.
 
 ---
 
 ### `/personalTrainers/{trainerId}/students/{studentId}/payments/{paymentId}` — shop breakdown
 **Optional fields** (when shop sync ran):
-- `baseAmount`: Membership (`monthlyRate`)
-- `shopAmount`: Shop total for `period`
+- `baseAmount`: Membership (`monthlyRate`) for `period`
+- `shopAmount`: Sum of **unpaid** shop on registrations whose **derived** effective payment month equals `period`
 - `amount`: `baseAmount + shopAmount`
 - `shopSyncedAt`: Last sync timestamp
 
