@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -100,6 +100,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EditWorkoutSessionDialog } from "@/components/EditWorkoutSessionDialog";
 import { MilestonesTab } from "@/components/MilestonesTab";
+import { StudentWeeklySchedulingTab } from "@/components/student-weekly-scheduling/StudentWeeklySchedulingTab";
 import { useI18n } from "@/lib/i18n";
 import type { Milestone, TrainingProgramDocument } from "@/lib/types";
 import { linkStudentProfileForTrainerAssignments } from "@/components/AssignStudentSequenceForm";
@@ -118,18 +119,28 @@ import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-s
 import { BodyCompositionTrendChart } from "@/components/BodyCompositionTrendChart";
 import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
 import {
+  buildPaymentAmounts,
+  buildShopBillingPeriodContextFromPayments,
   catalogMapFromItems,
+  collectShopLinesForPaymentPeriod,
+  collectShopLinesPaidByPaymentId,
+  collectTargetPaymentPeriodsFromRegistrations,
+  computeUnpaidShopForPaymentPeriod,
   paymentHasShopBreakdown,
-  shopSourcePeriodForPaymentPeriod,
-  summarizeShopRegistrationsForPeriod,
-  type ShopLine,
-  type ShopRegistrationLike,
+  shopLineBillablePaymentPeriod,
+  summarizeUnpaidShopRegistrations,
+  formatShopRegistrationDateTime,
+  type ShopPurchaseLike,
 } from "@/lib/shop-billing";
 import {
-  fetchShopRegistrationsForPeriodCandidates,
+  fetchShopRegistrationsForStudentCandidates,
   resolveShopRegistrationStudentIds,
 } from "@/lib/fetch-shop-registrations";
-import { currentBillingPeriod, nextBillingPeriod } from "@/lib/roster-payment-status";
+import {
+  markShopRegistrationsPaidForPayment,
+  repairShopLinesForPaidPayments,
+} from "@/lib/shop-billing-payments";
+import { currentBillingPeriod } from "@/lib/roster-payment-status";
 import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import {
@@ -228,15 +239,16 @@ function BillingTab({
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [newPayment, setNewPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid" });
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
-  const [editingPayment, setEditingPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid" });
+  const [editingPayment, setEditingPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid", shopAmountLocked: false, lockedShopAmount: 0, lockedBaseAmount: 0 });
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState<string | null>(null);
   const [shopCatalogMap, setShopCatalogMap] = useState<Map<string, { name: string; price: number; active?: boolean }>>(
     () => new Map()
   );
-  const [shopRegs, setShopRegs] = useState<ShopRegistrationLike[]>([]);
+  const [shopRegs, setShopRegs] = useState<ShopPurchaseLike[]>([]);
   const [shopDataLoading, setShopDataLoading] = useState(false);
   const [billingConfigOpen, setBillingConfigOpen] = useState(true);
   const [billingConfigInitDone, setBillingConfigInitDone] = useState(false);
+  const shopRepairDoneRef = useRef(false);
 
   const calculatedMonthlyRate = useMemo(() => {
     const selectedRate =
@@ -269,12 +281,113 @@ function BillingTab({
     (a: any, b: any) => (b.period || "").localeCompare(a.period || "")
   );
 
-  const currentShopPeriod = currentBillingPeriod();
-  const nextPaymentPeriod = nextBillingPeriod();
-  const currentMonthShop = useMemo(
-    () => summarizeShopRegistrationsForPeriod(shopRegs, shopCatalogMap, currentShopPeriod),
-    [shopRegs, shopCatalogMap, currentShopPeriod]
+  const shopBillingContext = useMemo(
+    () => buildShopBillingPeriodContextFromPayments(sortedPayments || []),
+    [sortedPayments]
   );
+
+  const shopPaymentTargetResolver = shopBillingContext.billablePeriodForPurchaseMonth;
+
+  const unpaidShopSummary = useMemo(
+    () =>
+      summarizeUnpaidShopRegistrations(shopRegs, shopCatalogMap, shopPaymentTargetResolver),
+    [shopRegs, shopCatalogMap, shopPaymentTargetResolver]
+  );
+
+  const paymentPeriodLikes = useMemo(
+    () =>
+      (sortedPayments || []).map((p: { period?: string; status?: string }) => ({
+        period: String(p.period ?? ""),
+        status: p.status,
+      })),
+    [sortedPayments]
+  );
+
+  const staleUnpaidCoverageByDate = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of unpaidShopSummary.entries) {
+      for (const p of sortedPayments || []) {
+        if (!normalizedPaymentPaid(String(p.status ?? ""))) continue;
+        const period = String(p.period ?? "").trim();
+        if (!period || Number(p.shopAmount ?? 0) <= 0) continue;
+        if (entry.billsOnPeriod !== period) continue;
+        const unsynced = collectShopLinesForPaymentPeriod(
+          shopRegs,
+          shopCatalogMap,
+          paymentPeriodLikes,
+          period
+        );
+        if (unsynced.some((line) => line.date === entry.date && line.dayTotal === entry.dayTotal)) {
+          map.set(entry.date, period);
+          break;
+        }
+      }
+    }
+    return map;
+  }, [unpaidShopSummary, sortedPayments, shopRegs, shopCatalogMap, paymentPeriodLikes]);
+
+  const suggestedRecordPayment = useMemo(() => {
+    const pendingRow = (sortedPayments || []).find((p: { status?: string }) =>
+      normalizedPaymentPending(String(p.status ?? "pending"))
+    ) as { period?: string; amount?: number; baseAmount?: number; shopAmount?: number } | undefined;
+
+    const unpaidTargetPeriods = collectTargetPaymentPeriodsFromRegistrations(
+      shopRegs,
+      shopPaymentTargetResolver
+    ).sort();
+
+    const period = pendingRow
+      ? String(pendingRow.period ?? currentBillingPeriod())
+      : unpaidTargetPeriods[0] ?? currentBillingPeriod();
+
+    const base = Number(monthlyRate) || calculatedMonthlyRate || 0;
+    const shopFromRegs = computeUnpaidShopForPaymentPeriod(
+      shopRegs,
+      shopCatalogMap,
+      period,
+      shopPaymentTargetResolver
+    );
+    const shop =
+      pendingRow && Number(pendingRow.shopAmount ?? 0) > 0
+        ? Number(pendingRow.shopAmount)
+        : shopFromRegs;
+    const amounts = buildPaymentAmounts(base, shop);
+
+    return {
+      period,
+      amount: pendingRow ? Number(pendingRow.amount) || amounts.amount : amounts.amount,
+      baseAmount: amounts.baseAmount,
+      shopAmount: amounts.shopAmount,
+    };
+  }, [
+    sortedPayments,
+    monthlyRate,
+    calculatedMonthlyRate,
+    shopRegs,
+    shopCatalogMap,
+    shopPaymentTargetResolver,
+  ]);
+
+  const activeRecordBreakdown = useMemo(() => {
+    const period = newPayment.period.trim() || suggestedRecordPayment.period;
+    if (!/^\d{4}-\d{2}$/.test(period)) return suggestedRecordPayment;
+    const base = Number(monthlyRate) || calculatedMonthlyRate || 0;
+    const shopAmount = computeUnpaidShopForPaymentPeriod(
+      shopRegs,
+      shopCatalogMap,
+      period,
+      shopPaymentTargetResolver
+    );
+    return { period, ...buildPaymentAmounts(base, shopAmount) };
+  }, [
+    newPayment.period,
+    suggestedRecordPayment,
+    monthlyRate,
+    calculatedMonthlyRate,
+    shopRegs,
+    shopCatalogMap,
+    shopPaymentTargetResolver,
+  ]);
 
   // Load existing config
   useEffect(() => {
@@ -371,12 +484,7 @@ function BillingTab({
           { rosterDocId: studentId, userId: shopAuthStudentId }
         );
         const uniqueIds = [...new Set([...studentIds, globalStudentUid, studentId].filter(Boolean))];
-        const regs = await fetchShopRegistrationsForPeriodCandidates(
-          db,
-          user.uid,
-          uniqueIds,
-          currentShopPeriod
-        );
+        const regs = await fetchShopRegistrationsForStudentCandidates(db, user.uid, uniqueIds);
         if (cancelled) return;
         setShopRegs(regs);
       } catch (e) {
@@ -392,7 +500,32 @@ function BillingTab({
     return () => {
       cancelled = true;
     };
-  }, [db, user?.uid, shopAuthStudentId, studentId, globalStudentUid, currentShopPeriod]);
+  }, [db, user?.uid, shopAuthStudentId, studentId, globalStudentUid]);
+
+  const reloadShopRegs = useCallback(async () => {
+    if (!db || !user?.uid || !shopAuthStudentId) return;
+    try {
+      const studentIds = await resolveShopRegistrationStudentIds(
+        db,
+        user.uid,
+        shopAuthStudentId,
+        { rosterDocId: studentId, userId: shopAuthStudentId }
+      );
+      const uniqueIds = [...new Set([...studentIds, globalStudentUid, studentId].filter(Boolean))];
+      const regs = await fetchShopRegistrationsForStudentCandidates(db, user.uid, uniqueIds);
+      setShopRegs(regs);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [db, user?.uid, shopAuthStudentId, studentId, globalStudentUid]);
+
+  useEffect(() => {
+    if (!db || !user?.uid || !shopAuthStudentId || shopRepairDoneRef.current) return;
+    shopRepairDoneRef.current = true;
+    void repairShopLinesForPaidPayments(db, user.uid, studentId, shopAuthStudentId)
+      .then(() => reloadShopRegs())
+      .catch(console.error);
+  }, [db, user?.uid, shopAuthStudentId, studentId, reloadShopRegs]);
 
   const handleSaveBillingConfig = () => {
     if (!db || !user) return;
@@ -427,15 +560,65 @@ function BillingTab({
   const handleAddPayment = async () => {
     if (!db || !user || !newPayment.period) return;
     try {
-      await addDoc(collection(db, "personalTrainers", user.uid, "students", studentId, "payments"), {
-        period: newPayment.period,
-        amount: Number(newPayment.amount) || Number(monthlyRate) || 0,
+      const period = newPayment.period.trim();
+      const base = Number(monthlyRate) || calculatedMonthlyRate || 0;
+      const shopAmount = computeUnpaidShopForPaymentPeriod(
+        shopRegs,
+        shopCatalogMap,
+        period,
+        shopPaymentTargetResolver
+      );
+      const amounts = buildPaymentAmounts(base, shopAmount);
+      const amount = Number(newPayment.amount) || amounts.amount;
+      const payload = {
+        period,
+        amount,
+        baseAmount: amounts.baseAmount,
+        shopAmount: amounts.shopAmount,
         method: newPayment.method,
         status: newPayment.status,
         paidAt: normalizedPaymentPaid(newPayment.status) ? new Date().toISOString() : null,
-        createdAt: new Date().toISOString(),
-      });
+      };
+
+      const pendingExisting = (sortedPayments || []).find(
+        (p: { id?: string; period?: string; status?: string }) =>
+          String(p.period ?? "") === period &&
+          normalizedPaymentPending(String(p.status ?? "pending"))
+      ) as { id: string } | undefined;
+
+      let paymentId: string;
+      if (pendingExisting?.id) {
+        const paymentRef = doc(
+          db,
+          "personalTrainers",
+          user.uid,
+          "students",
+          studentId,
+          "payments",
+          pendingExisting.id
+        );
+        await updateDoc(paymentRef, payload);
+        paymentId = pendingExisting.id;
+      } else {
+        const paymentRef = await addDoc(
+          collection(db, "personalTrainers", user.uid, "students", studentId, "payments"),
+          {
+            ...payload,
+            createdAt: new Date().toISOString(),
+          }
+        );
+        paymentId = paymentRef.id;
+      }
+
       if (normalizedPaymentPaid(newPayment.status)) {
+        await markShopRegistrationsPaidForPayment(
+          db,
+          user.uid,
+          shopAuthStudentId,
+          period,
+          paymentId
+        );
+        await reloadShopRegs();
         await tryAutoUnblockAfterPaymentRecorded(db, user.uid, studentId);
       }
       toast({ title: t("paymentRecorded") });
@@ -448,11 +631,17 @@ function BillingTab({
 
   const startEditPayment = (payment: any) => {
     setEditingPaymentId(payment.id);
+    const isPendingWithLock =
+      normalizedPaymentPending(String(payment.status ?? "pending")) &&
+      payment.shopAmount != null;
     setEditingPayment({
       period: String(payment.period || ""),
       amount: String(payment.amount || ""),
       method: String(payment.method || "mbway"),
       status: String(payment.status || "paid"),
+      shopAmountLocked: isPendingWithLock,
+      lockedShopAmount: Number(payment.shopAmount ?? 0),
+      lockedBaseAmount: Number(payment.baseAmount ?? 0),
     });
   };
 
@@ -460,19 +649,33 @@ function BillingTab({
     if (!db || !user) return;
     try {
       const paymentRef = doc(db, "personalTrainers", user.uid, "students", studentId, "payments", paymentId);
-      await updateDoc(paymentRef, {
-        period: editingPayment.period,
-        amount: Number(editingPayment.amount) || 0,
+      const paymentPeriod = editingPayment.period.trim();
+      // When shopAmount is locked (pending with snapshot), don't overwrite amount/shopAmount/baseAmount.
+      // The coach can still mark it as paid (status change) or change method/period.
+      const baseUpdate: Record<string, unknown> = {
+        period: paymentPeriod,
         method: editingPayment.method,
         status: editingPayment.status,
         paidAt: normalizedPaymentPaid(editingPayment.status) ? new Date().toISOString() : null,
-      });
-      if (normalizedPaymentPaid(editingPayment.status)) {
+      };
+      if (!editingPayment.shopAmountLocked) {
+        baseUpdate.amount = Number(editingPayment.amount) || 0;
+      }
+      await updateDoc(paymentRef, baseUpdate);
+      if (normalizedPaymentPaid(editingPayment.status) && paymentPeriod) {
+        await markShopRegistrationsPaidForPayment(
+          db,
+          user.uid,
+          shopAuthStudentId,
+          paymentPeriod,
+          paymentId
+        );
+        await reloadShopRegs();
         await tryAutoUnblockAfterPaymentRecorded(db, user.uid, studentId);
       }
       toast({ title: t("paymentUpdated") });
       setEditingPaymentId(null);
-      setEditingPayment({ period: "", amount: "", method: "mbway", status: "paid" });
+      setEditingPayment({ period: "", amount: "", method: "mbway", status: "paid", shopAmountLocked: false, lockedShopAmount: 0, lockedBaseAmount: 0 });
     } catch (e: any) {
       toast({ title: "Error", description: e.message || "Failed to update payment.", variant: "destructive" });
     }
@@ -633,29 +836,36 @@ function BillingTab({
               <CardDescription>{t("recordPayments")}</CardDescription>
               <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t("shopBillingCoachMonthTitle").replace("{period}", currentShopPeriod)}
+                  {t("shopBillingUnpaidTitle")}
                 </p>
                 {shopDataLoading ? (
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t("shopLoadingDay")}
                   </p>
-                ) : currentMonthShop.entries.length > 0 ? (
+                ) : unpaidShopSummary.entries.length > 0 ? (
                   <>
                     <ul className="text-xs text-muted-foreground space-y-0.5">
-                      {currentMonthShop.entries.map((entry) => (
+                      {unpaidShopSummary.entries.map((entry) => (
                         <li key={entry.date} className="break-words">
-                          {entry.date} · {entry.summary} · €{entry.dayTotal.toFixed(2)}
+                          {formatShopRegistrationDateTime(entry.date, entry.time)} · {entry.summary} · €
+                          {entry.dayTotal.toFixed(2)}{" "}
+                          <span className="text-muted-foreground/80">
+                            {t("shopBillingUnpaidBillsOn").replace("{period}", entry.billsOnPeriod)}
+                          </span>
+                          {staleUnpaidCoverageByDate.has(entry.date) ? (
+                            <span className="block text-amber-700 dark:text-amber-400 mt-0.5">
+                              {t("shopBillingStaleUnpaidHint").replace(
+                                "{period}",
+                                staleUnpaidCoverageByDate.get(entry.date) ?? ""
+                              )}
+                            </span>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
                     <p className="text-xs font-medium">
-                      {t("shopMonthTotal")}: €{currentMonthShop.monthShopTotal.toFixed(2)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("shopBillingAppliedToNext")
-                        .replace("{amount}", currentMonthShop.monthShopTotal.toFixed(2))
-                        .replace("{period}", nextPaymentPeriod)}
+                      {t("shopBillingUnpaidTotal")}: €{unpaidShopSummary.totalUnpaid.toFixed(2)}
                     </p>
                   </>
                 ) : (
@@ -664,12 +874,21 @@ function BillingTab({
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+              {suggestedRecordPayment.amount > 0 ? (
+                <p className="text-xs text-muted-foreground sm:text-right sm:max-w-[220px]">
+                  {t("shopBillingMembership")}: €{suggestedRecordPayment.baseAmount.toFixed(2)} ·{" "}
+                  {t("shopBillingShop")}: €{suggestedRecordPayment.shopAmount.toFixed(2)} ·{" "}
+                  {t("shopBillingTotal")}: €{suggestedRecordPayment.amount.toFixed(2)}
+                </p>
+              ) : null}
               <Button size="sm" className="gap-1 shrink-0 w-full sm:w-auto" onClick={() => {
                 if (!showAddPayment) {
-                  const billingAmount = monthlyRate || "";
                   setNewPayment({
-                    period: currentBillingPeriod(),
-                    amount: billingAmount,
+                    period: suggestedRecordPayment.period,
+                    amount:
+                      suggestedRecordPayment.amount > 0
+                        ? String(suggestedRecordPayment.amount)
+                        : "",
                     method: paymentMethod,
                     status: "paid",
                   });
@@ -698,10 +917,17 @@ function BillingTab({
                   <Label className="text-xs">{t("amount")}</Label>
                   <Input
                     type="number"
-                    placeholder={monthlyRate || "0"}
+                    placeholder={String(suggestedRecordPayment.amount || monthlyRate || "0")}
                     value={newPayment.amount}
                     onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
                   />
+                  {activeRecordBreakdown.baseAmount > 0 || activeRecordBreakdown.shopAmount > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("shopBillingMembership")}: €{activeRecordBreakdown.baseAmount.toFixed(2)} ·{" "}
+                      {t("shopBillingShop")}: €{activeRecordBreakdown.shopAmount.toFixed(2)} ·{" "}
+                      {t("shopBillingTotal")}: €{activeRecordBreakdown.amount.toFixed(2)}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">{t("method")}</Label>
@@ -751,15 +977,35 @@ function BillingTab({
                             placeholder="e.g. April 2026"
                           />
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">{t("amount")}</Label>
-                          <Input
-                            type="number"
-                            value={editingPayment.amount}
-                            onChange={(e) => setEditingPayment({ ...editingPayment, amount: e.target.value })}
-                            placeholder="0"
-                          />
-                        </div>
+                        {editingPayment.shopAmountLocked ? (
+                          <div className="space-y-1">
+                            <Label className="text-xs">{t("amount")}</Label>
+                            <div className="rounded-md border bg-muted px-3 py-2 text-sm space-y-0.5">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Base</span>
+                                <span>{editingPayment.lockedBaseAmount.toFixed(2)} €</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Shop</span>
+                                <span>{editingPayment.lockedShopAmount.toFixed(2)} €</span>
+                              </div>
+                              <div className="flex justify-between font-medium border-t pt-0.5 mt-0.5">
+                                <span>Total</span>
+                                <span>{(editingPayment.lockedBaseAmount + editingPayment.lockedShopAmount).toFixed(2)} €</span>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <Label className="text-xs">{t("amount")}</Label>
+                            <Input
+                              type="number"
+                              value={editingPayment.amount}
+                              onChange={(e) => setEditingPayment({ ...editingPayment, amount: e.target.value })}
+                              placeholder="0"
+                            />
+                          </div>
+                        )}
                         <div className="space-y-1">
                           <Label className="text-xs">{t("method")}</Label>
                           <Select
@@ -813,22 +1059,65 @@ function BillingTab({
                           </p>
                           {(() => {
                             const period = String(p.period ?? "");
-                            const shopPeriod = shopSourcePeriodForPaymentPeriod(period) ?? period;
-                            const { monthShopTotal } = summarizeShopRegistrationsForPeriod(
-                              shopRegs,
-                              shopCatalogMap,
-                              shopPeriod
-                            );
                             const shopCharge =
-                              monthShopTotal > 0 ? monthShopTotal : Number(p.shopAmount ?? 0);
+                              Number(p.shopAmount ?? 0) > 0
+                                ? Number(p.shopAmount ?? 0)
+                                : computeUnpaidShopForPaymentPeriod(
+                                    shopRegs,
+                                    shopCatalogMap,
+                                    period,
+                                    shopPaymentTargetResolver
+                                  );
                             const showBreakdown =
                               paymentHasShopBreakdown(p) || shopCharge > 0;
+                            const linkedRaw = collectShopLinesPaidByPaymentId(
+                              shopRegs,
+                              p.id,
+                              shopCatalogMap
+                            );
+                            // Paid rows with no shop charge were membership-only; don't
+                            // list purchases linked later by auto-sync/repair mistakes.
+                            const linked =
+                              normalizedPaymentPaid(p.status) && Number(p.shopAmount ?? 0) <= 0
+                                ? []
+                                : linkedRaw;
+                            const unsynced =
+                              shopCharge > 0 && linked.length === 0
+                                ? collectShopLinesForPaymentPeriod(
+                                    shopRegs,
+                                    shopCatalogMap,
+                                    paymentPeriodLikes,
+                                    period
+                                  ).filter(
+                                    (line) =>
+                                      shopLineBillablePaymentPeriod(line.date, paymentPeriodLikes) ===
+                                      period
+                                  )
+                                : [];
+                            const purchaseLines = linked.length > 0 ? linked : unsynced;
                             return showBreakdown ? (
-                              <p className="text-xs text-muted-foreground">
-                                {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)} ·{" "}
-                                {t("shopBillingShop")}: €{shopCharge.toFixed(2)}
-                                {shopPeriod !== period ? ` (${shopPeriod})` : ""}
-                              </p>
+                              <div className="text-xs text-muted-foreground space-y-0.5 mt-0.5">
+                                <p>
+                                  {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)} ·{" "}
+                                  {t("shopBillingShop")}: €{shopCharge.toFixed(2)}
+                                </p>
+                                {purchaseLines.length > 0 ? (
+                                  <ul className="space-y-0.5">
+                                    {purchaseLines.map((line) => (
+                                      <li key={line.date}>
+                                        {formatShopRegistrationDateTime(line.date, line.time)} · {line.summary} · €
+                                        {line.dayTotal.toFixed(2)}
+                                        {line.syncStatus === "unpaid" ? (
+                                          <span className="text-amber-700 dark:text-amber-400">
+                                            {" "}
+                                            ({t("shopBillingStaleUnpaidHint").replace("{period}", period)})
+                                          </span>
+                                        ) : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </div>
                             ) : null;
                           })()}
                         </div>
@@ -924,6 +1213,7 @@ const STUDENT_DETAIL_TABS = [
   "workoutHistory",
   "milestones",
   "progress",
+  "weeklyScheduling",
 ] as const;
 type StudentDetailTab = (typeof STUDENT_DETAIL_TABS)[number];
 
@@ -2143,7 +2433,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
         )}
 
         <Tabs value={studentDetailTab} onValueChange={handleStudentDetailTabChange} className="space-y-6">
-          <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1 p-1">
+          <TabsList className="bg-card border h-auto w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1 p-1">
             <TabsTrigger value="management" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
               {t("coachingManagement")}
             </TabsTrigger>
@@ -2158,6 +2448,9 @@ export default function StudentDetailPage({ id }: { id: string }) {
             </TabsTrigger>
             <TabsTrigger value="progress" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
               {t("progress")}
+            </TabsTrigger>
+            <TabsTrigger value="weeklyScheduling" className="text-xs sm:text-sm whitespace-normal text-center leading-tight min-h-10 px-2 py-2 h-auto">
+              {t("weeklySchedulingTab")}
             </TabsTrigger>
           </TabsList>
 
@@ -2767,6 +3060,21 @@ export default function StudentDetailPage({ id }: { id: string }) {
               globalStudentUid={id}
               toast={toast}
             />
+          </TabsContent>
+
+          <TabsContent value="weeklyScheduling" className="space-y-6">
+            {user?.uid && (
+              <StudentWeeklySchedulingTab
+                trainerId={user.uid}
+                studentId={id}
+                studentName={`${student?.firstName || ""} ${student?.lastName || ""}`.trim() || (student as any)?.name || ""}
+                studentPhotoUrl={(student as any)?.photoUrl ?? undefined}
+                sessionsPerWeek={Number((effectiveRoster as any)?.sessionsPerWeek) || 0}
+                sessionDurationMin={Number((effectiveRoster as any)?.sessionDurationMin) || 60}
+                trainingAccessMode={String((effectiveRoster as any)?.trainingAccessMode || "scheduled")}
+                studentMatchIds={studentAssignmentCandidateIds}
+              />
+            )}
           </TabsContent>
         </Tabs>
 

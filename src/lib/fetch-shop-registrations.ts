@@ -1,6 +1,9 @@
 import type { Firestore } from "firebase/firestore";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
-import { mergeShopRegistrationsByDate, type ShopLine, type ShopRegistrationLike } from "@/lib/shop-billing";
+import {
+  normalizeShopPurchasesFromDoc,
+  type ShopPurchaseLike,
+} from "@/lib/shop-billing";
 
 function periodDateBounds(period: string): { startDate: string; endDate: string } | null {
   const [y, m] = period.split("-").map(Number);
@@ -11,16 +14,14 @@ function periodDateBounds(period: string): { startDate: string; endDate: string 
   return { startDate, endDate };
 }
 
-function mapRegistrationDocs(
-  docs: Array<{ data: () => Record<string, unknown> }>
-): ShopRegistrationLike[] {
-  return docs.map((d) => {
-    const data = d.data();
-    return {
-      date: String(data.date ?? ""),
-      lines: Array.isArray(data.lines) ? (data.lines as ShopLine[]) : [],
-    };
-  });
+function mapPurchaseDocs(
+  docs: Array<{ id: string; data: () => Record<string, unknown> }>
+): ShopPurchaseLike[] {
+  const purchases: ShopPurchaseLike[] = [];
+  for (const d of docs) {
+    purchases.push(...normalizeShopPurchasesFromDoc(d.data(), d.id));
+  }
+  return purchases;
 }
 
 function isMissingIndexError(e: unknown): boolean {
@@ -30,46 +31,97 @@ function isMissingIndexError(e: unknown): boolean {
   return msg.includes("requires an index");
 }
 
+function uniqueNonEmptyIds(...values: (string | undefined | null)[]): string[] {
+  return [
+    ...new Set(
+      values.map((v) => String(v ?? "").trim()).filter(Boolean)
+    ),
+  ];
+}
+
+/** Pure merge of id sets from roster, auth uid, and reverse lookups (unit-testable). */
+export function collectShopRegistrationStudentIds(
+  ...groups: (string | undefined | null)[][]
+): string[] {
+  return uniqueNonEmptyIds(...groups.flat());
+}
+
 /**
- * Loads shop registrations for one student in a billing period (`YYYY-MM`).
- * Uses a composite query when indexed; falls back to studentId-only + client date filter.
+ * All Firestore `studentId` values that may own shop rows for a student.
+ * `seedId` may be the Firebase auth UID or the roster document id.
  */
-/** All Firestore `studentId` values that may own shop rows for this signed-in student. */
 export async function resolveShopRegistrationStudentIds(
   db: Firestore,
   trainerId: string,
-  authUid: string,
+  seedId: string,
   globalStudent?: Record<string, unknown> | null
 ): Promise<string[]> {
-  const ids = new Set<string>();
-  const uid = String(authUid || "").trim();
-  if (uid) ids.add(uid);
-  const rosterDocId = String(globalStudent?.rosterDocId ?? "").trim();
-  const rosterPathId = rosterDocId || uid;
-  if (rosterPathId) ids.add(rosterPathId);
-  if (trainerId && rosterPathId) {
+  const seed = String(seedId || "").trim();
+  const fromGlobalRoster = String(globalStudent?.rosterDocId ?? "").trim();
+  const fromGlobalUserId = String(globalStudent?.userId ?? "").trim();
+
+  let rosterDocIdFromAuth = "";
+  if (seed) {
     try {
-      const rosterSnap = await getDoc(
-        doc(db, "personalTrainers", trainerId, "students", rosterPathId)
-      );
-      if (rosterSnap.exists()) {
-        const rd = rosterSnap.data() as Record<string, unknown>;
-        const linkedUid = String(rd.userId ?? "").trim();
-        if (linkedUid) ids.add(linkedUid);
+      const globalSnap = await getDoc(doc(db, "students", seed));
+      if (globalSnap.exists()) {
+        rosterDocIdFromAuth = String(globalSnap.data()?.rosterDocId ?? "").trim();
       }
     } catch {
       /* ignore */
     }
   }
-  return [...ids];
+
+  const rosterPathCandidates = uniqueNonEmptyIds(
+    fromGlobalRoster,
+    rosterDocIdFromAuth,
+    seed
+  );
+
+  const reverseAuthUids: string[] = [];
+  for (const rosterCandidate of rosterPathCandidates) {
+    try {
+      const reverseSnap = await getDocs(
+        query(collection(db, "students"), where("rosterDocId", "==", rosterCandidate))
+      );
+      for (const d of reverseSnap.docs) {
+        reverseAuthUids.push(d.id);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const rosterUserIds: string[] = [];
+  for (const rosterCandidate of rosterPathCandidates) {
+    if (!trainerId || !rosterCandidate) continue;
+    try {
+      const rosterSnap = await getDoc(
+        doc(db, "personalTrainers", trainerId, "students", rosterCandidate)
+      );
+      if (rosterSnap.exists()) {
+        const linkedUid = String(rosterSnap.data()?.userId ?? "").trim();
+        if (linkedUid) rosterUserIds.push(linkedUid);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return collectShopRegistrationStudentIds(
+    [seed, fromGlobalUserId],
+    rosterPathCandidates,
+    rosterUserIds,
+    reverseAuthUids
+  );
 }
 
-export async function fetchShopRegistrationsForPeriod(
+export async function fetchShopPurchasesForPeriod(
   db: Firestore,
   trainerId: string,
   studentId: string,
   period: string
-): Promise<ShopRegistrationLike[]> {
+): Promise<ShopPurchaseLike[]> {
   const bounds = periodDateBounds(period);
   if (!bounds) return [];
 
@@ -85,82 +137,71 @@ export async function fetchShopRegistrationsForPeriod(
         where("date", "<=", endDate)
       )
     );
-    return mapRegistrationDocs(snap.docs);
+    return mapPurchaseDocs(snap.docs.map((d) => ({ id: d.id, data: () => d.data() })));
   } catch (e) {
     if (!isMissingIndexError(e)) throw e;
     const snap = await getDocs(query(col, where("studentId", "==", studentId)));
-    return mapRegistrationDocs(snap.docs).filter((reg) => {
-      const d = String(reg.date ?? "");
-      return d >= startDate && d <= endDate;
-    });
+    return mapPurchaseDocs(snap.docs.map((d) => ({ id: d.id, data: () => d.data() }))).filter(
+      (purchase) => {
+        const d = String(purchase.date ?? "");
+        return d >= startDate && d <= endDate;
+      }
+    );
   }
 }
 
-/**
- * Loads one student's month via per-day `get` on `{authUid}_{YYYY-MM-DD}` docs.
- * Students cannot `list` shopRegistrations (rules); `get` on own doc ids is allowed.
- */
-export async function fetchShopRegistrationsForPeriodByAuthDocIds(
+/** @deprecated Use fetchShopPurchasesForPeriod */
+export const fetchShopRegistrationsForPeriod = fetchShopPurchasesForPeriod;
+
+/** Loads shop purchases for every linked student id in a billing month. */
+export async function fetchShopPurchasesForPeriodCandidates(
   db: Firestore,
   trainerId: string,
-  authUid: string,
+  studentIds: string[],
   period: string
-): Promise<ShopRegistrationLike[]> {
-  const bounds = periodDateBounds(period);
-  const uid = String(authUid || "").trim();
-  if (!bounds || !uid) return [];
-
-  const [y, m] = period.split("-").map(Number);
-  const lastDay = new Date(y, m, 0).getDate();
-  const colRef = collection(db, "personalTrainers", trainerId, "shopRegistrations");
-
-  const snaps = await Promise.all(
-    Array.from({ length: lastDay }, (_, i) => {
-      const day = i + 1;
-      const date = `${period}-${String(day).padStart(2, "0")}`;
-      const regId = `${uid}_${date}`;
-      return getDoc(doc(colRef, regId));
-    })
-  );
-
-  const regs: ShopRegistrationLike[] = [];
-  for (let i = 0; i < snaps.length; i++) {
-    const snap = snaps[i];
-    if (!snap.exists()) continue;
-    const data = snap.data() as Record<string, unknown>;
-    const day = i + 1;
-    const date = `${period}-${String(day).padStart(2, "0")}`;
-    regs.push({
-      date: String(data.date ?? date),
-      lines: Array.isArray(data.lines) ? (data.lines as ShopLine[]) : [],
-    });
+): Promise<ShopPurchaseLike[]> {
+  const uniqueIds = [...new Set(studentIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!uniqueIds.length) return [];
+  const merged: ShopPurchaseLike[] = [];
+  for (const sid of uniqueIds) {
+    merged.push(...(await fetchShopPurchasesForPeriod(db, trainerId, sid, period)));
   }
-  return regs;
+  return merged;
 }
 
-export type FetchShopRegistrationsCandidatesOptions = {
-  /** When set, loads this id via per-day doc `get` instead of a collection `list` query. */
-  authUidForDocIdFetch?: string;
-};
-
-/** Loads shop rows for every linked student id, merged by calendar day. */
+/** @deprecated Use fetchShopPurchasesForPeriodCandidates */
 export async function fetchShopRegistrationsForPeriodCandidates(
   db: Firestore,
   trainerId: string,
   studentIds: string[],
-  period: string,
-  options?: FetchShopRegistrationsCandidatesOptions
-): Promise<ShopRegistrationLike[]> {
+  period: string
+): Promise<ShopPurchaseLike[]> {
+  return fetchShopPurchasesForPeriodCandidates(db, trainerId, studentIds, period);
+}
+
+/** Loads all shop purchases for every linked student id (no date filter). */
+export async function fetchShopPurchasesForStudentCandidates(
+  db: Firestore,
+  trainerId: string,
+  studentIds: string[]
+): Promise<ShopPurchaseLike[]> {
   const uniqueIds = [...new Set(studentIds.map((id) => String(id || "").trim()).filter(Boolean))];
   if (!uniqueIds.length) return [];
-  const authUid = String(options?.authUidForDocIdFetch ?? "").trim();
-  const merged: ShopRegistrationLike[] = [];
+
+  const col = collection(db, "personalTrainers", trainerId, "shopRegistrations");
+  const merged: ShopPurchaseLike[] = [];
+
   for (const sid of uniqueIds) {
-    const regs =
-      authUid && sid === authUid
-        ? await fetchShopRegistrationsForPeriodByAuthDocIds(db, trainerId, sid, period)
-        : await fetchShopRegistrationsForPeriod(db, trainerId, sid, period);
-    merged.push(...regs);
+    try {
+      const snap = await getDocs(query(col, where("studentId", "==", sid)));
+      merged.push(...mapPurchaseDocs(snap.docs.map((d) => ({ id: d.id, data: () => d.data() }))));
+    } catch {
+      /* skip ids the caller cannot list (e.g. roster doc id on student client) */
+    }
   }
-  return mergeShopRegistrationsByDate(merged);
+
+  return merged;
 }
+
+/** @deprecated Use fetchShopPurchasesForStudentCandidates */
+export const fetchShopRegistrationsForStudentCandidates = fetchShopPurchasesForStudentCandidates;

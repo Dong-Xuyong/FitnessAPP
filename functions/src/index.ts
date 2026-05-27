@@ -167,7 +167,7 @@ export const enforcePaymentBlocking = onSchedule(
   }
 );
 
-export { syncShopPaymentOnRegistrationWrite, syncShopPaymentCallable } from "./shop-billing-sync";
+export { syncShopPaymentOnRegistrationWrite, syncShopPaymentCallable, markShopPaidOnPaymentWrite, repairShopLinesForStudentCallable, repairMyShopBillingCallable, listMyShopPurchasesCallable, migrateShopRegistrationsCallable } from "./shop-billing-sync";
 export { ensureNextPeriodPayments } from "./ensure-next-period-payments";
 export {
   createNextPeriodPaymentsCallable,

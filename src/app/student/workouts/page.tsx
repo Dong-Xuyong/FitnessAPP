@@ -39,8 +39,16 @@ import {
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
 import {
+  dayHasOpenBlocks,
+  getEffectiveSessionDurationMin,
   isDateInVacation,
+  isNewBookingBlocked,
+  normalizeOpenAvailabilityBlocks,
   normalizeVacationPeriods,
+  openBlocksForDate,
+  resolveDaySlotTimes,
+  studentDayBookable,
+  type OpenAvailabilityBlock,
   type VacationPeriod,
 } from "@/lib/trainer-availability";
 
@@ -103,24 +111,6 @@ function areConsecutiveBlocks(times: string[], dur: number): boolean {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function generateSlotTimes(start: string, end: string, dur: number): string[] {
-  const slots: string[] = [];
-  let [h, m] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  const endTotal = eh * 60 + em;
-  while (h * 60 + m < endTotal) {
-    slots.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
-    m += dur; h += Math.floor(m/60); m = m % 60;
-  }
-  return slots;
-}
-
-function generateSlotsForDay(sched: DaySchedule | undefined, dur: number): string[] {
-  if (!sched?.enabled || !sched.ranges.length) return [];
-  const all = sched.ranges.flatMap(r => generateSlotTimes(r.startTime, r.endTime, dur));
-  return [...new Set(all)].sort();
-}
 
 function addMin(time: string, min: number): string {
   const [h, m] = time.split(":").map(Number);
@@ -231,6 +221,7 @@ export default function StudentWorkoutsPage() {
   // Coach settings
   const [availability, setAvailability] = useState<Availability>({});
   const [vacationPeriods, setVacationPeriods] = useState<VacationPeriod[]>([]);
+  const [openAvailabilityBlocks, setOpenAvailabilityBlocks] = useState<OpenAvailabilityBlock[]>([]);
   const [slotDurationMin, setSlotDurationMin]       = useState(30);
   const [defaultMaxStudents, setDefaultMaxStudents] = useState(4);
 
@@ -309,6 +300,7 @@ export default function StudentWorkoutsPage() {
           if (td.slotDurationMin)   setSlotDurationMin(td.slotDurationMin);
           if (td.maxStudentsPerSlot) setDefaultMaxStudents(td.maxStudentsPerSlot);
           setVacationPeriods(normalizeVacationPeriods(td.vacationPeriods));
+          setOpenAvailabilityBlocks(normalizeOpenAvailabilityBlocks(td.openAvailabilityBlocks));
           const savedAvail = td.availability as any;
           if (savedAvail) {
             if (Array.isArray(savedAvail.workingDays)) {
@@ -490,18 +482,58 @@ export default function StudentWorkoutsPage() {
   const selectedDaySched = availability[DAY_KEYS[selectedDate.getDay()]];
   const selectedDayWeeklyAvailable = !!(selectedDaySched?.enabled && selectedDaySched.ranges.length);
   const selectedDayOnVacation = isDateInVacation(selectedDateStr, vacationPeriods);
+  const openBlocksOnSelectedDay = useMemo(
+    () => openBlocksForDate(selectedDateStr, openAvailabilityBlocks),
+    [selectedDateStr, openAvailabilityBlocks]
+  );
   const hasBookingOnSelectedDay = sessionSlots.some(
     (s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId)
   );
-  const showStudentDaySchedule =
-    selectedDayWeeklyAvailable && (!selectedDayOnVacation || hasBookingOnSelectedDay);
-
-  // How many consecutive 30-min blocks a single session occupies
-  const slotsNeeded = Math.max(1, Math.ceil(sessionDurationMin / slotDurationMin));
 
   const timeSlots = useMemo(
-    () => generateSlotsForDay(selectedDaySched, slotDurationMin),
-    [selectedDaySched, slotDurationMin]
+    () =>
+      resolveDaySlotTimes({
+        dateStr: selectedDateStr,
+        weeklySched: selectedDaySched,
+        openBlocks: openAvailabilityBlocks,
+        slotDurationMin,
+      }),
+    [selectedDateStr, selectedDaySched, openAvailabilityBlocks, slotDurationMin]
+  );
+
+  const showStudentDaySchedule =
+    studentDayBookable({
+      weeklyAvailable: selectedDayWeeklyAvailable,
+      onVacation: selectedDayOnVacation,
+      hasResolvableSlots: timeSlots.length > 0,
+    }) || (selectedDayOnVacation && hasBookingOnSelectedDay);
+
+  const getSessionDurationForTime = useCallback(
+    (_time: string) =>
+      getEffectiveSessionDurationMin({
+        rosterDurationMin: sessionDurationMin,
+        slotDurationMin,
+      }),
+    [sessionDurationMin, slotDurationMin]
+  );
+
+  const getSlotsNeededForTime = useCallback(
+    (time: string) => {
+      const dur = getSessionDurationForTime(time);
+      return Math.max(1, Math.ceil(dur / slotDurationMin));
+    },
+    [getSessionDurationForTime, slotDurationMin]
+  );
+
+  const isBookingBlockedAtTime = useCallback(
+    (time: string) =>
+      isNewBookingBlocked({
+        dateStr: selectedDateStr,
+        time,
+        vacationPeriods,
+        openBlocks: openAvailabilityBlocks,
+      }),
+    [selectedDateStr, vacationPeriods, openAvailabilityBlocks]
   );
 
   const slotsByTime = useMemo(() => {
@@ -537,10 +569,12 @@ export default function StudentWorkoutsPage() {
 
   // Calendar modifiers
   const isUnavailableDay = useCallback((date: Date) => {
+    const dateStr = toDateStr(date);
+    if (dayHasOpenBlocks(dateStr, openAvailabilityBlocks)) return false;
+    if (isDateInVacation(dateStr, vacationPeriods)) return false;
     const s = availability[DAY_KEYS[date.getDay()]];
-    const weeklyOff = !s?.enabled || !s.ranges.length;
-    return weeklyOff || isDateInVacation(toDateStr(date), vacationPeriods);
-  }, [availability, vacationPeriods]);
+    return !s?.enabled || !s.ranges.length;
+  }, [availability, vacationPeriods, openAvailabilityBlocks]);
 
   const bookedDates = useMemo(() => {
     if (!myId) return [];
@@ -654,10 +688,13 @@ export default function StudentWorkoutsPage() {
     const myEntry = existingAtTime?.students.find(s => s.studentId === myId);
     const isEnrolled = !!myEntry;
 
-    if (!isEnrolled && selectedDayOnVacation) {
+    if (!isEnrolled && isBookingBlockedAtTime(time)) {
       toast({ title: "O treinador está de férias neste dia", variant: "destructive" });
       return;
     }
+
+    const slotsNeededForTime = getSlotsNeededForTime(time);
+    const sessionDurForTime = getSessionDurationForTime(time);
 
     setIsRegistering(slotDocId(selectedDateStr, time));
     try {
@@ -672,9 +709,9 @@ export default function StudentWorkoutsPage() {
           });
           return;
         }
-        // ── Unregister: free exactly the consecutive blocks that were booked ──
-        // Build by time arithmetic so non-adjacent slots (different ranges) are never touched.
-        const blocksToFree = Array.from({ length: slotsNeeded }, (_, i) =>
+        const enrolledDur = myEntry.sessionDurationMin ?? sessionDurForTime;
+        const freeCount = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
+        const blocksToFree = Array.from({ length: freeCount }, (_, i) =>
           addMin(sessionStart, i * slotDurationMin)
         );
 
@@ -721,9 +758,15 @@ export default function StudentWorkoutsPage() {
           });
           return;
         }
-        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsNeeded);
-        if (blocksToBook.length < slotsNeeded || !areConsecutiveBlocks(blocksToBook, slotDurationMin)) {
-          toast({ title: `Não há blocos consecutivos suficientes para uma sessão de ${sessionDurationMin} min neste horário.`, variant: "destructive" });
+        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
+        if (
+          blocksToBook.length < slotsNeededForTime ||
+          !areConsecutiveBlocks(blocksToBook, slotDurationMin)
+        ) {
+          toast({
+            title: `Não há blocos consecutivos suficientes para uma sessão de ${sessionDurForTime} min neste horário.`,
+            variant: "destructive",
+          });
           return;
         }
 
@@ -750,7 +793,7 @@ export default function StudentWorkoutsPage() {
                 isSequenceStepEffectiveUnlocked(w, completedPlanIds)
             )
             .sort((a, b) => (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0))[0];
-        const totalSessionMin = slotsNeeded * slotDurationMin;
+        const totalSessionMin = sessionDurForTime;
         const nextSlots = [...sessionSlots];
 
         for (const t of blocksToBook) {
@@ -932,17 +975,27 @@ export default function StudentWorkoutsPage() {
                   </CardTitle>
                   <CardDescription className="mt-0.5">
                     {showStudentDaySchedule
-                      ? `${timeSlots.length} blocos · sessão ${slotsNeeded * slotDurationMin} min`
+                      ? `${timeSlots.length} blocos · sessão ${sessionDurationMin} min`
                       : selectedDayOnVacation
                         ? "Treinador de férias"
                         : "Sem disponibilidade neste dia"}
                   </CardDescription>
                 </div>
-                {showStudentDaySchedule && selectedDaySched && (
+                {showStudentDaySchedule && (
                   <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                    {selectedDaySched.ranges.map((r, i) => (
-                      <Badge key={i} variant="outline" className="text-xs shrink-0 font-mono">
-                        {r.startTime}–{r.endTime}
+                    {selectedDayWeeklyAvailable &&
+                      selectedDaySched?.ranges.map((r, i) => (
+                        <Badge key={`w-${i}`} variant="outline" className="text-xs shrink-0 font-mono">
+                          {r.startTime}–{r.endTime}
+                        </Badge>
+                      ))}
+                    {openBlocksOnSelectedDay.map((b) => (
+                      <Badge
+                        key={b.id}
+                        variant="outline"
+                        className="text-xs shrink-0 font-mono border-teal-500/50 text-teal-700 dark:text-teal-400"
+                      >
+                        {b.startTime}–{b.endTime}
                       </Badge>
                     ))}
                   </div>
@@ -975,23 +1028,27 @@ export default function StudentWorkoutsPage() {
                     const count = slot?.students.length ?? 0;
                     const mySlotEntry = slot?.students.find(s => s.studentId === myId);
                     const isEnrolled = !!mySlotEntry;
+                    const slotsNeededForTime = getSlotsNeededForTime(time);
+                    const sessionMinForTime = getSessionDurationForTime(time);
 
                     // A slot is a continuation only if it is strictly adjacent to sessionStart
                     const isContinuation = isEnrolled
                       && mySlotEntry.sessionStart !== undefined
                       && mySlotEntry.sessionStart !== time
                       && (() => {
+                        const enrolledDur = mySlotEntry.sessionDurationMin ?? sessionMinForTime;
+                        const needed = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
                         const [sh, sm] = mySlotEntry.sessionStart!.split(":").map(Number);
                         const [th, tm] = time.split(":").map(Number);
                         const diff = (th * 60 + tm) - (sh * 60 + sm);
-                        return diff > 0 && diff < slotsNeeded * slotDurationMin && diff % slotDurationMin === 0;
+                        return diff > 0 && diff < needed * slotDurationMin && diff % slotDurationMin === 0;
                       })();
                     const isSessionStart = isEnrolled && !isContinuation;
 
                     const startIdx = timeSlots.indexOf(time);
-                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeeded);
+                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
                     const hasEnoughBlocks = !isEnrolled
-                      && blocksForSession.length === slotsNeeded
+                      && blocksForSession.length === slotsNeededForTime
                       && areConsecutiveBlocks(blocksForSession, slotDurationMin);
                     const allBlocksFree = hasEnoughBlocks && blocksForSession.every(t2 => {
                       const s2 = slotsByTime.get(t2);
@@ -1071,7 +1128,7 @@ export default function StudentWorkoutsPage() {
                                   <div className="flex items-center gap-1.5">
                                     <CheckCircle2 className="h-3.5 w-3.5 text-accent shrink-0" />
                                     <p className="text-xs font-semibold text-accent">
-                                      Inscrito · {slotsNeeded * slotDurationMin} min
+                                      Inscrito · {mySlotEntry?.sessionDurationMin ?? sessionMinForTime} min
                                     </p>
                                   </div>
                                   {mySlotEntry?.workoutTitle && (
@@ -1136,7 +1193,7 @@ export default function StudentWorkoutsPage() {
                             size="sm"
                             className="shrink-0 h-8 gap-1.5 text-xs"
                             onClick={() => handleToggleSlot(time)}
-                            disabled={!!isLoading_ || !canBookMore || selectedDayOnVacation}
+                            disabled={!!isLoading_ || !canBookMore || isBookingBlockedAtTime(time)}
                           >
                             {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
                             Inscrever

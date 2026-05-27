@@ -33,7 +33,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, Timestamp } from "firebase/firestore";
 import {
-  CalendarDays, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
+  CalendarDays, CalendarPlus, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
   Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp, ListOrdered,
   ExternalLink, ClipboardList, History, Pencil,
 } from "lucide-react";
@@ -72,12 +72,22 @@ import { cn } from "@/lib/utils";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import {
   coachDayShowsSchedule,
+  dayHasOpenBlocks,
   dayIsWeeklyAvailable,
+  formatOpenBlockLabel,
   formatVacationPeriodRange,
+  generateSlotTimes,
+  getEffectiveSessionDurationMin,
   isDateInVacation,
+  isNewBookingBlocked,
+  normalizeOpenAvailabilityBlocks,
   normalizeVacationPeriods,
+  openBlocksForDate,
+  resolveDaySlotTimes,
+  upcomingOpenAvailabilityBlocks,
   upcomingVacationPeriods,
   vacationPeriodsOverlap,
+  type OpenAvailabilityBlock,
   type VacationPeriod,
 } from "@/lib/trainer-availability";
 
@@ -780,27 +790,6 @@ const DEFAULT_AVAILABILITY: Availability = {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function generateSlotTimes(startTime: string, endTime: string, durationMin: number): string[] {
-  const slots: string[] = [];
-  let [h, m] = startTime.split(":").map(Number);
-  const [eh, em] = endTime.split(":").map(Number);
-  const endTotal = eh * 60 + em;
-  while (h * 60 + m < endTotal) {
-    slots.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    m += durationMin;
-    h += Math.floor(m / 60);
-    m = m % 60;
-  }
-  return slots;
-}
-
-/** Generate all slot start-times for a day, across all its ranges, sorted. */
-function generateSlotsForDay(sched: DaySchedule | undefined, durationMin: number): string[] {
-  if (!sched?.enabled || !sched.ranges.length) return [];
-  const all = sched.ranges.flatMap((r) => generateSlotTimes(r.startTime, r.endTime, durationMin));
-  return [...new Set(all)].sort();
-}
-
 /** Migrate legacy single-range format → new multi-range format. */
 function migrateDaySchedule(raw: any): DaySchedule {
   if (raw && Array.isArray(raw.ranges)) return raw as DaySchedule;
@@ -808,6 +797,16 @@ function migrateDaySchedule(raw: any): DaySchedule {
     return { enabled: !!raw.enabled, ranges: [{ startTime: raw.startTime, endTime: raw.endTime || "18:00" }] };
   }
   return { enabled: false, ranges: [] };
+}
+
+function nextOccurrenceOfDay(dayKey: string): Date {
+  const DAY_KEY_TO_JS: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+  const target = DAY_KEY_TO_JS[dayKey] ?? 0;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = (target - today.getDay() + 7) % 7;
+  const d = new Date(today);
+  d.setDate(today.getDate() + diff);
+  return d;
 }
 
 function addMin(time: string, minutes: number): string {
@@ -982,6 +981,11 @@ export default function AssignmentCalendarPage() {
   const [vacationDraftStart, setVacationDraftStart] = useState("");
   const [vacationDraftEnd, setVacationDraftEnd] = useState("");
   const [vacationDraftLabel, setVacationDraftLabel] = useState("");
+  const [openAvailabilityBlocks, setOpenAvailabilityBlocks] = useState<OpenAvailabilityBlock[]>([]);
+  const [draftOpenBlocks, setDraftOpenBlocks] = useState<OpenAvailabilityBlock[]>([]);
+  const [openBlockDraftDate, setOpenBlockDraftDate] = useState("");
+  const [openBlockDraftStart, setOpenBlockDraftStart] = useState("");
+  const [openBlockDraftEnd, setOpenBlockDraftEnd] = useState("");
 
   // Slot settings
   const [slotDurationMin, setSlotDurationMin] = useState(30);
@@ -1195,6 +1199,7 @@ export default function AssignmentCalendarPage() {
         if (data?.maxStudentsPerSlot) setDefaultMaxStudents(data.maxStudentsPerSlot);
         if (data?.slotDurationMin) setSlotDurationMin(data.slotDurationMin);
         setVacationPeriods(normalizeVacationPeriods(data?.vacationPeriods));
+        setOpenAvailabilityBlocks(normalizeOpenAvailabilityBlocks(data?.openAvailabilityBlocks));
       } catch {}
     }
     load();
@@ -1272,16 +1277,38 @@ export default function AssignmentCalendarPage() {
   const selectedDayWeeklyAvailable = dayIsWeeklyAvailable(selectedDate, availability);
   const selectedDayOnVacation = isDateInVacation(selectedDateStr, vacationPeriods);
   const hasSlotsOnSelectedDay = sessionSlots.some((s) => s.date === selectedDateStr);
+  const openBlocksOnSelectedDay = useMemo(
+    () => openBlocksForDate(selectedDateStr, openAvailabilityBlocks),
+    [selectedDateStr, openAvailabilityBlocks]
+  );
+
+  const timeSlots = useMemo(
+    () =>
+      resolveDaySlotTimes({
+        dateStr: selectedDateStr,
+        weeklySched: selectedDaySchedule,
+        openBlocks: openAvailabilityBlocks,
+        slotDurationMin,
+      }),
+    [selectedDateStr, selectedDaySchedule, openAvailabilityBlocks, slotDurationMin]
+  );
+
   const showCoachDaySchedule = coachDayShowsSchedule({
     weeklyAvailable: selectedDayWeeklyAvailable,
     onVacation: selectedDayOnVacation,
     hasExistingSlots: hasSlotsOnSelectedDay,
+    hasResolvableSlots: timeSlots.length > 0,
   });
-  const blockNewBookingsOnSelectedDay = selectedDayOnVacation;
 
-  const timeSlots = useMemo(
-    () => generateSlotsForDay(selectedDaySchedule, slotDurationMin),
-    [selectedDaySchedule, slotDurationMin]
+  const isBookingBlockedAtTime = useCallback(
+    (time: string) =>
+      isNewBookingBlocked({
+        dateStr: selectedDateStr,
+        time,
+        vacationPeriods,
+        openBlocks: openAvailabilityBlocks,
+      }),
+    [selectedDateStr, vacationPeriods, openAvailabilityBlocks]
   );
 
   const slotsByTime = useMemo(() => {
@@ -1397,10 +1424,29 @@ export default function AssignmentCalendarPage() {
       | (Record<string, unknown> & { id: string })
       | undefined;
   }, [filterStudentId, rosterStudentsSorted]);
-  const effectiveSlotDuration = isFilterActive && filterStudentSessionDuration
-    ? filterStudentSessionDuration
-    : slotDurationMin;
-  const slotsPerSession = Math.max(1, Math.ceil(effectiveSlotDuration / slotDurationMin));
+  const rosterSessionDurationForFilter =
+    isFilterActive && filterStudentSessionDuration && filterStudentSessionDuration > 0
+      ? filterStudentSessionDuration
+      : slotDurationMin;
+
+  const getSessionDurationForTime = useCallback(
+    (_time: string) =>
+      getEffectiveSessionDurationMin({
+        rosterDurationMin: rosterSessionDurationForFilter,
+        slotDurationMin,
+      }),
+    [rosterSessionDurationForFilter, slotDurationMin]
+  );
+
+  const getSlotsPerSessionForTime = useCallback(
+    (time: string) => {
+      const dur = getSessionDurationForTime(time);
+      return Math.max(1, Math.ceil(dur / slotDurationMin));
+    },
+    [getSessionDurationForTime, slotDurationMin]
+  );
+
+  const effectiveSlotDuration = rosterSessionDurationForFilter;
 
   // Selected week helpers
   const selectedWeekStart = getWeekStart(selectedDateStr);
@@ -1943,16 +1989,23 @@ export default function AssignmentCalendarPage() {
 
   const isUnavailableDay = useCallback(
     (date: Date) => {
+      const dateStr = toDateStr(date);
+      if (dayHasOpenBlocks(dateStr, openAvailabilityBlocks)) return false;
+      if (isDateInVacation(dateStr, vacationPeriods)) return false;
       const sched = availability[DAY_KEYS[date.getDay()]];
-      const weeklyOff = !sched?.enabled || !sched.ranges.length;
-      return weeklyOff || isDateInVacation(toDateStr(date), vacationPeriods);
+      return !sched?.enabled || !sched.ranges.length;
     },
-    [availability, vacationPeriods]
+    [availability, vacationPeriods, openAvailabilityBlocks]
   );
 
   const previewVacationPeriods = useMemo(
     () => upcomingVacationPeriods(vacationPeriods, selectedDateStr).slice(0, 3),
     [vacationPeriods, selectedDateStr]
+  );
+
+  const previewOpenBlocks = useMemo(
+    () => upcomingOpenAvailabilityBlocks(openAvailabilityBlocks, selectedDateStr, 5),
+    [openAvailabilityBlocks, selectedDateStr]
   );
 
   const getWeeklyCount = useCallback(
@@ -1994,7 +2047,51 @@ export default function AssignmentCalendarPage() {
     setVacationDraftStart("");
     setVacationDraftEnd("");
     setVacationDraftLabel("");
+    setDraftOpenBlocks([...openAvailabilityBlocks]);
+    setOpenBlockDraftDate("");
+    setOpenBlockDraftStart("");
+    setOpenBlockDraftEnd("");
     setAvailabilityOpen(true);
+  };
+
+  const addDraftOpenBlock = () => {
+    const date = openBlockDraftDate.trim().slice(0, 10);
+    const startTime = openBlockDraftStart.trim();
+    const endTime = openBlockDraftEnd.trim();
+    if (!date || !startTime || !endTime) {
+      toast({ title: "Indica a data e o horário de início e fim", variant: "destructive" });
+      return;
+    }
+    if (endTime <= startTime) {
+      toast({ title: "A hora de fim deve ser posterior à de início", variant: "destructive" });
+      return;
+    }
+    const slotStarts = generateSlotTimes(startTime, endTime, slotDurationMin);
+    if (slotStarts.length < 1) {
+      toast({
+        title: `O intervalo deve ter pelo menos um bloco de ${slotDurationMin} min`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const candidate: OpenAvailabilityBlock = {
+      id: crypto.randomUUID(),
+      date,
+      startTime,
+      endTime,
+    };
+    setDraftOpenBlocks((prev) =>
+      [...prev, candidate].sort(
+        (a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)
+      )
+    );
+    setOpenBlockDraftDate("");
+    setOpenBlockDraftStart("");
+    setOpenBlockDraftEnd("");
+  };
+
+  const removeDraftOpenBlock = (id: string) => {
+    setDraftOpenBlocks((prev) => prev.filter((b) => b.id !== id));
   };
 
   const addDraftVacationPeriod = () => {
@@ -2092,11 +2189,16 @@ export default function AssignmentCalendarPage() {
     try {
       await setDoc(
         doc(db, "personalTrainers", user.uid),
-        { availability: draft, vacationPeriods: draftVacationPeriods },
+        {
+          availability: draft,
+          vacationPeriods: draftVacationPeriods,
+          openAvailabilityBlocks: draftOpenBlocks,
+        },
         { merge: true }
       );
       setAvailability(draft);
       setVacationPeriods(draftVacationPeriods);
+      setOpenAvailabilityBlocks(draftOpenBlocks);
       setAvailabilityOpen(false);
       toast({ title: "Disponibilidade guardada" });
     } catch {
@@ -2128,7 +2230,7 @@ export default function AssignmentCalendarPage() {
 
   const openManageSlot = (time: string) => {
     const existing = slotsByTime.get(time) ?? null;
-    if (blockNewBookingsOnSelectedDay && !(existing?.students?.length)) {
+    if (isBookingBlockedAtTime(time) && !(existing?.students?.length)) {
       toast({ title: "Dia de férias — não é possível criar novos blocos", variant: "destructive" });
       return;
     }
@@ -2174,7 +2276,14 @@ export default function AssignmentCalendarPage() {
 
   const handleAddStudent = async () => {
     if (!managingSlot || !addStudentId || !db || !user) return;
-    if (isDateInVacation(managingSlot.date, vacationPeriods)) {
+    if (
+      isNewBookingBlocked({
+        dateStr: managingSlot.date,
+        time: managingSlot.startTime,
+        vacationPeriods,
+        openBlocks: openAvailabilityBlocks,
+      })
+    ) {
       toast({ title: "Dia de férias — não é possível inscrever novos alunos", variant: "destructive" });
       return;
     }
@@ -2277,12 +2386,15 @@ export default function AssignmentCalendarPage() {
     const slot = slotsByTime.get(time);
     const entry = slot?.students.find((s) => s.studentId === filterStudentId);
     const isEnrolled = !!entry;
-    if (!isEnrolled && blockNewBookingsOnSelectedDay) {
+    if (!isEnrolled && isBookingBlockedAtTime(time)) {
       toast({ title: "Dia de férias — não é possível inscrever", variant: "destructive" });
       return;
     }
     const startIdx = timeSlots.indexOf(time);
     if (startIdx === -1) return;
+
+    const sessionDurForTime = getSessionDurationForTime(time);
+    const slotsPerSessionForTime = getSlotsPerSessionForTime(time);
 
     const docKey = slotDocId(selectedDateStr, time);
     setIsTogglingSlot(docKey);
@@ -2290,8 +2402,10 @@ export default function AssignmentCalendarPage() {
       if (isEnrolled) {
         // Remove from all consecutive blocks of this session
         const sessionStart = entry.sessionStart ?? time;
+        const enrolledDur = entry.sessionDurationMin ?? sessionDurForTime;
+        const freeCount = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
         const sessionIdx = timeSlots.indexOf(sessionStart);
-        const blocksToFree = timeSlots.slice(Math.max(0, sessionIdx), Math.max(0, sessionIdx) + slotsPerSession);
+        const blocksToFree = timeSlots.slice(Math.max(0, sessionIdx), Math.max(0, sessionIdx) + freeCount);
         const nextSlots = [...sessionSlots];
         for (const t of blocksToFree) {
           const id = slotDocId(selectedDateStr, t);
@@ -2311,10 +2425,9 @@ export default function AssignmentCalendarPage() {
         setSessionSlots(nextSlots);
         toast({ title: "Aluno removido dos blocos" });
       } else {
-        // Enroll in slotsPerSession consecutive blocks
-        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsPerSession);
-        if (blocksToBook.length < slotsPerSession) {
-          toast({ title: `Não há blocos suficientes para sessão de ${effectiveSlotDuration} min`, variant: "destructive" });
+        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsPerSessionForTime);
+        if (blocksToBook.length < slotsPerSessionForTime) {
+          toast({ title: `Não há blocos suficientes para sessão de ${sessionDurForTime} min`, variant: "destructive" });
           return;
         }
         for (const t of blocksToBook) {
@@ -2365,7 +2478,7 @@ export default function AssignmentCalendarPage() {
             studentId: filterStudentId,
             studentName,
             sessionStart: time,
-            sessionDurationMin: effectiveSlotDuration,
+            sessionDurationMin: sessionDurForTime,
             sessionAttendance: "pending",
             ...(rosterPhoto ? { studentPhotoUrl: rosterPhoto } : {}),
             ...(weekMatch ? { workoutTitle: weekMatch.programTitle } : {}),
@@ -2378,7 +2491,7 @@ export default function AssignmentCalendarPage() {
           if (i >= 0) nextSlots[i] = newSlot; else nextSlots.push(newSlot);
         }
         setSessionSlots(nextSlots);
-        toast({ title: `${studentName} inscrito (${effectiveSlotDuration} min)` });
+        toast({ title: `${studentName} inscrito (${sessionDurForTime} min)` });
       }
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message, variant: "destructive" });
@@ -2757,6 +2870,82 @@ export default function AssignmentCalendarPage() {
               </div>
               <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Blocos abertos
+                </p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Num dia e horário concretos, estes blocos têm prioridade sobre o horário semanal e permitem
+                  marcações mesmo em férias.
+                </p>
+                <div className="space-y-1">
+                  <Label className="text-xs">Data</Label>
+                  <Input
+                    type="date"
+                    value={openBlockDraftDate}
+                    onChange={(e) => setOpenBlockDraftDate(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Início</Label>
+                    <Input
+                      type="time"
+                      value={openBlockDraftStart}
+                      onChange={(e) => setOpenBlockDraftStart(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Fim</Label>
+                    <Input
+                      type="time"
+                      value={openBlockDraftEnd}
+                      onChange={(e) => setOpenBlockDraftEnd(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-8"
+                  onClick={addDraftOpenBlock}
+                  disabled={
+                    !openBlockDraftDate.trim() ||
+                    !openBlockDraftStart.trim() ||
+                    !openBlockDraftEnd.trim()
+                  }
+                >
+                  Adicionar bloco aberto
+                </Button>
+                {draftOpenBlocks.length > 0 ? (
+                  <ul className="space-y-2">
+                    {draftOpenBlocks.map((b) => (
+                      <li
+                        key={b.id}
+                        className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-xs"
+                      >
+                        <span className="min-w-0 font-medium truncate">
+                          {formatOpenBlockLabel(b)}
+                        </span>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeDraftOpenBlock(b.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">Sem blocos abertos</p>
+                )}
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   Férias / dias indisponíveis
                 </p>
                 <div className="grid grid-cols-2 gap-2">
@@ -2846,7 +3035,12 @@ export default function AssignmentCalendarPage() {
               const maxS = slotMaxOverride || defaultMaxStudents;
               const canAdd =
                 slotStudents.length < maxS &&
-                !isDateInVacation(managingSlot.date, vacationPeriods);
+                !isNewBookingBlocked({
+                  dateStr: managingSlot.date,
+                  time: managingSlot.startTime,
+                  vacationPeriods,
+                  openBlocks: openAvailabilityBlocks,
+                });
               return (
                 <>
                   <DialogHeader>
@@ -3264,7 +3458,31 @@ export default function AssignmentCalendarPage() {
                             {active ? (
                               <div className="flex flex-col gap-0.5">
                                 {sched.ranges.map((r, i) => (
-                                  <span key={i} className="text-primary font-semibold">{r.startTime} – {r.endTime}</span>
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    className="group flex items-center gap-1 text-primary font-semibold hover:underline cursor-pointer text-left"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const nextDate = nextOccurrenceOfDay(day);
+                                      const nextDateStr = toDateStr(nextDate);
+                                      setSelectedDate(nextDate);
+                                      const firstSlot = generateSlotTimes(r.startTime, r.endTime, slotDurationMin)[0];
+                                      if (firstSlot) {
+                                        const existingSlot = sessionSlots.find(
+                                          (s) => s.date === nextDateStr && s.startTime === firstSlot
+                                        ) ?? null;
+                                        setManagingSlot({ date: nextDateStr, startTime: firstSlot, slot: existingSlot });
+                                        setAddStudentId("");
+                                        setSelectedPlanId("");
+                                        setStudentWorkoutPlans([]);
+                                        setSlotMaxOverride(existingSlot?.maxStudents ?? defaultMaxStudents);
+                                      }
+                                    }}
+                                  >
+                                    {r.startTime} – {r.endTime}
+                                    <CalendarPlus className="h-3 w-3 opacity-0 group-hover:opacity-70 shrink-0 transition-opacity" />
+                                  </button>
                                 ))}
                               </div>
                             ) : (
@@ -3274,6 +3492,23 @@ export default function AssignmentCalendarPage() {
                         </div>
                       );
                     })}
+                    <div className="border-t pt-2 mt-2 space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Blocos abertos
+                      </p>
+                      {previewOpenBlocks.length > 0 ? (
+                        previewOpenBlocks.map((b) => (
+                          <p
+                            key={b.id}
+                            className="text-xs text-teal-700 dark:text-teal-400 font-medium"
+                          >
+                            {formatOpenBlockLabel(b)}
+                          </p>
+                        ))
+                      ) : (
+                        <p className="text-xs italic text-muted-foreground">Sem blocos abertos</p>
+                      )}
+                    </div>
                     <div className="border-t pt-2 mt-2 space-y-1">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Férias
@@ -3367,11 +3602,21 @@ export default function AssignmentCalendarPage() {
                         : "Dia indisponível"}
                   </CardDescription>
                 </div>
-                {showCoachDaySchedule && selectedDaySchedule && (
+                {showCoachDaySchedule && (
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {selectedDaySchedule.ranges.map((r, i) => (
-                      <Badge key={i} variant="outline" className="text-xs">
-                        {r.startTime} – {r.endTime}
+                    {selectedDayWeeklyAvailable &&
+                      selectedDaySchedule?.ranges.map((r, i) => (
+                        <Badge key={`w-${i}`} variant="outline" className="text-xs">
+                          {r.startTime} – {r.endTime}
+                        </Badge>
+                      ))}
+                    {openBlocksOnSelectedDay.map((b) => (
+                      <Badge
+                        key={b.id}
+                        variant="outline"
+                        className="text-xs border-teal-500/50 text-teal-700 dark:text-teal-400"
+                      >
+                        {b.startTime} – {b.endTime}
                       </Badge>
                     ))}
                   </div>
@@ -3411,8 +3656,10 @@ export default function AssignmentCalendarPage() {
                     const isSessionStart = isEnrolled && !isContinuation;
 
                     const startIdx = timeSlots.indexOf(time);
-                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsPerSession);
-                    const hasEnoughBlocks = !isEnrolled && blocksForSession.length === slotsPerSession;
+                    const slotsNeededForTime = getSlotsPerSessionForTime(time);
+                    const sessionMinForTime = getSessionDurationForTime(time);
+                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
+                    const hasEnoughBlocks = !isEnrolled && blocksForSession.length === slotsNeededForTime;
                     const allFree = hasEnoughBlocks && blocksForSession.every((t2) => {
                       const s2 = slotsByTime.get(t2);
                       return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
@@ -3476,7 +3723,7 @@ export default function AssignmentCalendarPage() {
                           ) : isSessionStart ? (
                             <div className="space-y-1">
                               <p className="text-xs font-semibold text-primary">
-                                Inscrito · {slotsPerSession * slotDurationMin} min
+                                Inscrito · {myEntry?.sessionDurationMin ?? sessionMinForTime} min
                               </p>
                               {myEntry && (
                                 <Badge
@@ -3514,7 +3761,7 @@ export default function AssignmentCalendarPage() {
                           <Button size="sm"
                             className="shrink-0 h-8 gap-1.5 text-xs bg-primary/90"
                             onClick={() => handleCoachToggleStudent(time)}
-                            disabled={busy || blockNewBookingsOnSelectedDay}>
+                            disabled={busy || isBookingBlockedAtTime(time)}>
                             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
                             Inscrever
                           </Button>

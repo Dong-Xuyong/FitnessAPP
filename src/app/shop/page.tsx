@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import {
   addDoc,
@@ -20,10 +20,14 @@ import { getStudentDisplayName } from "@/lib/student-display";
 import { seedDefaultShopItemsIfEmpty } from "@/lib/shop-catalog";
 import {
   catalogMapFromItems,
-  computeRegistrationDayTotal,
-  formatShopLinesSummary,
-  type ShopLine,
+  computePurchaseTotal,
+  formatPurchaseSummary,
+  isShopPurchasePaid,
+  isShopPurchaseUnpaid,
+  normalizeShopPurchasesFromDoc,
+  type ShopPurchaseLike,
 } from "@/lib/shop-billing";
+import { repairShopLinesForPaidPayments, resolveRosterStudentIdClient } from "@/lib/shop-billing-payments";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,8 +58,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Pencil, Plus, Store, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Pencil, Plus, Store, Trash2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 
 type ShopItemRow = {
   id: string;
@@ -65,18 +71,58 @@ type ShopItemRow = {
 };
 
 type ShopRegRow = {
+  id: string;
   studentId?: string;
   trainerId?: string;
   date?: string;
-  lines?: ShopLine[];
+  time?: string;
+  itemId?: string;
+  quantity?: number;
+  billingStatus?: "unpaid" | "paid";
+  paidInPaymentId?: string;
+  lines?: unknown[];
   updatedAt?: string;
 };
+
+type EnrichedPurchaseRow = ShopPurchaseLike & {
+  id: string;
+  studentId?: string;
+  lineTotal: number;
+  summary: string;
+};
+
+function flattenPurchaseRows(
+  rows: ShopRegRow[],
+  catalogMap: ReturnType<typeof catalogMapFromItems>
+): EnrichedPurchaseRow[] {
+  const out: EnrichedPurchaseRow[] = [];
+  for (const row of rows) {
+    const purchases = normalizeShopPurchasesFromDoc(row as Record<string, unknown>, row.id);
+    for (const purchase of purchases) {
+      const lineTotal = computePurchaseTotal(purchase, catalogMap);
+      if (lineTotal <= 0) continue;
+      out.push({
+        ...purchase,
+        id: purchase.id ?? row.id,
+        studentId: row.studentId,
+        lineTotal,
+        summary: formatPurchaseSummary(purchase, catalogMap),
+      });
+    }
+  }
+  return out;
+}
 
 export default function CoachShopPage() {
   const { t } = useI18n();
   const { toast } = useToast();
-  const { user } = useUser();
+  const { user, isUserLoading } = useUser();
   const db = useFirestore();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const itemsQuery = useMemoFirebase(() => {
     if (!db || !user?.uid) return null;
@@ -93,6 +139,10 @@ export default function CoachShopPage() {
     );
   }, [db, user?.uid]);
   const { data: rows, isLoading: regsLoading } = useCollection<ShopRegRow>(shopQuery);
+
+  const authReady = mounted && !isUserLoading;
+  const catalogLoading = !authReady || itemsLoading;
+  const registrationsLoading = !authReady || regsLoading;
 
   const catalogMap = useMemo(
     () =>
@@ -112,6 +162,26 @@ export default function CoachShopPage() {
     return [...list].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   }, [rows]);
 
+  const enrichedRows = useMemo(
+    () => flattenPurchaseRows(sortedRows as ShopRegRow[], catalogMap),
+    [sortedRows, catalogMap]
+  );
+
+  const unpaidRegRows = useMemo(
+    () => enrichedRows.filter((r) => isShopPurchaseUnpaid(r)),
+    [enrichedRows]
+  );
+  const paidRegRows = useMemo(
+    () => enrichedRows.filter((r) => isShopPurchasePaid(r)),
+    [enrichedRows]
+  );
+
+  useEffect(() => {
+    if (unpaidRegRows.length === 0 && paidRegRows.length > 0) {
+      setCoachRegsPaidOpen(true);
+    }
+  }, [unpaidRegRows.length, paidRegRows.length]);
+
   const [nameByStudentId, setNameByStudentId] = useState<Record<string, string>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -122,6 +192,33 @@ export default function CoachShopPage() {
   const [itemActive, setItemActive] = useState(true);
   const [savingItem, setSavingItem] = useState(false);
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
+  const [coachRegsUnpaidOpen, setCoachRegsUnpaidOpen] = useState(true);
+  const [coachRegsPaidOpen, setCoachRegsPaidOpen] = useState(false);
+  const shopRepairTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!db || !user?.uid) return;
+    const studentIds = [
+      ...new Set(sortedRows.map((r) => r.studentId).filter(Boolean)),
+    ] as string[];
+    if (!studentIds.length) return;
+    if (shopRepairTimerRef.current) clearTimeout(shopRepairTimerRef.current);
+    shopRepairTimerRef.current = setTimeout(() => {
+      void (async () => {
+        for (const sid of studentIds) {
+          try {
+            const rosterId = await resolveRosterStudentIdClient(db, user.uid, sid);
+            await repairShopLinesForPaidPayments(db, user.uid, rosterId, sid);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      })();
+    }, 400);
+    return () => {
+      if (shopRepairTimerRef.current) clearTimeout(shopRepairTimerRef.current);
+    };
+  }, [db, user?.uid, sortedRows]);
 
   useEffect(() => {
     if (!db || !user?.uid) return;
@@ -273,7 +370,7 @@ export default function CoachShopPage() {
             </Button>
           </CardHeader>
           <CardContent>
-            {itemsLoading ? (
+            {catalogLoading ? (
               <div className="flex items-center gap-2 text-muted-foreground text-sm py-6 justify-center">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {t("shopLoadingDay")}
@@ -337,7 +434,7 @@ export default function CoachShopPage() {
             <CardDescription>{t("shopCoachTableHint")}</CardDescription>
           </CardHeader>
           <CardContent>
-            {regsLoading ? (
+            {registrationsLoading ? (
               <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {t("shopLoadingDay")}
@@ -345,52 +442,169 @@ export default function CoachShopPage() {
             ) : sortedRows.length === 0 ? (
               <p className="text-sm text-muted-foreground py-6 text-center">{t("shopCoachEmpty")}</p>
             ) : (
-              <div className="rounded-md border overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("date")}</TableHead>
-                      <TableHead>{t("shopTableStudent")}</TableHead>
-                      <TableHead>{t("shopTableItems")}</TableHead>
-                      <TableHead className="text-right">{t("shopDayTotal")}</TableHead>
-                      <TableHead className="w-[72px]" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedRows.map((row) => {
-                      const sid = row.studentId || "";
-                      const isDeleting = deletingId === row.id;
-                      const dayTotal = computeRegistrationDayTotal(row.lines, catalogMap);
-                      return (
-                        <TableRow key={row.id}>
-                          <TableCell className="font-medium whitespace-nowrap">{row.date || "—"}</TableCell>
-                          <TableCell>{nameByStudentId[sid] || sid.slice(0, 8) || "—"}</TableCell>
-                          <TableCell className="max-w-[240px] truncate text-sm text-muted-foreground">
-                            {formatShopLinesSummary(row.lines, catalogMap)}
-                          </TableCell>
-                          <TableCell className="text-right font-medium">€{dayTotal.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              disabled={isDeleting}
-                              aria-label={t("shopDeleteRegistration")}
-                              onClick={() => setConfirmDeleteId(row.id)}
-                            >
-                              {isDeleting ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+              <div className="space-y-3">
+                <Collapsible open={coachRegsUnpaidOpen} onOpenChange={setCoachRegsUnpaidOpen}>
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border bg-amber-500/5 px-4 py-3 text-left hover:bg-amber-500/10 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {coachRegsUnpaidOpen ? (
+                          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                          {t("shopMonthUnpaidSection")}
+                        </span>
+                        <span className="text-xs text-muted-foreground">({unpaidRegRows.length})</span>
+                      </div>
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-3">
+                    {unpaidRegRows.length === 0 ? (
+                      <p className="text-sm text-muted-foreground px-1 py-2">{t("shopCoachNoUnpaidRegs")}</p>
+                    ) : (
+                      <div className="rounded-md border overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>{t("date")}</TableHead>
+                              <TableHead>{t("shopTableStudent")}</TableHead>
+                              <TableHead>{t("shopTableItems")}</TableHead>
+                              <TableHead className="text-right">{t("shopDayTotal")}</TableHead>
+                              <TableHead className="w-[72px]" />
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {unpaidRegRows.map((row) => {
+                              const sid = row.studentId || "";
+                              const isDeleting = deletingId === row.id;
+                              return (
+                                <TableRow key={`${row.id}-unpaid`}>
+                                  <TableCell className="font-medium whitespace-nowrap">
+                                    {row.date || "—"}
+                                    {row.time ? (
+                                      <span className="block text-xs text-muted-foreground">{row.time}</span>
+                                    ) : null}
+                                  </TableCell>
+                                  <TableCell>{nameByStudentId[sid] || sid.slice(0, 8) || "—"}</TableCell>
+                                  <TableCell className="max-w-[240px] truncate text-sm text-muted-foreground">
+                                    {row.summary}
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium">
+                                    €{row.lineTotal.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-right w-[72px]">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      disabled={isDeleting}
+                                      aria-label={t("shopDeleteRegistration")}
+                                      onClick={() => setConfirmDeleteId(row.id)}
+                                    >
+                                      {isDeleting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible open={coachRegsPaidOpen} onOpenChange={setCoachRegsPaidOpen}>
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex w-full items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition-colors",
+                        "bg-green-500/5 hover:bg-green-500/10"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {coachRegsPaidOpen ? (
+                          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="text-sm font-semibold text-green-800 dark:text-green-300">
+                          {t("shopMonthPaidSection")}
+                        </span>
+                        <span className="text-xs text-muted-foreground">({paidRegRows.length})</span>
+                      </div>
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-3">
+                    {paidRegRows.length === 0 ? (
+                      <p className="text-sm text-muted-foreground px-1 py-2">{t("shopCoachNoPaidRegs")}</p>
+                    ) : (
+                      <div className="rounded-md border overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>{t("date")}</TableHead>
+                              <TableHead>{t("shopTableStudent")}</TableHead>
+                              <TableHead>{t("shopTableItems")}</TableHead>
+                              <TableHead className="text-right">{t("shopDayTotal")}</TableHead>
+                              <TableHead className="w-[72px]" />
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {paidRegRows.map((row) => {
+                              const sid = row.studentId || "";
+                              const isDeleting = deletingId === row.id;
+                              return (
+                                <TableRow key={`${row.id}-paid`}>
+                                  <TableCell className="font-medium whitespace-nowrap">
+                                    {row.date || "—"}
+                                    {row.time ? (
+                                      <span className="block text-xs text-muted-foreground">{row.time}</span>
+                                    ) : null}
+                                  </TableCell>
+                                  <TableCell>{nameByStudentId[sid] || sid.slice(0, 8) || "—"}</TableCell>
+                                  <TableCell className="max-w-[240px] truncate text-sm text-muted-foreground">
+                                    {row.summary}
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium">
+                                    €{row.lineTotal.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      disabled={isDeleting}
+                                      aria-label={t("shopDeleteRegistration")}
+                                      onClick={() => setConfirmDeleteId(row.id)}
+                                    >
+                                      {isDeleting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
               </div>
             )}
           </CardContent>

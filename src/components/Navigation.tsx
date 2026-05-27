@@ -12,7 +12,6 @@ import {
   CalendarDays,
   LogOut, 
   Search,
-  Plus,
   User,
   Store,
   ChevronLeft,
@@ -26,7 +25,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc } from "firebase/firestore";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Globe } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -67,13 +66,18 @@ function TrainerSidebarIdentity({
   collapsed?: boolean;
   onNavigate?: () => void;
 }) {
-  const displayName = trainerDisplayName(trainer);
-  const avatarSrc =
-    trainer?.photoUrl ||
-    user?.photoURL ||
-    `https://picsum.photos/seed/${encodeURIComponent(user?.uid || "trainer")}/100/100`;
-  const fallback =
-    (trainer?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "T").toUpperCase();
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+
+  const displayName = hydrated ? trainerDisplayName(trainer) : "Trainer";
+  const avatarSrc = hydrated
+    ? trainer?.photoUrl ||
+      user?.photoURL ||
+      `https://picsum.photos/seed/${encodeURIComponent(user?.uid || "trainer")}/100/100`
+    : `https://picsum.photos/seed/trainer/100/100`;
+  const fallback = hydrated
+    ? (trainer?.firstName?.[0] || user?.displayName?.[0] || user?.email?.[0] || "T").toUpperCase()
+    : "T";
 
   if (collapsed) {
     return (
@@ -116,14 +120,107 @@ function TrainerSidebarIdentity({
         <AvatarFallback className={layout === "vertical" ? "text-lg" : "text-sm"}>{fallback}</AvatarFallback>
       </Avatar>
       <div className={cn("min-w-0", layout === "horizontal" && "flex-1", textAlign)}>
-        <p className="text-sm font-semibold leading-snug truncate">{displayName}</p>
+        <p className="text-sm font-semibold leading-snug truncate" suppressHydrationWarning>
+          {displayName}
+        </p>
       </div>
     </Link>
   );
 }
 
+function TrainerLocaleToggle({
+  locale,
+  setLocale,
+  collapsed = false,
+}: {
+  locale: string;
+  setLocale: (locale: "en" | "pt") => void;
+  collapsed?: boolean;
+}) {
+  const menu = (
+    <DropdownMenuContent align={collapsed ? "center" : "start"} side={collapsed ? "right" : "top"}>
+      <DropdownMenuItem onClick={() => setLocale("en")} className={locale === "en" ? "font-bold" : ""}>
+        English
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setLocale("pt")} className={locale === "pt" ? "font-bold" : ""}>
+        Português
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
+  if (collapsed) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="icon" className="w-full shrink-0">
+            <Globe className="h-4 w-4" />
+            <span className="sr-only">Language</span>
+          </Button>
+        </DropdownMenuTrigger>
+        {menu}
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon" className="shrink-0">
+          <Globe className="h-4 w-4" />
+          <span className="sr-only">Language</span>
+        </Button>
+      </DropdownMenuTrigger>
+      {menu}
+    </DropdownMenu>
+  );
+}
+
+function TrainerSidebarUtilityControls({
+  locale,
+  setLocale,
+  collapsed = false,
+}: {
+  locale: string;
+  setLocale: (locale: "en" | "pt") => void;
+  collapsed?: boolean;
+}) {
+  if (collapsed) {
+    return (
+      <div className="flex flex-col items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <ThemeToggle />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">Toggle dark mode</TooltipContent>
+        </Tooltip>
+        <TrainerLocaleToggle locale={locale} setLocale={setLocale} collapsed />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <ThemeToggle />
+      <TrainerLocaleToggle locale={locale} setLocale={setLocale} />
+    </div>
+  );
+}
+
 /* ─── Shared sidebar nav content ─── */
-type SidebarTranslate = (key: "dashboard" | "students" | "programs" | "exercises" | "assignmentCalendar" | "coachProgressNav" | "myProfile" | "shop" | "logout") => string;
+type SidebarTranslate = (
+  key:
+    | "dashboard"
+    | "students"
+    | "programs"
+    | "exercises"
+    | "assignmentCalendar"
+    | "coachProgressNav"
+    | "myProfile"
+    | "shop"
+    | "logout"
+) => string;
 
 function SidebarContent({
   pathname,
@@ -132,6 +229,8 @@ function SidebarContent({
   onSignOut,
   onNavClick,
   t,
+  locale,
+  setLocale,
 }: {
   pathname: string;
   trainer: TrainerNavProfile;
@@ -139,6 +238,8 @@ function SidebarContent({
   onSignOut: () => void;
   onNavClick?: () => void;
   t: SidebarTranslate;
+  locale: string;
+  setLocale: (locale: "en" | "pt") => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -171,8 +272,9 @@ function SidebarContent({
         ))}
       </nav>
 
-      {/* Bottom: Logout */}
-      <div className="p-2 border-t mt-auto space-y-1">
+      {/* Bottom: theme, language, logout */}
+      <div className="p-4 border-t mt-auto space-y-3 shrink-0">
+        <TrainerSidebarUtilityControls locale={locale} setLocale={setLocale} />
         <Button
           variant="ghost"
           className="w-full justify-start gap-3 text-muted-foreground"
@@ -215,17 +317,6 @@ export function Navigation({ children }: { children: React.ReactNode }) {
 
   const sidebarWidth = collapsed ? "w-[70px]" : "w-64";
   const mainMargin = collapsed ? "md:ml-[70px]" : "md:ml-64";
-  const pathLabelMap: Record<string, string> = {
-    dashboard: t("dashboard"),
-    students: t("students"),
-    workouts: t("programs"),
-    exercises: t("exercises"),
-    "assignment-calendar": t("assignmentCalendar"),
-    progress: t("coachProgressNav"),
-    profile: t("myProfile"),
-    shop: t("shop"),
-  };
-  const currentPathKey = pathname.split("/")[1] || "dashboard";
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -282,8 +373,9 @@ export function Navigation({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          {/* Bottom: Logout */}
-          <div className="p-2 border-t mt-auto space-y-1">
+          {/* Bottom: theme, language, logout */}
+          <div className={cn("border-t mt-auto shrink-0 space-y-2", collapsed ? "p-2" : "p-4")}>
+            <TrainerSidebarUtilityControls locale={locale} setLocale={setLocale} collapsed={collapsed} />
             {collapsed ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -335,55 +427,23 @@ export function Navigation({ children }: { children: React.ReactNode }) {
               onSignOut={handleSignOut}
               onNavClick={() => setMobileOpen(false)}
               t={t}
+              locale={locale}
+              setLocale={setLocale}
             />
           </SheetContent>
         </Sheet>
 
         {/* Main Content */}
         <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", mainMargin)}>
-          {/* Header */}
-          <header className="h-16 border-b bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-4 md:px-6">
-            <div className="flex items-center gap-3">
-              {/* Hamburger — mobile only */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="md:hidden"
-                onClick={() => setMobileOpen(true)}
-                aria-label="Open menu"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-              <h1 className="text-lg font-semibold capitalize">
-                {pathLabelMap[currentPathKey] || t("dashboard")}
-              </h1>
-            </div>
-            <div className="flex items-center gap-3">
-              <ThemeToggle />
-              {/* Language Switcher */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon">
-                    <Globe className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setLocale("en")} className={locale === "en" ? "font-bold" : ""}>
-                    🇬🇧 English
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setLocale("pt")} className={locale === "pt" ? "font-bold" : ""}>
-                    🇵🇹 Português
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button className="hidden sm:flex gap-2" asChild>
-                <Link href="/workouts/builder">
-                  <Plus className="h-4 w-4" />
-                  {t("newProgram")}
-                </Link>
-              </Button>
-            </div>
-          </header>
+          <Button
+            variant="outline"
+            size="icon"
+            className="md:hidden fixed top-3 left-3 z-50 shadow-sm bg-background/95 backdrop-blur"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
 
           <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
             {children}

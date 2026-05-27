@@ -1,7 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { isPaidStatus, isPendingStatus, resolveMonthlyRate, shopSourcePeriodForPaymentPeriod } from "./shop-billing";
+import { isPaidStatus, isPendingStatus, resolveMonthlyRate } from "./shop-billing";
 import { lisbonYmd, nextBillingPeriod } from "./lisbon-billing-window";
 import { syncShopPaymentForPeriod } from "./shop-billing-sync";
 
@@ -51,10 +51,6 @@ export async function createNextPeriodPendingForTrainer(
 ): Promise<NextPeriodBulkResult> {
   const lisbon = lisbonYmd(now);
   const paymentPeriod = nextBillingPeriod(lisbon);
-  const shopSourcePeriod = shopSourcePeriodForPaymentPeriod(paymentPeriod);
-  if (!shopSourcePeriod) {
-    return { period: paymentPeriod, processed: 0, skipped: 0, errors: 0 };
-  }
 
   const studentsSnap = await db
     .collection("personalTrainers")
@@ -80,7 +76,7 @@ export async function createNextPeriodPendingForTrainer(
 
     const authUid = String(roster.userId ?? "").trim() || sDoc.id;
     try {
-      await syncShopPaymentForPeriod(trainerId, authUid, paymentPeriod, shopSourcePeriod, {
+      await syncShopPaymentForPeriod(trainerId, authUid, paymentPeriod, {
         createSource: "coach_bulk_next_month",
         bypassBillingWindow: true,
       });
