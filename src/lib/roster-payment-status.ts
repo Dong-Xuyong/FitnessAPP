@@ -26,11 +26,17 @@ export function nextBillingPeriod(now = new Date()): string {
   return `${y}-${String(m + 1).padStart(2, "0")}`;
 }
 
-/** True when `now` is on one of the last three calendar days of the month (local). */
-export function isWithinLastThreeDaysOfMonth(now = new Date()): boolean {
+/** Calendar days at month end when next-period payment rows may be created (local). */
+export const NEXT_PERIOD_CREATION_WINDOW_DAYS = 4;
+
+/** True when `now` is on one of the last four calendar days of the month (local). */
+export function isWithinLastFourDaysOfMonth(now = new Date()): boolean {
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  return now.getDate() >= lastDay - 2;
+  return now.getDate() >= lastDay - (NEXT_PERIOD_CREATION_WINDOW_DAYS - 1);
 }
+
+/** @deprecated Use {@link isWithinLastFourDaysOfMonth}. */
+export const isWithinLastThreeDaysOfMonth = isWithinLastFourDaysOfMonth;
 
 function rosterPaymentStatusIsPaid(raw: unknown): boolean {
   const s = String(raw ?? "").trim().toLowerCase();
@@ -81,7 +87,7 @@ export async function ensurePendingPaymentForCurrentPeriod(
 }
 
 /**
- * During the last three days of the calendar month, ensure a pending row exists for **next** `YYYY-MM`.
+ * During the last four days of the calendar month, ensure a pending row exists for **next** `YYYY-MM`.
  * @returns true when a new Firestore document was added.
  */
 export async function ensurePendingPaymentForNextPeriodIfWindow(
@@ -90,7 +96,7 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
   rosterStudentId: string,
   now = new Date()
 ): Promise<boolean> {
-  if (!isWithinLastThreeDaysOfMonth(now)) return false;
+  if (!isWithinLastFourDaysOfMonth(now)) return false;
 
   const rosterRef = doc(db, "personalTrainers", trainerUid, "students", rosterStudentId);
   const rosterSnap = await getDoc(rosterRef);

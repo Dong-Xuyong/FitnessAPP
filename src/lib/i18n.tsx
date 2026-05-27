@@ -195,7 +195,6 @@ const translations = {
     calendarRosterSectionActivePlan: "Active workout",
     calendarRosterSectionCompletedPlan: "Completed workout",
     calendarRosterViewWorkoutHistory: "Workout history",
-    calendarRosterNextProgramHint: "Next: {title}",
     calendarRosterSlotPlanNotOnProfile:
       "This booking’s plan is not on the student’s profile (missing or outdated link).",
     calendarRosterPlanDetailEmpty: "No exercises in this plan.",
@@ -1216,7 +1215,6 @@ const translations = {
     calendarRosterSectionActivePlan: "Treino ativo",
     calendarRosterSectionCompletedPlan: "Treino concluído",
     calendarRosterViewWorkoutHistory: "Histórico de treinos",
-    calendarRosterNextProgramHint: "A seguir: {title}",
     calendarRosterSlotPlanNotOnProfile:
       "O plano desta reserva não está na ficha do aluno (ligação em falta ou desatualizada).",
     calendarRosterPlanDetailEmpty: "Este plano não tem exercícios.",

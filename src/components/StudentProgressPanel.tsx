@@ -3,12 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Award, Calendar, Target, Flame, Scale } from "lucide-react";
 import { BodyCompositionTrendChart } from "@/components/BodyCompositionTrendChart";
 import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
-import { countMonthlyWorkoutPlanCompletions } from "@/lib/student-monthly-workout-completion";
+import { countCompletedWorkoutSessionsInMonth } from "@/lib/student-monthly-workout-completion";
 import { useUser, useFirestore } from "@/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
@@ -24,8 +23,6 @@ export function StudentProgressPanel() {
   const { user } = useUser();
   const db = useFirestore();
   const [currentStreak, setCurrentStreak] = useState(0);
-  const [goalCompletionPercent, setGoalCompletionPercent] = useState(0);
-  const [monthlyPlannedCount, setMonthlyPlannedCount] = useState(0);
   const [monthlyDoneCount, setMonthlyDoneCount] = useState(0);
   const [selectedStrengthExercises, setSelectedStrengthExercises] = useState<string[]>([]);
   const [strengthExerciseOptions, setStrengthExerciseOptions] = useState<string[]>([]);
@@ -54,9 +51,8 @@ export function StudentProgressPanel() {
         const resolvedStudentId = (studentSnap.data()?.rosterDocId as string | undefined) || uid;
         if (!trainerId) return;
 
-        const [sessionsSnap, workoutPlansSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
+        const [sessionsSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
           getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")),
-          getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans")),
           getDoc(doc(db, "personalTrainers", trainerId)),
           getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots")),
         ]);
@@ -67,24 +63,11 @@ export function StudentProgressPanel() {
           bodyCompositionPointsFromSessions(sessionsSnap.docs.map((d) => d.data()))
         );
 
-        const planRows = workoutPlansSnap.docs.map((planDoc) => ({
-          id: planDoc.id,
-          data: planDoc.data() as Record<string, unknown>,
-        }));
         const sessionRows = sessionsSnap.docs.map((d) => ({
           data: d.data() as Record<string, unknown>,
         }));
 
-        const { done: doneThisMonth, planned: plannedThisMonth } = countMonthlyWorkoutPlanCompletions(
-          planRows,
-          sessionRows,
-          new Date()
-        );
-        const completion = plannedThisMonth > 0 ? Math.round((doneThisMonth / plannedThisMonth) * 100) : 0;
-
-        setMonthlyDoneCount(doneThisMonth);
-        setMonthlyPlannedCount(plannedThisMonth);
-        setGoalCompletionPercent(completion);
+        setMonthlyDoneCount(countCompletedWorkoutSessionsInMonth(sessionRows, new Date()));
 
         const slotDm = Number(trainerSnap.data()?.slotDurationMin) || 30;
         const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
@@ -265,11 +248,8 @@ export function StudentProgressPanel() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{goalCompletionPercent}%</div>
-            <Progress value={goalCompletionPercent} className="h-2 mt-2 bg-accent-foreground/20" />
-            <p className="text-xs opacity-80 mt-1">
-              {monthlyDoneCount} / {monthlyPlannedCount} {t("workoutsCompletedThisMonth")}
-            </p>
+            <div className="text-3xl font-bold">{monthlyDoneCount}</div>
+            <p className="text-xs opacity-80 mt-1">{t("workoutsCompletedThisMonth")}</p>
           </CardContent>
         </Card>
       </div>

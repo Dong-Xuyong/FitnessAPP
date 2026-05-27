@@ -22,11 +22,7 @@ import {
   type OpenAvailabilityBlock,
   type VacationPeriod,
 } from "@/lib/trainer-availability";
-import {
-  datesWithActionablePendingAttendance,
-  normalizeAttendance,
-  type SessionAttendanceStatus,
-} from "@/lib/session-attendance-streak";
+import { normalizeAttendance, type SessionAttendanceStatus } from "@/lib/session-attendance-streak";
 import { getWeekStart, isDateBeforeToday, type SessionSlot } from "@/lib/session-slot-enrollment";
 
 const DAY_KEYS = [
@@ -120,6 +116,7 @@ export function StudentSchedulingCalendarBoard({
         weeklySched: selectedDaySchedule,
         openBlocks,
         slotDurationMin,
+        vacationPeriods,
       }),
     [selectedDateStr, selectedDaySchedule, openBlocks, slotDurationMin]
   );
@@ -143,18 +140,6 @@ export function StudentSchedulingCalendarBoard({
     );
     return [...new Set(relevant.map((s) => s.date))].map((s) => new Date(`${s}T12:00:00`));
   }, [sessionSlots, idSet]);
-
-  const pendingAttendanceDates = useMemo(() => {
-    const days = new Set<string>();
-    for (const id of matchIds) {
-      for (const d of datesWithActionablePendingAttendance(sessionSlots, Date.now(), {
-        filterStudentId: id,
-      })) {
-        days.add(d);
-      }
-    }
-    return [...days].map((d) => new Date(`${d}T12:00:00`));
-  }, [sessionSlots, matchIds]);
 
   const isOnVacationDay = useCallback(
     (date: Date) => isDateInVacation(toDateStr(date), vacationPeriods),
@@ -273,15 +258,12 @@ export function StudentSchedulingCalendarBoard({
               hasSlots: slotDates,
               unavailable: isUnavailableDay,
               onVacation: isOnVacationDay,
-              pendingAttendance: pendingAttendanceDates,
             }}
             modifiersClassNames={{
               hasSlots: "bg-accent/20 text-accent font-semibold rounded-full",
               unavailable: "opacity-40 line-through text-muted-foreground",
               onVacation:
                 "ring-2 ring-orange-400/80 dark:ring-orange-500 ring-offset-2 ring-offset-background rounded-full",
-              pendingAttendance:
-                "ring-2 ring-amber-500/90 dark:ring-amber-400 ring-offset-2 ring-offset-background relative z-[1] rounded-full",
             }}
             className="rounded-md border max-w-full"
           />
@@ -290,10 +272,6 @@ export function StudentSchedulingCalendarBoard({
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-full bg-accent/30 border border-accent/40 inline-block" />
               {t("weeklySchedulingLegendHasSessions")}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full border-2 border-amber-500 dark:border-amber-400 inline-block" />
-              {t("weeklySchedulingLegendPendingAttendance")}
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-full bg-muted border inline-block" />

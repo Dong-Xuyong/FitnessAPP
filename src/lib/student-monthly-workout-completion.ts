@@ -1,3 +1,37 @@
+/** Same rules as student workout history: session counts when `completedAt` is set. */
+export function parseSessionCompletedAtMs(completedAt: unknown): number | null {
+  if (completedAt == null) return null;
+  if (
+    typeof completedAt === "object" &&
+    completedAt !== null &&
+    "toDate" in completedAt &&
+    typeof (completedAt as { toDate?: () => Date }).toDate === "function"
+  ) {
+    const t = (completedAt as { toDate: () => Date }).toDate().getTime();
+    return Number.isFinite(t) ? t : null;
+  }
+  if (typeof completedAt === "string" && completedAt.trim()) {
+    const v = Date.parse(completedAt);
+    return Number.isFinite(v) ? v : null;
+  }
+  return null;
+}
+
+/** Completed workout sessions whose `completedAt` falls in the calendar month of `referenceDate`. */
+export function countCompletedWorkoutSessionsInMonth(
+  sessionDocs: Array<{ data: Record<string, unknown> }>,
+  referenceDate: Date = new Date()
+): number {
+  const month = referenceDate.getMonth();
+  const year = referenceDate.getFullYear();
+  return sessionDocs.filter((s) => {
+    const ms = parseSessionCompletedAtMs(s.data.completedAt);
+    if (ms == null) return false;
+    const d = new Date(ms);
+    return d.getMonth() === month && d.getFullYear() === year;
+  }).length;
+}
+
 /**
  * Count assigned workout plans in the calendar month of `referenceDate` that have
  * a matching completed session (by workoutPlanId on session docs).

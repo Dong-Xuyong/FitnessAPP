@@ -4,7 +4,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { isPaidStatus, isPendingStatus, resolveMonthlyRate } from "./shop-billing";
 import {
   currentBillingPeriod,
-  isWithinLastThreeDaysOfMonth,
+  isWithinLastFourDaysOfMonth,
   lisbonYmd,
   nextBillingPeriod,
 } from "./lisbon-billing-window";
@@ -44,7 +44,7 @@ async function cleanupFuturePendingPayments(currentPeriod: string): Promise<numb
 }
 
 /**
- * Daily (Europe/Lisbon): outside the last 3 days, delete premature next-month pending rows.
+ * Daily (Europe/Lisbon): outside the last 4 days, delete premature next-month pending rows.
  * Inside the window, create or refresh pending payments for the next billing period.
  */
 export const ensureNextPeriodPayments = onSchedule(
@@ -58,7 +58,7 @@ export const ensureNextPeriodPayments = onSchedule(
     const lisbon = lisbonYmd(new Date());
     const currentPeriod = currentBillingPeriod(lisbon);
 
-    if (!isWithinLastThreeDaysOfMonth(lisbon)) {
+    if (!isWithinLastFourDaysOfMonth(lisbon)) {
       const removed = await cleanupFuturePendingPayments(currentPeriod);
       logger.info("ensureNextPeriodPayments: cleaned future pending rows", {
         lisbon,

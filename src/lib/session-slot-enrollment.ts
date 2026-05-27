@@ -9,6 +9,7 @@ import {
   Availability,
   VacationPeriod,
   OpenAvailabilityBlock,
+  consecutiveSlotBlocksFrom,
   isNewBookingBlocked,
   resolveDaySlotTimes,
   weekdayKeyFromDate,
@@ -102,21 +103,7 @@ export function nextMondayFrom(now: Date): string {
   return toDateStr(d);
 }
 
-/** Add `minutes` to a HH:mm string. */
-function addMinutes(time: string, minutes: number): string {
-  const [h, m] = time.split(":").map(Number);
-  const total = h * 60 + m + minutes;
-  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
-
-/** Return N consecutive slot start-times from `time` in `allSlotTimes`. */
-function consecutiveBlocksFrom(allSlotTimes: string[], startTime: string, count: number): string[] {
-  const idx = allSlotTimes.indexOf(startTime);
-  if (idx === -1) return [];
-  return allSlotTimes.slice(idx, idx + count);
-}
-
-/** Given a cycleStartMonday and week offset `w`, return the date for `weekday` ("monday" = 0 offset). */
+/** Match a workoutPlan for a given week start date. */
 const WEEKDAY_ORDER = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
 export function dateForWeekdayInCycle(cycleStartMonday: string, weekOffset: number, weekday: string): string {
@@ -207,10 +194,21 @@ export async function bulkEnrollWeeklyCycle(params: {
       // 3. Build available slot times for this day
       const dayKey = weekdayKeyFromDate(new Date(dateStr + "T12:00:00"));
       const weeklySched = availability[dayKey];
-      const daySlotTimes = resolveDaySlotTimes({ dateStr, weeklySched, openBlocks, slotDurationMin });
+      const daySlotTimes = resolveDaySlotTimes({
+        dateStr,
+        weeklySched,
+        openBlocks,
+        slotDurationMin,
+        vacationPeriods,
+      });
 
       // 4. Verify enough consecutive blocks starting at startTime
-      const blocksToBook = consecutiveBlocksFrom(daySlotTimes, startTime, slotsNeeded);
+      const blocksToBook = consecutiveSlotBlocksFrom(
+        daySlotTimes,
+        startTime,
+        slotsNeeded,
+        slotDurationMin
+      );
       if (blocksToBook.length < slotsNeeded) {
         result.skippedInsufficientBlocks++;
         continue;

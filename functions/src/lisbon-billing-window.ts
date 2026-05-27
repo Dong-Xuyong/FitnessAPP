@@ -1,5 +1,8 @@
 export const LISBON_TZ = "Europe/Lisbon";
 
+/** Calendar days at month end when next-period payment sync may run (inclusive). */
+export const NEXT_PERIOD_CREATION_WINDOW_DAYS = 4;
+
 export function lisbonYmd(now: Date): { y: number; m: number; d: number } {
   const s = new Intl.DateTimeFormat("en-CA", {
     timeZone: LISBON_TZ,
@@ -21,11 +24,14 @@ export function nextBillingPeriod(parts: { y: number; m: number }): string {
   return `${parts.y}-${String(parts.m + 1).padStart(2, "0")}`;
 }
 
-/** True on the last three calendar days of the month (Lisbon). */
-export function isWithinLastThreeDaysOfMonth(parts: { y: number; m: number; d: number }): boolean {
+/** True on the last {@link NEXT_PERIOD_CREATION_WINDOW_DAYS} calendar days of the month (Lisbon). */
+export function isWithinLastFourDaysOfMonth(parts: { y: number; m: number; d: number }): boolean {
   const lastDay = new Date(parts.y, parts.m, 0).getDate();
-  return parts.d >= lastDay - 2;
+  return parts.d >= lastDay - (NEXT_PERIOD_CREATION_WINDOW_DAYS - 1);
 }
+
+/** @deprecated Use {@link isWithinLastFourDaysOfMonth}. */
+export const isWithinLastThreeDaysOfMonth = isWithinLastFourDaysOfMonth;
 
 /** `YYYY-MM` strictly after the current Lisbon calendar month. */
 export function isFutureBillingPeriod(period: string, now = new Date()): boolean {
@@ -37,5 +43,5 @@ export function isFutureBillingPeriod(period: string, now = new Date()): boolean
 export function maySyncFuturePaymentPeriod(paymentPeriod: string, now = new Date()): boolean {
   if (!isFutureBillingPeriod(paymentPeriod, now)) return true;
   const lisbon = lisbonYmd(now);
-  return isWithinLastThreeDaysOfMonth(lisbon);
+  return isWithinLastFourDaysOfMonth(lisbon);
 }

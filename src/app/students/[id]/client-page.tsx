@@ -1952,7 +1952,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
     const batch = writeBatch(db);
     newOrder.forEach((planId, idx) => {
       const planRef = doc(db, "personalTrainers", user.uid, "students", id, "workoutPlans", planId);
-      batch.update(planRef, { manualSortOrder: idx, studentUnlocked: idx === 0 });
+      batch.update(planRef, {
+        manualSortOrder: idx,
+        studentUnlocked: idx === 0,
+        sequenceUnlockAfterPlanId: idx === 0 ? null : newOrder[idx - 1] ?? null,
+      });
     });
     await batch.commit();
   };
