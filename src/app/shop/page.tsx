@@ -7,6 +7,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  writeBatch,
   getDoc,
   limit,
   orderBy,
@@ -185,6 +186,8 @@ export default function CoachShopPage() {
   const [nameByStudentId, setNameByStudentId] = useState<Record<string, string>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteAllPaidStep, setDeleteAllPaidStep] = useState<0 | 1 | 2>(0);
+  const [deletingAllPaid, setDeletingAllPaid] = useState(false);
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ShopItemRow | null>(null);
   const [itemName, setItemName] = useState("");
@@ -342,6 +345,40 @@ export default function CoachShopPage() {
       setConfirmDeleteId(null);
     }
   };
+
+  const paidRegDocIds = useMemo(
+    () => [...new Set(paidRegRows.map((r) => r.id).filter(Boolean))] as string[],
+    [paidRegRows]
+  );
+
+  const handleDeleteAllPaid = async () => {
+    if (!db || !user?.uid || !paidRegDocIds.length) return;
+    setDeletingAllPaid(true);
+    try {
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < paidRegDocIds.length; i += BATCH_SIZE) {
+        const chunk = paidRegDocIds.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+        for (const regId of chunk) {
+          batch.delete(doc(db, "personalTrainers", user.uid, "shopRegistrations", regId));
+        }
+        await batch.commit();
+      }
+      toast({
+        title: t("shopDeleteAllPaidSuccess"),
+        description: String(paidRegDocIds.length),
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast({ variant: "destructive", title: t("shopSaveFailed"), description: msg });
+    } finally {
+      setDeletingAllPaid(false);
+      setDeleteAllPaidStep(0);
+    }
+  };
+
+  const formatDeleteAllPaidMessage = (key: "shopDeleteAllPaidStep1Desc" | "shopDeleteAllPaidStep2Desc") =>
+    t(key).replace("{count}", String(paidRegDocIds.length));
 
   const sortedItems = [...(shopItems || [])].sort((a, b) =>
     String(a.name ?? "").localeCompare(String(b.name ?? ""))
@@ -549,7 +586,25 @@ export default function CoachShopPage() {
                     {paidRegRows.length === 0 ? (
                       <p className="text-sm text-muted-foreground px-1 py-2">{t("shopCoachNoPaidRegs")}</p>
                     ) : (
-                      <div className="rounded-md border overflow-x-auto">
+                      <div className="space-y-3">
+                        <div className="flex justify-end px-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                            disabled={deletingAllPaid}
+                            onClick={() => setDeleteAllPaidStep(1)}
+                          >
+                            {deletingAllPaid ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <Trash2 className="h-4 w-4 mr-2" />
+                            )}
+                            {t("shopDeleteAllPaid")}
+                          </Button>
+                        </div>
+                        <div className="rounded-md border overflow-x-auto">
                         <Table>
                           <TableHeader>
                             <TableRow>
@@ -601,6 +656,7 @@ export default function CoachShopPage() {
                             })}
                           </TableBody>
                         </Table>
+                        </div>
                       </div>
                     )}
                   </CollapsibleContent>
@@ -669,6 +725,49 @@ export default function CoachShopPage() {
                 <Trash2 className="h-4 w-4 mr-2" />
                 {t("delete")}
               </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={deleteAllPaidStep > 0}
+          onOpenChange={(open) => {
+            if (!open && !deletingAllPaid) setDeleteAllPaidStep(0);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-destructive">
+                {deleteAllPaidStep === 1
+                  ? t("shopDeleteAllPaidStep1Title")
+                  : t("shopDeleteAllPaidStep2Title")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {deleteAllPaidStep === 1
+                  ? formatDeleteAllPaidMessage("shopDeleteAllPaidStep1Desc")
+                  : formatDeleteAllPaidMessage("shopDeleteAllPaidStep2Desc")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deletingAllPaid}>{t("cancel")}</AlertDialogCancel>
+              {deleteAllPaidStep === 1 ? (
+                <Button type="button" onClick={() => setDeleteAllPaidStep(2)}>
+                  {t("shopDeleteAllPaidContinue")}
+                </Button>
+              ) : (
+                <AlertDialogAction
+                  className="bg-destructive hover:bg-destructive/90"
+                  disabled={deletingAllPaid}
+                  onClick={() => void handleDeleteAllPaid()}
+                >
+                  {deletingAllPaid ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Trash2 className="h-4 w-4 mr-2" />
+                  )}
+                  {t("shopDeleteAllPaidConfirm")}
+                </AlertDialogAction>
+              )}
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

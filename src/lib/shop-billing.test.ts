@@ -32,7 +32,6 @@ import {
   revertShopRegistrationLinesPaidForFuturePeriods,
   shouldMarkShopLinePaidForPaymentRepair,
   shopLineBillablePaymentPeriod,
-  buildShopRegistrationWritePayload,
   sanitizeShopLinesForStudentWrite,
   summarizeShopRegistrationsForBillingMonth,
   summarizeShopRegistrationsForPeriod,
@@ -120,9 +119,45 @@ describe("shop-billing", () => {
     assert.equal(billablePeriodForPurchaseMonth("2026-05"), "2026-06");
   });
 
+  it("uses payment createdAt cutoff for pending payment rows", () => {
+    const payments = [
+      { period: "2026-06", status: "pending", createdAt: "2026-05-28T11:27:42.000Z" },
+    ];
+    const { billablePeriodForPurchaseMonth } = buildShopBillingPeriodContextFromPayments(payments);
+    assert.equal(
+      billablePeriodForPurchaseMonth("2026-05", "2026-05-28", "12:27:40"),
+      "2026-06"
+    );
+    assert.equal(
+      billablePeriodForPurchaseMonth("2026-05", "2026-05-28", "12:27:58"),
+      "2026-07"
+    );
+  });
+
+  it("uses payment createdAt cutoff for paid payment rows", () => {
+    const payments = [
+      { period: "2026-06", status: "paid", createdAt: "2026-05-28T11:27:42.000Z" },
+    ];
+    const { billablePeriodForPurchaseMonth } = buildShopBillingPeriodContextFromPayments(payments);
+    assert.equal(
+      billablePeriodForPurchaseMonth("2026-05", "2026-05-28", "12:27:40"),
+      "2026-06"
+    );
+    assert.equal(
+      billablePeriodForPurchaseMonth("2026-05", "2026-05-28", "12:27:58"),
+      "2026-07"
+    );
+  });
+
   it("markShopRegistrationLinesPaidForPayment uses billable period resolver", () => {
-    const billableForPurchaseMonth = (m: string) =>
-      resolveBillableShopPaymentPeriod(m, (pm) => pm === "2026-05", () => false);
+    const billableForPurchaseMonth = (m: string, date?: string, time?: string) =>
+      resolveBillableShopPaymentPeriod(
+        m,
+        date,
+        time,
+        (pm) => pm === "2026-05",
+        () => false
+      );
     const paidMay = markShopRegistrationLinesPaidForPayment(
       {
         date: "2026-05-10",
@@ -480,7 +515,10 @@ describe("shop-billing", () => {
       { period: "2026-05", status: "paid" },
       { period: "2026-06", status: "pending" },
     ];
-    assert.equal(shouldMarkShopLinePaidForPaymentRepair("2026-05-27", "2026-06", payments), true);
+    assert.equal(
+      shouldMarkShopLinePaidForPaymentRepair("2026-05-27", undefined, "2026-06", payments),
+      true
+    );
     const { billablePeriodForPurchaseMonth } = buildShopBillingPeriodContextFromPayments(payments);
     const next = markShopPurchasePaidForPayment(
       p("2026-05-27", "water", 1, "unpaid"),
@@ -511,7 +549,7 @@ describe("shop-billing", () => {
     const payments = [{ period: "2026-05", status: "paid" }];
     assert.equal(shopLineBillablePaymentPeriod("2026-05-27", payments), "2026-06");
     assert.equal(
-      shouldMarkShopLinePaidForPaymentRepair("2026-05-27", "2026-05", payments),
+      shouldMarkShopLinePaidForPaymentRepair("2026-05-27", undefined, "2026-05", payments),
       false
     );
   });
@@ -520,7 +558,7 @@ describe("shop-billing", () => {
     const payments = [{ period: "2026-05", status: "paid" }];
     const purchase = p("2026-05-27", "chocolate", 1, "unpaid");
     assert.equal(
-      shouldMarkShopLinePaidForPaymentRepair("2026-05-27", "2026-05", payments),
+      shouldMarkShopLinePaidForPaymentRepair("2026-05-27", undefined, "2026-05", payments),
       false
     );
     const { billablePeriodForPurchaseMonth } = buildShopBillingPeriodContextFromPayments(payments);

@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateEmailSignIn, initiateEmailSignUp } from "@/firebase/non-blocking-login";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { sendEmailVerification, signOut } from "firebase/auth";
+import { sendEmailVerification, sendPasswordResetEmail, signOut } from "firebase/auth";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 
@@ -34,6 +34,7 @@ function LoginContent() {
   const [verificationPending, setVerificationPending] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState("");
   const [isResending, setIsResending] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   useEffect(() => {
     async function handleRedirect() {
@@ -136,6 +137,35 @@ function LoginContent() {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (!auth) return;
+    if (!email.trim()) {
+      toast({
+        variant: "destructive",
+        title: t("emailRequired"),
+        description: t("enterEmailToResetPassword"),
+      });
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      toast({
+        title: t("passwordResetSent"),
+        description: t("passwordResetSentDesc"),
+      });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: t("passwordResetFailed"),
+        description: t("passwordResetFailedDesc"),
+      });
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   if (verificationPending) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-secondary/50 to-background">
@@ -151,16 +181,22 @@ function LoginContent() {
           <span className="text-2xl font-bold tracking-tight font-headline">Sergio Oliveira PT</span>
         </Link>
         <Card className="w-full max-w-md shadow-xl border-t-4 border-t-primary">
-          <CardHeader className="text-center space-y-4">
+          <CardHeader className="text-center space-y-3">
             <div className="mx-auto rounded-full bg-primary/10 p-4 w-fit">
               <CheckCircle2 className="h-10 w-10 text-primary" />
             </div>
             <CardTitle className="text-2xl font-bold font-headline">{t("checkYourEmail")}</CardTitle>
-            <CardDescription className="text-base">
+            <CardDescription className="text-sm text-muted-foreground leading-relaxed">
               {t("verificationLinkSent")}
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3">
+            <div className="rounded-md border bg-muted/40 px-4 py-3 text-center">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {t("emailDestination")}
+              </p>
+              <p className="mt-1 text-sm font-semibold break-all">{verificationEmail}</p>
+            </div>
             <Button
               variant="outline"
               className="w-full gap-2"
@@ -243,6 +279,16 @@ function LoginContent() {
                     />
                   </div>
                 </div>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0 text-sm text-primary"
+                  onClick={handleForgotPassword}
+                  disabled={isResettingPassword}
+                >
+                  {isResettingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {t("forgotPassword")}
+                </Button>
                 <Button className="w-full" type="submit" disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {t("signIn")}

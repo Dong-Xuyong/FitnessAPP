@@ -79,6 +79,7 @@ export async function createNextPeriodPendingForTrainer(
       await syncShopPaymentForPeriod(trainerId, authUid, paymentPeriod, {
         createSource: "coach_bulk_next_month",
         bypassBillingWindow: true,
+        overwriteLockedPending: true,
       });
       processed += 1;
     } catch (e) {

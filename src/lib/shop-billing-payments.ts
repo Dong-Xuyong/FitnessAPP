@@ -55,6 +55,7 @@ export async function markShopRegistrationsPaidForPayment(
   const payments = paySnap.docs.map((d) => ({
     period: String(d.data().period ?? ""),
     status: d.data().status,
+    createdAt: d.data().createdAt,
   }));
   const { billablePeriodForPurchaseMonth } = options?.repairMode
     ? buildShopBillingPeriodContextFromPayments(payments)
@@ -86,7 +87,12 @@ export async function markShopRegistrationsPaidForPayment(
       const date = String(before.date ?? "").trim();
       if (
         options?.repairMode &&
-        !shouldMarkShopLinePaidForPaymentRepair(date, paymentPeriod, payments)
+        !shouldMarkShopLinePaidForPaymentRepair(
+          date,
+          String(before.time ?? "").trim() || undefined,
+          paymentPeriod,
+          payments
+        )
       ) {
         continue;
       }
@@ -127,8 +133,13 @@ export async function repairShopLinesForPaidPayments(
     period: String(d.data().period ?? "").trim(),
     status: d.data().status,
     shopAmount: Number(d.data().shopAmount ?? 0),
+    createdAt: d.data().createdAt,
   }));
-  const payments = paymentsWithId.map((p) => ({ period: p.period, status: p.status }));
+  const payments = paymentsWithId.map((p) => ({
+    period: p.period,
+    status: p.status,
+    createdAt: p.createdAt,
+  }));
   const paymentIdToPeriod = new Map(
     paymentsWithId.filter((p) => p.id && p.period).map((p) => [p.id, p.period])
   );

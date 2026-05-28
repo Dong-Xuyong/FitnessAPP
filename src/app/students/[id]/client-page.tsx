@@ -130,6 +130,7 @@ import {
   shopLineBillablePaymentPeriod,
   summarizeUnpaidShopRegistrations,
   formatShopRegistrationDateTime,
+  shopRegistrationSummaryKey,
   type ShopPurchaseLike,
 } from "@/lib/shop-billing";
 import {
@@ -296,9 +297,10 @@ function BillingTab({
 
   const paymentPeriodLikes = useMemo(
     () =>
-      (sortedPayments || []).map((p: { period?: string; status?: string }) => ({
+      (sortedPayments || []).map((p: { period?: string; status?: string; createdAt?: string }) => ({
         period: String(p.period ?? ""),
         status: p.status,
+        createdAt: p.createdAt,
       })),
     [sortedPayments]
   );
@@ -846,8 +848,8 @@ function BillingTab({
                 ) : unpaidShopSummary.entries.length > 0 ? (
                   <>
                     <ul className="text-xs text-muted-foreground space-y-0.5">
-                      {unpaidShopSummary.entries.map((entry) => (
-                        <li key={entry.date} className="break-words">
+                      {unpaidShopSummary.entries.map((entry, entryIdx) => (
+                        <li key={shopRegistrationSummaryKey(entry, entryIdx)} className="break-words">
                           {formatShopRegistrationDateTime(entry.date, entry.time)} · {entry.summary} · €
                           {entry.dayTotal.toFixed(2)}{" "}
                           <span className="text-muted-foreground/80">
@@ -1055,7 +1057,18 @@ function BillingTab({
                           <p className="text-sm font-medium break-words">{p.period}</p>
                           <p className="text-xs text-muted-foreground capitalize break-words">
                             {p.method === "mbway" ? t("mbway") : p.method === "bank_transfer" ? t("bankTransfer") : (p.method || "—")}
-                            {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString()}` : ""}
+                            {(() => {
+                              const ts = p.paidAt || p.createdAt;
+                              if (!ts) return "";
+                              const d = new Date(ts);
+                              if (Number.isNaN(d.getTime())) return "";
+                              return ` · ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                                hour12: false,
+                              })}`;
+                            })()}
                           </p>
                           {(() => {
                             const period = String(p.period ?? "");
@@ -1090,7 +1103,7 @@ function BillingTab({
                                     period
                                   ).filter(
                                     (line) =>
-                                      shopLineBillablePaymentPeriod(line.date, paymentPeriodLikes) ===
+                                      shopLineBillablePaymentPeriod(line.date, paymentPeriodLikes, line.time) ===
                                       period
                                   )
                                 : [];
@@ -1103,8 +1116,8 @@ function BillingTab({
                                 </p>
                                 {purchaseLines.length > 0 ? (
                                   <ul className="space-y-0.5">
-                                    {purchaseLines.map((line) => (
-                                      <li key={line.date}>
+                                    {purchaseLines.map((line, lineIdx) => (
+                                      <li key={shopRegistrationSummaryKey(line, lineIdx)}>
                                         {formatShopRegistrationDateTime(line.date, line.time)} · {line.summary} · €
                                         {line.dayTotal.toFixed(2)}
                                         {line.syncStatus === "unpaid" ? (
