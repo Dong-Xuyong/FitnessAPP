@@ -1,151 +1,188 @@
 # Sergio Oliveira PT
 
-A fitness coaching web application that connects personal trainers with their students. Trainers can build custom workout programs, track student progress, and leverage AI-powered workout suggestions — all from a clean, responsive dashboard.
+A production gym-management web app that connects personal trainers with their students. Trainers manage rosters, programs, scheduling, billing, and progress from a bilingual dashboard; students log workouts, book sessions, and track goals from a dedicated portal.
+
+Built with **Next.js 15**, **TypeScript**, and **Firebase**, deployed for a live coaching business.
 
 ## Features
 
-- **Trainer Dashboard & Student Management** — Register, create, and manage student profiles (age, weight, fitness goals).
-- **Workout Program Builder** — Design custom training programs with exercises, sets, reps, and rest times, then assign them to students.
-- **Exercise Database** — Searchable exercise library categorized by body part (chest, back, legs, etc.).
-- **Student Workout Logger** — Students view assigned workouts and log completed sets, reps, weights, and rest times.
-- **Progress Tracking** — Visual charts for weight tracking and strength progression over time.
-- **AI Workout Suggestions** — AI-powered tool that recommends workout plans based on a student's profile and goals.
-- **Notification System** — Alerts for new workout assignments and completed sessions.
+### Trainer portal
+
+- **Dashboard** — Roster stats, team velocity, attendance streaks, and goal progress at a glance.
+- **Student management** — Roster profiles, coaching notes, body-composition trends, and private trainer settings.
+- **Training programs** — Program library with weekly-cycle templates; assign sequences to students.
+- **Workout builder** — Create and assign plans with exercises, sets, reps, rest times, and week scheduling.
+- **Exercise library** — Searchable database by muscle group; Excel import/export for bulk coach-library updates.
+- **Assignment calendar** — Plan and review workout assignments across the week.
+- **Session scheduling** — Trainer availability, vacation blocks, and group session slots with attendance tracking.
+- **Milestones** — Goal milestones with due dates and status tracking per student.
+- **Shop & billing** — Gym shop catalog, student purchase logging, monthly payment records, and unpaid-period blocking (Europe/Lisbon billing window).
+- **Progress views** — Charts for roster attendance, monthly sessions, and student performance.
+
+### Student portal
+
+- **Dashboard** — Streak, last session, physical stats, and training status.
+- **Workouts** — View assigned programs, log sets/reps/weights, and finish sessions (including coach-led sessions).
+- **Weekly scheduling** — Enroll in open session slots based on trainer availability.
+- **Shop** — Log daily gym-shop purchases; charges roll into the monthly payment.
+- **Billing** — View current plan, pending payments, and payment history.
+- **Profile & history** — Update stats and goals; browse exercise and workout history.
+
+### Platform
+
+- **Bilingual UI** — English and Portuguese (`src/lib/i18n.tsx`).
+- **Role-based access** — Separate trainer and student experiences with Firestore security rules.
+- **Firebase Cloud Functions** — Scheduled billing enforcement and shop-billing sync (see `functions/`).
+- **AI workout drafts (Genkit)** — Server-side flow using Google Gemini with schema-validated JSON output to suggest initial workout plans from student profile data (`src/ai/flows/ai-workout-plan-suggestion.ts`). Run locally via `npm run genkit:dev`.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Framework | [Next.js 15](https://nextjs.org/) (App Router) |
+| Framework | [Next.js 15](https://nextjs.org/) (App Router), React 19 |
 | Language | TypeScript |
 | Styling | Tailwind CSS |
-| UI Components | Radix UI + shadcn/ui |
+| UI | Radix UI + shadcn/ui |
 | Database | Firebase Firestore |
-| Authentication | Firebase Auth |
+| Auth | Firebase Auth |
+| Storage | Firebase Storage (profile photos) |
+| Backend jobs | Firebase Cloud Functions (scheduled billing) |
 | Hosting | Firebase App Hosting |
-| AI | Google GenAI via Genkit |
+| AI | [Genkit](https://firebase.google.com/docs/genkit) + Google Gemini 1.5 Flash |
 | Charts | Recharts |
-| Forms | React Hook Form + Zod |
+| Forms & validation | React Hook Form + Zod |
+| Spreadsheets | ExcelJS / xlsx (coach library import/export) |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- A Firebase project with Firestore and Authentication enabled
-- A Google GenAI API key (for AI features)
+- A Firebase project with **Firestore**, **Authentication**, and **Storage** enabled
+- Firebase CLI (for deploying rules, functions, and hosting)
+- Google GenAI API key (optional — only needed for AI / Genkit dev flows)
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone <repo-url>
 cd FitnessAPP
-
-# Install dependencies
 npm install
+```
 
-# Set up environment variables
-# Create a .env.local file with your Firebase config and GenAI API key
+### Environment variables
 
-# Run the development server
+Create `.env.local` in the project root:
+
+```env
+# Optional — overrides default bucket from src/firebase/config.ts
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
+
+# Optional — App Check / reCAPTCHA in production
+NEXT_PUBLIC_RECAPTCHA_SITE_KEY=
+
+# Required for Genkit / AI flows
+GOOGLE_GENAI_API_KEY=
+```
+
+Firebase web config is in `src/firebase/config.ts`. Point it at your Firebase project before running locally.
+
+### Run locally
+
+```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:9002`.
+App: [http://localhost:9002](http://localhost:9002)
 
-### Available Scripts
+Genkit AI dev UI (optional):
+
+```bash
+npm run genkit:dev
+```
+
+### Available scripts
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Start dev server (Turbopack, port 9002) |
+| `npm run dev` | Start dev server (port 9002) |
+| `npm run dev:turbo` | Start dev server with Turbopack |
 | `npm run build` | Production build |
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
-| `npm run typecheck` | Run TypeScript type checking |
+| `npm run typecheck` | TypeScript check (`tsc --noEmit`) |
 | `npm run genkit:dev` | Start Genkit AI dev server |
+| `npm run genkit:watch` | Genkit dev server with file watch |
+| `npm run test:shop` | Shop billing unit tests |
+| `npm run test:sequence` | Workout plan sequence tests |
+| `npm run test:enrollment` | Session slot enrollment tests |
+| `npm run test:excel` | Coach library Excel tests |
 
-## Student Guide
+### Deploy
 
-Welcome, Students! Here's what you can do with Sergio Oliveira PT:
+```bash
+firebase deploy
+```
 
-### Getting Started
-1. **Sign Up**: Go to the login page and switch to the "Sign Up" tab. Enter your email and password.
-2. **Verify Email**: After signing up, check your email and click the verification link sent to you.
-3. **Complete Your Profile**: Navigate to "My Profile" and fill in your:
-   - Personal information (name, photo)
-   - Physical stats (age, sex, weight, height, body fat percentage)
-   - Fitness goals (goal type: muscle gain, weight loss, endurance, or general; target weight)
+Deploys Firestore rules, Storage rules, Cloud Functions, and Firebase App Hosting. See `firebase.json` for configuration.
 
-### Using the App
-- **Dashboard** (`/student/dashboard`): View your training status, current streak, last session date, and physical stats at a glance.
-- **Workouts**: Access workouts assigned by your trainer. Click "Resume" to continue an active program.
-- **Profile Management** (`/student/profile`): Keep your stats up to date so your trainer can tailor workouts effectively.
-- **Progress Tracking**: Monitor your streak and see how you're progressing toward your goal weight.
+## Student guide
 
-### Tips
-- Update your weight regularly for accurate progress tracking.
-- Complete assigned workouts to maintain your streak.
-- If you don't see a trainer linked, ask your trainer to add you to their roster.
+1. **Sign up** at `/login` (Sign Up tab), then verify your email.
+2. **Complete your profile** at `/student/profile` — name, photo, stats, and fitness goals.
+3. **Dashboard** (`/student/dashboard`) — streak, last session, and progress summary.
+4. **Workouts** (`/student/workouts`) — open assigned programs and log sessions.
+5. **Scheduling** — enroll in open slots when your trainer publishes availability.
+6. **Shop** (`/student/shop`) — log daily purchases; unpaid items are added to your monthly bill.
+7. **Billing** (`/student/billing`) — view plan details and payment status.
 
----
+If you are not linked to a trainer, ask your coach to add you to their roster.
 
-## Teacher Guide
+## Trainer guide
 
-Welcome, Personal Trainers! Here's how to manage your students and create workout programs:
+1. **Sign in** with your trainer account at `/login`.
+2. **Dashboard** (`/dashboard`) — roster overview, velocity, streaks, and milestones tabs.
+3. **Students** (`/students`) — manage roster; open a student for notes, billing, scheduling, and assignments.
+4. **Programs & workouts** (`/workouts`, `/workouts/builder`) — build programs and assign them.
+5. **Exercises** (`/exercises`) — maintain the exercise library; import/export via Excel.
+6. **Assignment calendar** (`/assignment-calendar`) — weekly assignment planning.
+7. **Shop** (`/shop`) — manage catalog and review student shop logs.
+8. **Progress** (`/progress`) — roster-wide progress and top performers.
 
-### Getting Started
-1. **Log In**: Sign in with your trainer account credentials.
-2. **Dashboard Overview** (`/dashboard`): Access your main control panel with:
-   - Student count (portal and roster stats)
-   - Team velocity (% of workouts completed this week)
-   - Average student streak
-   - Goal success percentage
+Use coaching notes on student profiles for private reference. Review team velocity and streaks to spot students who need support.
 
-### Managing Students
-- **Student Directory** (`/students`): View all students, add new students to your roster, or manage existing ones.
-- **Student Profiles**: Click on any student to view their detailed profile, progress, and add private coaching notes.
-- **Roster Management**: Students can be added to your roster for assigned workout tracking.
-
-### Creating Workouts
-- **Workout Builder** (`/workouts/builder`): Design custom workout programs with:
-  - Exercise selection from the database
-  - Sets, reps, and weight configuration
-  - Rest time between exercises
-- **Exercise Database** (`/exercises`): Browse exercises categorized by body part (chest, back, legs, etc.) to include in your programs.
-- **Assign Workouts**: Assign created programs to individual students with scheduled dates and times.
-
-### Tracking Progress
-- **Assignment Calendar**: View all workout assignments by date.
-- **Workout Details**: Click on any assignment to view exercises, edit the workout, or delete it.
-- **Student Progress**: Monitor each student's streak, completed sessions, and progress toward their goal weight.
-
-### Tips
-- Use the calendar view to plan weekly workout schedules.
-- Add coaching notes to student profiles for private reference.
-- Review team velocity to identify students who may need additional support.
-
----
-
-## Project Structure
+## Project structure
 
 ```
 src/
-├── ai/              # AI flows (Genkit + Google GenAI)
-├── app/             # Next.js App Router pages
-│   ├── dashboard/       # Trainer dashboard
-│   ├── students/        # Student management
-│   ├── workouts/        # Workout programs & builder
-│   ├── exercises/       # Exercise database
-│   ├── progress/        # Progress tracking
-│   ├── student/         # Student portal
-│   └── login/           # Authentication
-├── components/      # Shared React components
-│   └── ui/              # shadcn/ui components
-├── firebase/        # Firebase config & hooks
-├── hooks/           # Custom React hooks
-└── lib/             # Utilities, types, and Firestore helpers
+├── ai/                    # Genkit flows (Gemini structured output)
+├── app/                   # Next.js App Router
+│   ├── dashboard/         # Trainer dashboard
+│   ├── students/          # Student roster & detail pages
+│   ├── workouts/          # Programs & builder
+│   ├── exercises/         # Exercise library
+│   ├── assignment-calendar/
+│   ├── progress/          # Trainer progress views
+│   ├── shop/              # Trainer shop management
+│   ├── profile/           # Trainer profile
+│   ├── student/           # Student portal (dashboard, workouts, shop, billing, …)
+│   └── login/
+├── components/            # Shared UI (billing, scheduling, charts, …)
+│   └── ui/                # shadcn/ui primitives
+├── firebase/              # Firebase client config & hooks
+├── hooks/                 # Custom React hooks
+└── lib/                   # Domain logic, i18n, Firestore helpers, billing, scheduling
+
+functions/                 # Firebase Cloud Functions (billing schedules, shop sync)
+public/templates/          # Coach library Excel template
+firestore.rules            # Firestore security rules
+storage.rules              # Storage security rules
+DATABASE_README.md         # Firestore data model reference
 ```
+
+## Data model
+
+See [DATABASE_README.md](./DATABASE_README.md) for Firestore collections, subcollections, and the security model.
 
 ## License
 
