@@ -418,13 +418,13 @@ function DashboardContent() {
 
   return (
     <Navigation>
-      <div className="space-y-6">
-        <header className="flex justify-between items-center">
-          <div>
-            <h2 className="text-3xl font-bold font-headline">{t("welcomeCoach")} {trainer?.lastName || ""}</h2>
-            <p className="text-muted-foreground">{t("overviewDescription")}</p>
+      <div className="space-y-6 min-w-0">
+        <header className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
+          <div className="min-w-0">
+            <h2 className="text-2xl sm:text-3xl font-bold font-headline">{t("welcomeCoach")} {trainer?.lastName || ""}</h2>
+            <p className="text-muted-foreground text-sm sm:text-base">{t("overviewDescription")}</p>
           </div>
-          <Button asChild>
+          <Button asChild className="w-full sm:w-auto shrink-0">
             <Link href="/students" className="gap-2">
               <UserPlus className="h-4 w-4" /> {t("manageRoster")}
             </Link>
@@ -432,17 +432,18 @@ function DashboardContent() {
         </header>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          <Card className="lg:col-span-3">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
+          <Card className="lg:col-span-3 min-w-0">
+            <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between space-y-0">
+              <div className="min-w-0">
                 <CardTitle>{t("students")}</CardTitle>
                 <CardDescription>{t("studentsCardDescription")}</CardDescription>
               </div>
-              <div className="flex flex-wrap gap-2 shrink-0">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full sm:w-auto shrink-0">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="w-full sm:w-auto h-auto min-h-9 py-2 whitespace-normal text-center"
                   disabled={billingBulkLoading || !user?.uid}
                   onClick={() => setBillingBulkConfirm("create")}
                 >
@@ -456,7 +457,7 @@ function DashboardContent() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="text-destructive hover:text-destructive"
+                  className="w-full sm:w-auto h-auto min-h-9 py-2 whitespace-normal text-center text-destructive hover:text-destructive"
                   disabled={billingBulkLoading || !user?.uid}
                   onClick={() => setBillingBulkConfirm("remove")}
                 >
@@ -466,7 +467,7 @@ function DashboardContent() {
                     t("dashboardRemoveNextPeriodPayments").replace("{period}", nextPaymentPeriod)
                   )}
                 </Button>
-                <Button variant="outline" size="sm" asChild>
+                <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
                   <Link href="/students">{t("openDirectory")}</Link>
                 </Button>
               </div>
@@ -527,10 +528,10 @@ function DashboardContent() {
                           <Link
                             key={student.id}
                             href={`/students/${student.id}`}
-                            className="flex items-center justify-between gap-3 hover:bg-accent/5 p-3 rounded-xl border border-transparent hover:border-border transition-all"
+                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:bg-accent/5 p-3 rounded-xl border border-transparent hover:border-border transition-all min-w-0"
                           >
-                            <div className="flex items-center gap-4 min-w-0">
-                              <Avatar className="h-12 w-12 ring-2 ring-primary/5 shrink-0">
+                            <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 ring-2 ring-primary/5 shrink-0">
                                 <AvatarImage src={(student.photoUrl as string) || `https://picsum.photos/seed/${student.id}/100/100`} />
                                 <AvatarFallback>
                                   {String(student.firstName || student.name || "?")[0]}
@@ -584,7 +585,7 @@ function DashboardContent() {
                                 })()}
                               </div>
                             </div>
-                            <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                            <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-end gap-2 shrink-0 w-full sm:w-auto pt-1 sm:pt-0 border-t sm:border-t-0 border-border/50 sm:border-transparent">
                               <Badge variant="secondary" className="text-[10px] h-5">
                                 {streakByStudentId[student.id] ?? 0} {t("sessionsStreakCompact")}
                               </Badge>

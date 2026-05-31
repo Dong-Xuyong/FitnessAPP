@@ -445,7 +445,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
             <Menu className="h-5 w-5" />
           </Button>
 
-          <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
+          <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto px-4 pt-14 pb-4 md:p-6">
             {children}
           </main>
         </div>

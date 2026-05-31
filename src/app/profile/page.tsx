@@ -1,23 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Navigation } from "@/components/Navigation";
+import { ProfilePhotoCropDialog } from "@/components/ProfilePhotoCropDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useUser, useFirestore, useDoc, useMemoFirebase, updateDocumentNonBlocking } from "@/firebase";
-import { doc } from "firebase/firestore";
+import { useUser, useFirestore, useDoc, useMemoFirebase, updateDocumentNonBlocking, useFirebaseApp } from "@/firebase";
+import { doc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 import { Loader2, Save, UserCircle, Camera, Mail } from "lucide-react";
+import { uploadTrainerProfilePhoto } from "@/lib/upload-trainer-profile-photo";
 
 export default function TrainerProfilePage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
+  const firebaseApp = useFirebaseApp();
   const { toast } = useToast();
   const { t } = useI18n();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const cropObjectUrlRef = useRef<string | null>(null);
 
   const trainerRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -26,7 +31,10 @@ export default function TrainerProfilePage() {
 
   const { data: trainer, isLoading: isLoadingProfile } = useDoc(trainerRef);
   const [isSaving, setIsSaving] = useState(false);
-  
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -44,6 +52,94 @@ export default function TrainerProfilePage() {
       });
     }
   }, [trainer]);
+
+  const clearCropObjectUrl = useCallback(() => {
+    if (cropObjectUrlRef.current) {
+      URL.revokeObjectURL(cropObjectUrlRef.current);
+      cropObjectUrlRef.current = null;
+    }
+    setCropImageSrc(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (cropObjectUrlRef.current) {
+        URL.revokeObjectURL(cropObjectUrlRef.current);
+        cropObjectUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  const commitProfilePhotoFile = useCallback(
+    async (file: File) => {
+      if (!user?.uid || !db || !trainerRef) throw new Error("NO_USER");
+      const url = await uploadTrainerProfilePhoto(firebaseApp, user.uid, file);
+      setFormData((prev) => ({ ...prev, photoUrl: url }));
+      await setDoc(trainerRef, { photoUrl: url }, { merge: true });
+    },
+    [firebaseApp, user, db, trainerRef]
+  );
+
+  const handlePhotoDialogOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        clearCropObjectUrl();
+      }
+      setPhotoDialogOpen(open);
+    },
+    [clearCropObjectUrl]
+  );
+
+  const handleCropFileChosen = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file) return;
+
+      if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+        toast({
+          variant: "destructive",
+          title: t("error"),
+          description: t("profilePhotoInvalidFile"),
+        });
+        return;
+      }
+
+      if (cropObjectUrlRef.current) {
+        URL.revokeObjectURL(cropObjectUrlRef.current);
+      }
+      const url = URL.createObjectURL(file);
+      cropObjectUrlRef.current = url;
+      setCropImageSrc(url);
+    },
+    [toast, t]
+  );
+
+  const handleCroppedPhotoConfirm = useCallback(
+    async (file: File) => {
+      setIsUploadingPhoto(true);
+      try {
+        await commitProfilePhotoFile(file);
+        toast({
+          title: t("profileUpdated"),
+          description: t("profilePhotoUploaded"),
+        });
+        clearCropObjectUrl();
+        setPhotoDialogOpen(false);
+      } catch (err) {
+        console.error("Profile photo upload failed", err);
+        toast({
+          variant: "destructive",
+          title: t("error"),
+          description: t("profilePhotoUploadFailed"),
+        });
+      } finally {
+        setIsUploadingPhoto(false);
+      }
+    },
+    [commitProfilePhotoFile, toast, t, clearCropObjectUrl]
+  );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,9 +203,25 @@ export default function TrainerProfilePage() {
             </CardHeader>
             <CardContent className="space-y-6 -mt-8 relative z-10">
               <div className="flex flex-col items-center gap-4 mb-6">
-                <div className="relative group">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  aria-hidden
+                  tabIndex={-1}
+                  onChange={handleCropFileChosen}
+                />
+                <button
+                  type="button"
+                  className="relative group rounded-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isUploadingPhoto}
+                  aria-label={t("uploadProfilePhoto")}
+                  onClick={() => setPhotoDialogOpen(true)}
+                >
                   <Avatar className="h-24 w-24 ring-4 ring-background shadow-lg bg-muted/40">
                     <AvatarImage
+                      key={formData.photoUrl || "no-photo"}
                       className="object-contain object-center"
                       src={formData.photoUrl || `https://picsum.photos/seed/${user?.uid}/200/200`}
                     />
@@ -117,19 +229,18 @@ export default function TrainerProfilePage() {
                       {formData.firstName?.[0] || "C"}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Camera className="h-6 w-6 text-white" />
+                  <div
+                    className={`pointer-events-none absolute inset-0 bg-black/40 rounded-full flex items-center justify-center transition-opacity ${
+                      isUploadingPhoto ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    {isUploadingPhoto ? (
+                      <Loader2 className="h-6 w-6 text-white animate-spin" />
+                    ) : (
+                      <Camera className="h-6 w-6 text-white" />
+                    )}
                   </div>
-                </div>
-                <div className="w-full max-w-sm space-y-2">
-                  <Label htmlFor="photoUrl">{t("profilePhotoUrl")}</Label>
-                  <Input 
-                    id="photoUrl" 
-                    placeholder="https://example.com/coach-photo.jpg" 
-                    value={formData.photoUrl} 
-                    onChange={(e) => setFormData({...formData, photoUrl: e.target.value})} 
-                  />
-                </div>
+                </button>
               </div>
 
               <div className="grid sm:grid-cols-2 gap-4">
@@ -175,6 +286,15 @@ export default function TrainerProfilePage() {
             </CardFooter>
           </Card>
         </form>
+
+        <ProfilePhotoCropDialog
+          open={photoDialogOpen}
+          onOpenChange={handlePhotoDialogOpenChange}
+          imageSrc={cropImageSrc}
+          onPickFile={() => photoInputRef.current?.click()}
+          isSaving={isUploadingPhoto}
+          onConfirm={handleCroppedPhotoConfirm}
+        />
       </div>
     </Navigation>
   );

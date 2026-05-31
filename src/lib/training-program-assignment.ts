@@ -45,18 +45,20 @@ export function buildWorkoutPlanExercises(
   const allSessions = program.sessions || [];
   const sessionsToUse = pickSessionsForAssignmentWeek(program, weekNumber);
   return sessionsToUse.flatMap((session) =>
-    (session.exercises || []).map((exercise) => ({
-      exerciseName: exercise.exerciseName,
-      sets: exercise.sets ?? 1,
-      reps: exercise.reps ?? "",
-      restTimeSeconds: exercise.restTimeSeconds ?? 0,
-      notes:
-        [
-          session.name && allSessions.length > 1 ? session.name : "",
-          exercise.notes || "",
-        ]
-          .filter(Boolean)
-          .join(" — ") || undefined,
-    }))
+    (session.exercises || []).map((exercise) => {
+      const notesText = [
+        session.name && allSessions.length > 1 ? session.name : "",
+        exercise.notes || "",
+      ]
+        .filter(Boolean)
+        .join(" — ");
+      return {
+        exerciseName: exercise.exerciseName ?? "",
+        sets: exercise.sets ?? 1,
+        reps: exercise.reps ?? "",
+        restTimeSeconds: exercise.restTimeSeconds ?? 0,
+        ...(notesText ? { notes: notesText } : {}),
+      };
+    })
   );
 }
