@@ -120,6 +120,32 @@ function normalizeHm(time: string): string {
   return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }
 
+function addMinutesToHm(time: string, minutes: number): string {
+  const start = parseHm(time);
+  if (start == null) return time;
+  const total = start + minutes;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Return N consecutive slot start-times from `startTime`, each `slotDurationMin` apart. */
+export function consecutiveSlotBlocksFrom(
+  allSlotTimes: string[],
+  startTime: string,
+  count: number,
+  slotDurationMin: number
+): string[] {
+  if (count <= 0) return [];
+  const available = new Set(allSlotTimes);
+  const blocks: string[] = [];
+  let t = startTime;
+  for (let i = 0; i < count; i++) {
+    if (!available.has(t)) return [];
+    blocks.push(t);
+    if (i < count - 1) t = addMinutesToHm(t, slotDurationMin);
+  }
+  return blocks;
+}
+
 /** Generate slot start-times from `startTime` (inclusive) until `endTime` (exclusive). */
 export function generateSlotTimes(startTime: string, endTime: string, slotDurationMin: number): string[] {
   const step = Math.max(1, Math.floor(slotDurationMin));
@@ -194,15 +220,24 @@ function timeWithinAnyOpenBlock(
   return blocksOnDate.some((b) => timeWithinOpenBlock(time, b));
 }
 
-/** Weekly slots outside open-block windows, plus slots from each open block on the date. */
+/** Weekly slots outside open-block windows, plus slots from each open block on the date.
+ *  On vacation days with open blocks, only the open-block windows are returned. */
 export function resolveDaySlotTimes(args: {
   dateStr: string;
   weeklySched: DaySchedule | undefined;
   openBlocks: OpenAvailabilityBlock[];
   slotDurationMin: number;
+  vacationPeriods?: VacationPeriod[];
 }): string[] {
-  const { dateStr, weeklySched, openBlocks, slotDurationMin } = args;
+  const { dateStr, weeklySched, openBlocks, slotDurationMin, vacationPeriods = [] } = args;
   const onDate = openBlocksForDate(dateStr, openBlocks);
+  const onVacation = isDateInVacation(dateStr, vacationPeriods);
+
+  if (onVacation) {
+    if (onDate.length === 0) return [];
+    return [...new Set(onDate.flatMap((b) => generateSlotTimes(b.startTime, b.endTime, slotDurationMin)))].sort();
+  }
+
   const weeklySlots = generateSlotsForDay(weeklySched, slotDurationMin).filter(
     (t) => !timeWithinAnyOpenBlock(t, onDate)
   );

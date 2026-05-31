@@ -79,6 +79,16 @@ const translations = {
     shopDeleteRegistration: "Delete registration",
     shopDeleteRegistrationConfirm:
       "Remove this shop log for the selected day? The student can log again later.",
+    shopDeleteAllPaid: "Delete all paid",
+    shopDeleteAllPaidStep1Title: "Delete all paid registrations?",
+    shopDeleteAllPaidStep1Desc:
+      "You are about to remove {count} paid shop registration(s) from the recent log. Payment records are not changed.",
+    shopDeleteAllPaidContinue: "Continue",
+    shopDeleteAllPaidStep2Title: "Confirm permanent deletion",
+    shopDeleteAllPaidStep2Desc:
+      "This cannot be undone. Permanently delete all {count} paid registration(s) now?",
+    shopDeleteAllPaidConfirm: "Delete all",
+    shopDeleteAllPaidSuccess: "Paid registrations removed",
     shopBillingMembership: "Membership",
     shopBillingShop: "Shop",
     shopBillingTotal: "Total due",
@@ -136,7 +146,7 @@ const translations = {
     dashboardRemoveNextPeriodPayments: "Remove {period} payments",
     dashboardNextPeriodCreateConfirmTitle: "Create next-month payments?",
     dashboardNextPeriodCreateConfirmDescription:
-      "Create or update pending payment rows for {period} for all active students on your roster (membership + shop from the prior month).",
+      "Create or update pending payment rows for {period} for all active students on your roster (membership + unpaid shop items).",
     dashboardNextPeriodRemoveConfirmTitle: "Remove next-month payments?",
     dashboardNextPeriodRemoveConfirmDescription:
       "Delete pending payment rows for {period} for all students on your roster. Paid rows are not removed.",
@@ -195,7 +205,6 @@ const translations = {
     calendarRosterSectionActivePlan: "Active workout",
     calendarRosterSectionCompletedPlan: "Completed workout",
     calendarRosterViewWorkoutHistory: "Workout history",
-    calendarRosterNextProgramHint: "Next: {title}",
     calendarRosterSlotPlanNotOnProfile:
       "This booking’s plan is not on the student’s profile (missing or outdated link).",
     calendarRosterPlanDetailEmpty: "No exercises in this plan.",
@@ -491,8 +500,16 @@ const translations = {
     couldNotResendDesc: "Please try signing in again to resend the verification email.",
     checkYourEmail: "Check Your Email",
     verificationLinkSent: "We sent a verification link to your email. Click the link to activate your account.",
+    emailDestination: "Email destination",
     resendVerificationEmail: "Resend Verification Email",
     backToSignIn: "Back to Sign In",
+    forgotPassword: "Forgot password?",
+    emailRequired: "Email required",
+    enterEmailToResetPassword: "Enter your email address to receive a reset link.",
+    passwordResetSent: "Password reset email sent",
+    passwordResetSentDesc: "If an account exists for this email, you will receive reset instructions shortly.",
+    passwordResetFailed: "Could not send reset email",
+    passwordResetFailedDesc: "Please verify your email and try again.",
     welcomeBack: "Welcome Back",
     signInDescription: "Sign in to your account or create a new one.",
     signUp: "Sign Up",
@@ -1099,6 +1116,16 @@ const translations = {
     shopDeleteRegistration: "Eliminar registo",
     shopDeleteRegistrationConfirm:
       "Remover este registo da loja para o dia selecionado? O aluno pode voltar a registar depois.",
+    shopDeleteAllPaid: "Apagar todos os pagos",
+    shopDeleteAllPaidStep1Title: "Apagar todos os registos pagos?",
+    shopDeleteAllPaidStep1Desc:
+      "Vai remover {count} registo(s) pago(s) da loja nos registos recentes. Os pagamentos na faturação não são alterados.",
+    shopDeleteAllPaidContinue: "Continuar",
+    shopDeleteAllPaidStep2Title: "Confirmar eliminação permanente",
+    shopDeleteAllPaidStep2Desc:
+      "Esta ação não pode ser anulada. Eliminar definitivamente os {count} registo(s) pago(s) agora?",
+    shopDeleteAllPaidConfirm: "Apagar todos",
+    shopDeleteAllPaidSuccess: "Registos pagos removidos",
     shopBillingMembership: "Mensalidade",
     shopBillingShop: "Loja",
     shopBillingTotal: "Total em dívida",
@@ -1157,7 +1184,7 @@ const translations = {
     dashboardRemoveNextPeriodPayments: "Remover pagamentos {period}",
     dashboardNextPeriodCreateConfirmTitle: "Criar pagamentos do próximo mês?",
     dashboardNextPeriodCreateConfirmDescription:
-      "Cria ou atualiza linhas pendentes para {period} em todos os alunos ativos do teu plantel (mensalidade + loja do mês anterior).",
+      "Cria ou atualiza linhas pendentes para {period} em todos os alunos ativos do teu plantel (mensalidade + artigos da loja nao pagos).",
     dashboardNextPeriodRemoveConfirmTitle: "Remover pagamentos do próximo mês?",
     dashboardNextPeriodRemoveConfirmDescription:
       "Elimina pagamentos pendentes de {period} para todos os alunos do plantel. Pagamentos já marcados como pagos não são removidos.",
@@ -1216,7 +1243,6 @@ const translations = {
     calendarRosterSectionActivePlan: "Treino ativo",
     calendarRosterSectionCompletedPlan: "Treino concluído",
     calendarRosterViewWorkoutHistory: "Histórico de treinos",
-    calendarRosterNextProgramHint: "A seguir: {title}",
     calendarRosterSlotPlanNotOnProfile:
       "O plano desta reserva não está na ficha do aluno (ligação em falta ou desatualizada).",
     calendarRosterPlanDetailEmpty: "Este plano não tem exercícios.",
@@ -1513,8 +1539,16 @@ const translations = {
     couldNotResendDesc: "Por favor, tente entrar novamente para reenviar o email de verificação.",
     checkYourEmail: "Verifique o Seu Email",
     verificationLinkSent: "Enviámos um link de verificação para o seu email. Clique no link para ativar a sua conta.",
+    emailDestination: "Email de destino",
     resendVerificationEmail: "Reenviar Email de Verificação",
     backToSignIn: "Voltar ao Login",
+    forgotPassword: "Recuperar palavra-passe?",
+    emailRequired: "Email obrigatório",
+    enterEmailToResetPassword: "Introduza o seu email para receber o link de recuperação.",
+    passwordResetSent: "Email de recuperação enviado",
+    passwordResetSentDesc: "Se existir uma conta com este email, vai receber instruções de recuperação em breve.",
+    passwordResetFailed: "Não foi possível enviar o email de recuperação",
+    passwordResetFailedDesc: "Verifique o email e tente novamente.",
     welcomeBack: "Bem-vindo de Volta",
     signInDescription: "Entre na sua conta ou crie uma nova.",
     signUp: "Registar",

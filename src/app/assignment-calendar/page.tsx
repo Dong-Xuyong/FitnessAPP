@@ -84,6 +84,7 @@ import {
   normalizeVacationPeriods,
   openBlocksForDate,
   resolveDaySlotTimes,
+  consecutiveSlotBlocksFrom,
   upcomingOpenAvailabilityBlocks,
   upcomingVacationPeriods,
   vacationPeriodsOverlap,
@@ -441,19 +442,6 @@ function CalendarDayRosterRow({
     }
   }
 
-  const nextProgramLine =
-    slotPlanId &&
-    slotMeta?.isCompleted &&
-    bucket === "active" &&
-    unlockedId &&
-    unlockedId !== slotPlanId &&
-    (String(unlockedMeta?.title || "").trim() || unlockedTitle)
-      ? t("calendarRosterNextProgramHint").replace(
-          "{title}",
-          String(unlockedMeta?.title || "").trim() || unlockedTitle
-        )
-      : "";
-
   const rosterMatch = rosterStudentsSorted.find(
     (s) => s.id === row.studentId || String((s as Record<string, unknown>).userId || "") === row.studentId
   ) as (Record<string, unknown> & { id: string }) | undefined;
@@ -543,9 +531,6 @@ function CalendarDayRosterRow({
               <Dumbbell className="h-3 w-3 shrink-0" />
               {programLabel}
             </p>
-            {nextProgramLine ? (
-              <p className="text-xs text-muted-foreground/90 mt-0.5 leading-snug">{nextProgramLine}</p>
-            ) : null}
             {row.times.length > 0 ? (
               <p className="text-xs text-muted-foreground/80 mt-0.5 tabular-nums">
                 {t("calendarDayBookedTimes")}: {row.times.join(", ")}
@@ -1073,6 +1058,7 @@ export default function AssignmentCalendarPage() {
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [isAddingStudent, setIsAddingStudent] = useState(false);
   const [slotMaxOverride, setSlotMaxOverride] = useState<number>(4);
+  const [isSavingSlotMax, setIsSavingSlotMax] = useState(false);
 
   // Roster
   const studentsQuery = useMemoFirebase(() => {
@@ -1282,16 +1268,26 @@ export default function AssignmentCalendarPage() {
     [selectedDateStr, openAvailabilityBlocks]
   );
 
-  const timeSlots = useMemo(
-    () =>
-      resolveDaySlotTimes({
-        dateStr: selectedDateStr,
-        weeklySched: selectedDaySchedule,
-        openBlocks: openAvailabilityBlocks,
-        slotDurationMin,
-      }),
-    [selectedDateStr, selectedDaySchedule, openAvailabilityBlocks, slotDurationMin]
-  );
+  const timeSlots = useMemo(() => {
+    const resolved = resolveDaySlotTimes({
+      dateStr: selectedDateStr,
+      weeklySched: selectedDaySchedule,
+      openBlocks: openAvailabilityBlocks,
+      slotDurationMin,
+      vacationPeriods,
+    });
+    const bookedTimes = sessionSlots
+      .filter((s) => s.date === selectedDateStr)
+      .map((s) => s.startTime);
+    return [...new Set([...resolved, ...bookedTimes])].sort();
+  }, [
+    selectedDateStr,
+    selectedDaySchedule,
+    openAvailabilityBlocks,
+    slotDurationMin,
+    vacationPeriods,
+    sessionSlots,
+  ]);
 
   const showCoachDaySchedule = coachDayShowsSchedule({
     weeklyAvailable: selectedDayWeeklyAvailable,
@@ -2363,19 +2359,34 @@ export default function AssignmentCalendarPage() {
   };
 
   const handleSaveSlotMax = async () => {
-    if (!managingSlot?.slot || !db || !user) return;
+    if (!managingSlot || !db || !user) return;
     const { date, startTime, slot } = managingSlot;
     const docId = slotDocId(date, startTime);
-    const maxS = slotMaxOverride || defaultMaxStudents;
+    const maxS = Math.min(20, Math.max(1, slotMaxOverride || defaultMaxStudents));
+    if (slot && slot.students.length > maxS) {
+      toast({
+        title: `Não é possível reduzir abaixo de ${slot.students.length} inscrito(s)`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsSavingSlotMax(true);
     try {
-      const newSlotData = { ...slot, maxStudents: maxS };
+      const newSlotData = slot
+        ? { date, startTime, maxStudents: maxS, students: slot.students }
+        : { date, startTime, maxStudents: maxS, students: [] as SlotStudent[] };
       await setDoc(doc(db, "personalTrainers", user.uid, "sessionSlots", docId), newSlotData);
-      const newSlot = { ...slot, maxStudents: maxS };
-      setSessionSlots((prev) => prev.map((s) => (s.id === docId ? newSlot : s)));
+      const newSlot: SessionSlot = { id: docId, ...newSlotData };
+      setSessionSlots((prev) => {
+        const idx = prev.findIndex((s) => s.id === docId);
+        return idx >= 0 ? prev.map((s) => (s.id === docId ? newSlot : s)) : [...prev, newSlot];
+      });
       setManagingSlot((prev) => (prev ? { ...prev, slot: newSlot } : null));
       toast({ title: "Capacidade atualizada" });
     } catch {
       toast({ title: t("error") || "Error", variant: "destructive" });
+    } finally {
+      setIsSavingSlotMax(false);
     }
   };
 
@@ -2404,8 +2415,12 @@ export default function AssignmentCalendarPage() {
         const sessionStart = entry.sessionStart ?? time;
         const enrolledDur = entry.sessionDurationMin ?? sessionDurForTime;
         const freeCount = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
-        const sessionIdx = timeSlots.indexOf(sessionStart);
-        const blocksToFree = timeSlots.slice(Math.max(0, sessionIdx), Math.max(0, sessionIdx) + freeCount);
+        const blocksToFree = consecutiveSlotBlocksFrom(
+          timeSlots,
+          sessionStart,
+          freeCount,
+          slotDurationMin
+        );
         const nextSlots = [...sessionSlots];
         for (const t of blocksToFree) {
           const id = slotDocId(selectedDateStr, t);
@@ -2425,7 +2440,12 @@ export default function AssignmentCalendarPage() {
         setSessionSlots(nextSlots);
         toast({ title: "Aluno removido dos blocos" });
       } else {
-        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsPerSessionForTime);
+        const blocksToBook = consecutiveSlotBlocksFrom(
+          timeSlots,
+          time,
+          slotsPerSessionForTime,
+          slotDurationMin
+        );
         if (blocksToBook.length < slotsPerSessionForTime) {
           toast({ title: `Não há blocos suficientes para sessão de ${sessionDurForTime} min`, variant: "destructive" });
           return;
@@ -3033,6 +3053,9 @@ export default function AssignmentCalendarPage() {
             {managingSlot && (() => {
               const slotStudents = managingSlot.slot?.students ?? [];
               const maxS = slotMaxOverride || defaultMaxStudents;
+              const persistedMax = managingSlot.slot?.maxStudents ?? defaultMaxStudents;
+              const canSaveSlotMax =
+                Math.min(20, Math.max(1, slotMaxOverride || defaultMaxStudents)) !== persistedMax;
               const canAdd =
                 slotStudents.length < maxS &&
                 !isNewBookingBlocked({
@@ -3068,7 +3091,9 @@ export default function AssignmentCalendarPage() {
                         className="w-16 h-7 text-sm text-center"
                       />
                       <Button size="sm" variant="outline" className="h-7 text-xs"
-                        onClick={handleSaveSlotMax} disabled={!managingSlot.slot}>
+                        onClick={handleSaveSlotMax}
+                        disabled={!canSaveSlotMax || isSavingSlotMax}>
+                        {isSavingSlotMax && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
                         Guardar
                       </Button>
                       <span className="ml-auto text-sm font-semibold tabular-nums">
@@ -3655,10 +3680,14 @@ export default function AssignmentCalendarPage() {
                     const isContinuation = isEnrolled && myEntry.sessionStart !== undefined && myEntry.sessionStart !== time;
                     const isSessionStart = isEnrolled && !isContinuation;
 
-                    const startIdx = timeSlots.indexOf(time);
                     const slotsNeededForTime = getSlotsPerSessionForTime(time);
                     const sessionMinForTime = getSessionDurationForTime(time);
-                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
+                    const blocksForSession = consecutiveSlotBlocksFrom(
+                      timeSlots,
+                      time,
+                      slotsNeededForTime,
+                      slotDurationMin
+                    );
                     const hasEnoughBlocks = !isEnrolled && blocksForSession.length === slotsNeededForTime;
                     const allFree = hasEnoughBlocks && blocksForSession.every((t2) => {
                       const s2 = slotsByTime.get(t2);

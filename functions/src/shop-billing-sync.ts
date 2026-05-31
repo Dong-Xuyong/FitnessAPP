@@ -160,6 +160,7 @@ async function buildDefaultTargetResolver(
   const payments = snap.docs.map((d) => ({
     period: String(d.data().period ?? ""),
     status: d.data().status,
+    createdAt: d.data().createdAt,
   }));
   return buildShopBillingPeriodContextFromPayments(payments).billablePeriodForPurchaseMonth;
 }
@@ -181,7 +182,12 @@ export async function syncShopPaymentForPeriod(
   trainerId: string,
   authStudentId: string,
   paymentPeriod: string,
-  options?: { createSource?: string; bypassBillingWindow?: boolean; shopSourcePeriod?: string }
+  options?: {
+    createSource?: string;
+    bypassBillingWindow?: boolean;
+    shopSourcePeriod?: string;
+    overwriteLockedPending?: boolean;
+  }
 ): Promise<void> {
   void options?.shopSourcePeriod;
   if (!options?.bypassBillingWindow && !maySyncFuturePaymentPeriod(paymentPeriod)) {
@@ -257,13 +263,12 @@ export async function syncShopPaymentForPeriod(
   };
 
   if (pendingDoc) {
-    // If the coach has already created this pending payment (shopAmount is present),
-    // the shop portion is locked — only update shopSyncedAt so we don't overwrite
-    // the snapshot the coach recorded. Amount/baseAmount/shopAmount stay as-is.
+    // For normal sync flows, preserve coach-locked pending rows (snapshot behavior).
+    // Bulk "create next period" can opt in to overwrite so totals are recalculated.
     const existingData = pendingDoc.data();
     const shopLocked = existingData.shopAmount != null;
     await pendingDoc.ref.update(
-      shopLocked
+      shopLocked && !options?.overwriteLockedPending
         ? { shopSyncedAt: nowIso }
         : paymentPayload
     );
@@ -337,6 +342,7 @@ export async function markShopLinesPaidForPaymentRecord(
   const payments = paymentsSnap.docs.map((p) => ({
     period: String(p.data().period ?? ""),
     status: p.data().status,
+    createdAt: p.data().createdAt,
   }));
   const { billablePeriodForPurchaseMonth } = options?.repairMode
     ? buildShopBillingPeriodContextFromPayments(payments)
@@ -361,7 +367,12 @@ export async function markShopLinesPaidForPaymentRecord(
       const date = String(before.date ?? "").trim();
       if (
         options?.repairMode &&
-        !shouldMarkShopLinePaidForPaymentRepair(date, paymentPeriod, payments)
+        !shouldMarkShopLinePaidForPaymentRepair(
+          date,
+          String(before.time ?? "").trim() || undefined,
+          paymentPeriod,
+          payments
+        )
       ) {
         continue;
       }
@@ -410,8 +421,13 @@ export async function repairShopLinesForPaidPaymentsAdmin(
     period: String(p.data().period ?? "").trim(),
     status: p.data().status,
     shopAmount: Number(p.data().shopAmount ?? 0),
+    createdAt: p.data().createdAt,
   }));
-  const payments = paymentsWithId.map((p) => ({ period: p.period, status: p.status }));
+  const payments = paymentsWithId.map((p) => ({
+    period: p.period,
+    status: p.status,
+    createdAt: p.createdAt,
+  }));
   const paymentIdToPeriod = new Map(
     paymentsWithId.filter((p) => p.id && p.period).map((p) => [p.id, p.period])
   );

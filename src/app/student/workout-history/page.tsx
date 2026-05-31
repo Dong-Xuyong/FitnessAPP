@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useUser, useFirestore } from "@/firebase";
 import { cn } from "@/lib/utils";
+import { parseSessionCompletedAtMs } from "@/lib/student-monthly-workout-completion";
 import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -59,24 +60,6 @@ interface WorkoutSession {
   moodNotes?: string;
   bodyWeightKg?: number | null;
   sessionBodyFatPercent?: number | null;
-}
-
-function parseCompletedAtMs(ca: unknown): number | null {
-  if (ca == null) return null;
-  if (
-    typeof ca === "object" &&
-    ca !== null &&
-    "toDate" in (ca as object) &&
-    typeof (ca as { toDate?: () => Date }).toDate === "function"
-  ) {
-    const t = (ca as { toDate: () => Date }).toDate().getTime();
-    return Number.isFinite(t) ? t : null;
-  }
-  if (typeof ca === "string" && ca.trim()) {
-    const v = Date.parse(ca);
-    return Number.isFinite(v) ? v : null;
-  }
-  return null;
 }
 
 function SessionFeedbackSummary({ session, t }: { session: WorkoutSession; t: (key: TranslationKey) => string }) {
@@ -171,11 +154,11 @@ export default function StudentWorkoutHistoryPage() {
 
       const completedSessions = sessionsSnap.docs
         .map((d) => ({ id: d.id, ...d.data() } as WorkoutSession))
-        .filter((s) => parseCompletedAtMs(s.completedAt as unknown) != null)
+        .filter((s) => parseSessionCompletedAtMs(s.completedAt as unknown) != null)
         .sort(
           (a, b) =>
-            (parseCompletedAtMs(b.completedAt as unknown) ?? 0) -
-            (parseCompletedAtMs(a.completedAt as unknown) ?? 0)
+            (parseSessionCompletedAtMs(b.completedAt as unknown) ?? 0) -
+            (parseSessionCompletedAtMs(a.completedAt as unknown) ?? 0)
         );
 
       setCompletedWorkouts(completedSessions);
@@ -298,7 +281,7 @@ export default function StudentWorkoutHistoryPage() {
             </div>
             <div className="space-y-2">
               {completedWorkouts.map((session) => {
-                const completedMs = parseCompletedAtMs(session.completedAt as unknown);
+                const completedMs = parseSessionCompletedAtMs(session.completedAt as unknown);
                 const fallbackDate = session.date?.trim();
                 const completedDate =
                   completedMs != null ? new Date(completedMs).toISOString() : fallbackDate || "";

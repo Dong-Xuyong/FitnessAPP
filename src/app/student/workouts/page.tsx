@@ -497,8 +497,9 @@ export default function StudentWorkoutsPage() {
         weeklySched: selectedDaySched,
         openBlocks: openAvailabilityBlocks,
         slotDurationMin,
+        vacationPeriods,
       }),
-    [selectedDateStr, selectedDaySched, openAvailabilityBlocks, slotDurationMin]
+    [selectedDateStr, selectedDaySched, openAvailabilityBlocks, slotDurationMin, vacationPeriods]
   );
 
   const showStudentDaySchedule =

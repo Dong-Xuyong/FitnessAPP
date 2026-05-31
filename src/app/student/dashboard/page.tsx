@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Milestone } from "@/lib/types";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
-import { countMonthlyWorkoutPlanCompletions } from "@/lib/student-monthly-workout-completion";
+import { countCompletedWorkoutSessionsInMonth } from "@/lib/student-monthly-workout-completion";
 import { useStudentBillingData } from "@/hooks/use-student-billing-data";
 import { StudentPendingPaymentCard } from "@/components/student-billing/StudentPendingPaymentCard";
 
@@ -45,7 +45,6 @@ export default function StudentDashboardPage() {
   const [currentStreak, setCurrentStreak] = useState(0);
   const [lastSessionDoneAt, setLastSessionDoneAt] = useState<string | null>(null);
   const [monthlyDoneCount, setMonthlyDoneCount] = useState(0);
-  const [monthlyPlannedCount, setMonthlyPlannedCount] = useState(0);
 
   /** Same rule as profile fetch: roster doc wins when coach keyed data under a different id. */
   const milestoneStudentDocId = useMemo(() => {
@@ -98,7 +97,6 @@ export default function StudentDashboardPage() {
       setCurrentStreak(0);
       setLastSessionDoneAt(null);
       setMonthlyDoneCount(0);
-      setMonthlyPlannedCount(0);
       return;
     }
     if (!db) {
@@ -120,29 +118,18 @@ export default function StudentDashboardPage() {
             // Use rosterDocId if set (handles cases where data is stored under a different doc ID)
             const effectiveStudentId = (profileData.rosterDocId as string | undefined) || user!.uid;
             const trainerId = profileData.trainerId as string;
-            const [sessionsSnap, plansSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
+            const [sessionsSnap, trainerSnap, sessionSlotsSnap] = await Promise.all([
               getDocs(
                 collection(db, "personalTrainers", trainerId, "students", effectiveStudentId, "workoutSessions")
               ),
-              getDocs(collection(db, "personalTrainers", trainerId, "students", effectiveStudentId, "workoutPlans")),
               getDoc(doc(db, "personalTrainers", trainerId)),
               getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots")),
             ]);
 
-            const planRows = plansSnap.docs.map((planDoc) => ({
-              id: planDoc.id,
-              data: planDoc.data() as Record<string, unknown>,
-            }));
             const sessionRows = sessionsSnap.docs.map((d) => ({
               data: d.data() as Record<string, unknown>,
             }));
-            const { done: doneMonth, planned: plannedMonth } = countMonthlyWorkoutPlanCompletions(
-              planRows,
-              sessionRows,
-              new Date()
-            );
-            setMonthlyDoneCount(doneMonth);
-            setMonthlyPlannedCount(plannedMonth);
+            setMonthlyDoneCount(countCompletedWorkoutSessionsInMonth(sessionRows, new Date()));
 
             const slotDm = Number(trainerSnap.data()?.slotDurationMin) || 30;
             const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
@@ -295,14 +282,12 @@ export default function StudentDashboardPage() {
                 </div>
                 {studentData.trainerId && (
                   <div className="space-y-2 pt-4 border-t border-primary-foreground/15">
-                    <div className="flex justify-between text-sm gap-4">
+                    <div className="flex justify-between items-baseline text-sm gap-4">
                       <span className="flex items-center gap-2 shrink-0">
                         <ClipboardCheck className="h-4 w-4" aria-hidden />
                         {t("goalCompletion")}
                       </span>
-                      <span className="font-semibold tabular-nums">
-                        {monthlyDoneCount} / {monthlyPlannedCount}
-                      </span>
+                      <span className="text-2xl font-bold tabular-nums">{monthlyDoneCount}</span>
                     </div>
                     <p className="text-xs text-primary-foreground/70">{t("workoutsCompletedThisMonth")}</p>
                   </div>

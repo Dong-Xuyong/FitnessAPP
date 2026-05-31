@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { collection, doc, setDoc } from "firebase/firestore";
 import {
   AlertDialog,
@@ -121,8 +121,8 @@ export function StudentWeeklySchedulingTab({
   const [repeatWeeks, setRepeatWeeks] = useState(4);
   const [isApplying, setIsApplying] = useState(false);
   const [isDefaultOpen, setIsDefaultOpen] = useState(false);
-  const [defaultsHydrated, setDefaultsHydrated] = useState(false);
   const [removeDialogStep, setRemoveDialogStep] = useState<null | 1 | 2>(null);
+  const lastHydratedDefaultKey = useRef<string | null>(null);
   const [isRemovingAll, setIsRemovingAll] = useState(false);
   const [isSavingDefault, setIsSavingDefault] = useState(false);
 
@@ -244,16 +244,23 @@ export function StudentWeeklySchedulingTab({
   }, [studentConfigDoc]);
 
   useEffect(() => {
-    if (defaultsHydrated) return;
-    if (savedDefault) {
-      setSelectedPattern(savedDefault.pattern);
-      setRepeatWeeks(savedDefault.repeatWeeks ?? 4);
-      if (savedDefault.cycleStartMonday) {
-        setSelectedCycleStartMonday(savedDefault.cycleStartMonday);
-      }
+    if (!savedDefault) return;
+    const hydrateKey =
+      savedDefault.updatedAt || JSON.stringify(savedDefault.pattern);
+    if (lastHydratedDefaultKey.current === hydrateKey) return;
+    lastHydratedDefaultKey.current = hydrateKey;
+    setSelectedPattern(savedDefault.pattern);
+    setRepeatWeeks(savedDefault.repeatWeeks ?? 4);
+    if (savedDefault.cycleStartMonday) {
+      setSelectedCycleStartMonday(savedDefault.cycleStartMonday);
     }
-    setDefaultsHydrated(true);
-  }, [defaultsHydrated, savedDefault]);
+  }, [savedDefault]);
+
+  /** Pattern shown in grid: draft selection, or saved predefined when draft is empty. */
+  const effectivePattern = useMemo(() => {
+    if (selectedPattern.length > 0) return selectedPattern;
+    return savedDefault?.pattern ?? [];
+  }, [selectedPattern, savedDefault]);
 
   const removableSessionCount = useMemo(
     () => countStudentLogicalSessions(sessionSlots, matchIds, { excludePast: true }),
@@ -272,16 +279,29 @@ export function StudentWeeklySchedulingTab({
         // rough check: if any time is blocked that day
         && !openBlocks.some((b) => b.date === dateStr);
 
-      const slotTimes = resolveDaySlotTimes({ dateStr, weeklySched, openBlocks, slotDurationMin });
+      const slotTimes = resolveDaySlotTimes({
+        dateStr,
+        weeklySched,
+        openBlocks,
+        slotDurationMin,
+        vacationPeriods,
+      });
 
       const slotsForPick = slotTimes.map((time) => ({
         time,
-        isSelected: selectedPattern.some((p) => p.weekday === key && p.startTime === time),
+        isSelected: effectivePattern.some((p) => p.weekday === key && p.startTime === time),
       }));
 
       return { key, label, dateStr, slots: slotsForPick, available: slotTimes.length > 0 };
     });
-  }, [availability, selectedCycleStartMonday, vacationPeriods, openBlocks, slotDurationMin, selectedPattern]);
+  }, [
+    availability,
+    selectedCycleStartMonday,
+    vacationPeriods,
+    openBlocks,
+    slotDurationMin,
+    effectivePattern,
+  ]);
 
   const hasAnySlots = weekGrid.some((d) => d.slots.length > 0);
 
@@ -302,19 +322,23 @@ export function StudentWeeklySchedulingTab({
 
   // ── Pattern selection ──────────────────────────────────────────────────────
 
-  const toggleSlot = useCallback((weekday: string, startTime: string) => {
-    setSelectedPattern((prev) => {
-      const exists = prev.some((p) => p.weekday === weekday && p.startTime === startTime);
-      if (exists) {
-        return prev.filter((p) => !(p.weekday === weekday && p.startTime === startTime));
-      }
-      if (sessionsPerWeek > 0 && prev.length >= sessionsPerWeek) return prev;
-      return [...prev, { weekday, startTime }];
-    });
-  }, [sessionsPerWeek]);
+  const toggleSlot = useCallback(
+    (weekday: string, startTime: string) => {
+      setSelectedPattern((prev) => {
+        const base = prev.length > 0 ? prev : (savedDefault?.pattern ?? []);
+        const exists = base.some((p) => p.weekday === weekday && p.startTime === startTime);
+        if (exists) {
+          return base.filter((p) => !(p.weekday === weekday && p.startTime === startTime));
+        }
+        if (sessionsPerWeek > 0 && base.length >= sessionsPerWeek) return base;
+        return [...base, { weekday, startTime }];
+      });
+    },
+    [sessionsPerWeek, savedDefault]
+  );
 
   const isDraftPatternComplete =
-    sessionsPerWeek > 0 && selectedPattern.length === sessionsPerWeek;
+    sessionsPerWeek > 0 && effectivePattern.length === sessionsPerWeek;
 
   const isPredefinedComplete =
     !!savedDefault && savedDefault.pattern.length === sessionsPerWeek;
@@ -334,13 +358,14 @@ export function StudentWeeklySchedulingTab({
 
   const handleSavePredefined = async () => {
     if (!studentConfigRef || !isDraftPatternComplete) return;
+    const patternToSave = selectedPattern.length > 0 ? selectedPattern : effectivePattern;
     setIsSavingDefault(true);
     try {
       await setDoc(
         studentConfigRef,
         {
           weeklySchedulingDefault: {
-            pattern: selectedPattern,
+            pattern: patternToSave,
             repeatWeeks,
             cycleStartMonday: selectedCycleStartMonday,
             updatedAt: new Date().toISOString(),
@@ -348,6 +373,7 @@ export function StudentWeeklySchedulingTab({
         },
         { merge: true }
       );
+      setSelectedPattern(patternToSave);
       toast({ title: t("weeklySchedulingDefaultSaved") });
       setIsDefaultOpen(true);
     } catch (e: unknown) {
@@ -508,7 +534,7 @@ export function StudentWeeklySchedulingTab({
                   variant={isDraftPatternComplete ? "default" : "secondary"}
                   className="text-[10px] font-normal"
                 >
-                  {selectedPattern.length}/{sessionsPerWeek}
+                  {effectivePattern.length}/{sessionsPerWeek}
                 </Badge>
               </span>
               {isDefaultOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -522,7 +548,7 @@ export function StudentWeeklySchedulingTab({
                 </p>
                 <Badge variant={isDraftPatternComplete ? "default" : "secondary"} className="text-xs">
                   {t("weeklySchedulingBlocksSelected")
-                    .replace("{s}", String(selectedPattern.length))
+                    .replace("{s}", String(effectivePattern.length))
                     .replace("{n}", String(sessionsPerWeek))}
                 </Badge>
               </div>
@@ -560,7 +586,7 @@ export function StudentWeeklySchedulingTab({
                             const disabledDueToLimit =
                               !isSelected &&
                               sessionsPerWeek > 0 &&
-                              selectedPattern.length >= sessionsPerWeek;
+                              effectivePattern.length >= sessionsPerWeek;
                             return (
                               <button
                                 key={time}
