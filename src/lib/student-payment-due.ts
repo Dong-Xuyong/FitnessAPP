@@ -1,15 +1,13 @@
-import { currentBillingPeriod, nextBillingPeriod } from "@/lib/roster-payment-status";
+import {
+  currentBillingPeriod,
+  isWithinLastFourDaysOfMonth,
+  nextBillingPeriod,
+} from "@/lib/roster-payment-status";
 
 /**
  * Client-side billing dates use the device local calendar (same as `Date` getters).
  * The scheduled payment-enforcement job uses `Europe/Lisbon` — keep logic aligned in `functions/src/`.
  */
-
-/** True only on the second-to-last calendar day of the month (local). */
-export function isPenultimateDayOfMonth(now = new Date()): boolean {
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  return now.getDate() === lastDay - 1;
-}
 
 /** End of calendar day 6 of the payment month for `YYYY-MM` (local). On-time through this instant. */
 export function graceDeadlineEndForPeriod(period: string): Date | null {
@@ -168,7 +166,7 @@ function latestOverduePeriod(
 /**
  * Warn when billing is active and monthly fee set:
  * - "overdue": any tracked period (current + periods in `payments`) is unpaid after end of day 6 of that month
- * - "soon": on the penultimate calendar day of the current month, if next month's period is not yet paid
+ * - "soon": during the last 4 calendar days of the current month, if next month's period is not yet paid
  *   (due by the 6th of next month)
  */
 export function getPaymentReminderState(args: {
@@ -190,7 +188,7 @@ export function getPaymentReminderState(args: {
     }
   }
 
-  if (isPenultimateDayOfMonth(now)) {
+  if (isWithinLastFourDaysOfMonth(now)) {
     const next = nextBillingPeriod(now);
     if (!isPeriodPaid(payments, next)) {
       const dueDate = graceDeadlineEndForPeriod(next);

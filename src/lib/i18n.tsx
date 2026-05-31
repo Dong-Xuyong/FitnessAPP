@@ -1913,7 +1913,7 @@ const translations = {
     noPaymentRecords: "Ainda sem registos de pagamento.",
     paymentReminderSoonTitle: "Pagamento a aproximar-se",
     paymentReminderSoonDesc:
-      "Lembrete: o próximo pagamento da mensalidade deve ser recebido até ao dia 6 do próximo mês (prazo {date}). Paga ou informa o teu treinador se já pagaste.",
+      "Lembrete: o próximo pagamento da mensalidade deve ser recebido até ao dia 6 do próximo mês (prazo {date}). Para mais informações contacta o teu treinador.",
     paymentReminderOverdueTitle: "Pagamento em atraso",
     paymentReminderOverdueDesc:
       "O pagamento mensal deste período devia estar pago até ao dia 6 desse mês (prazo {date}). Paga ou contacta o teu treinador.",
