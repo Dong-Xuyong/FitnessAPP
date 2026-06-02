@@ -34,7 +34,15 @@ export type SessionSlot = {
   startTime: string;
   maxStudents: number;
   students: SlotStudent[];
+  /** ISO timestamp when the coach cancelled this block (no new bookings until reactivated). */
+  cancelledAt?: string;
 };
+
+export function isSessionSlotCancelled(
+  slot: Pick<SessionSlot, "cancelledAt"> | null | undefined
+): boolean {
+  return Boolean(slot?.cancelledAt);
+}
 
 export type WorkoutPlanRecord = {
   id: string;
