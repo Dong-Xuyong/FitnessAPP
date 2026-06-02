@@ -72,6 +72,15 @@ const translations = {
     shopCoachEmpty: "No shop registrations yet.",
     shopCoachNoUnpaidRegs: "No unpaid lines in recent registrations.",
     shopCoachNoPaidRegs: "No paid lines in recent registrations.",
+    shopCoachRegisterTitle: "Register purchase",
+    shopCoachRegisterHint: "Select a student and items. New entries appear under Unpaid until billed.",
+    shopCoachSelectStudents: "Students",
+    shopCoachSelectStudentsPlaceholder: "Select students...",
+    shopCoachNoRosterStudents: "No students on roster",
+    shopCoachSelectStudentRequired: "Select a student first.",
+    shopCoachRegisterSuccess: "Purchase registered",
+    shopCoachConfirmRegisterTitle: "Confirm purchase",
+    shopCoachConfirmRegisterDescription: "Register {items} for {student} on {date}?",
     shopTableStudent: "Student",
     shopTableItems: "Items",
     shopDayTotal: "Day total",
@@ -314,6 +323,19 @@ const translations = {
     coachAttendanceTooEarlyDescription:
       "You can mark attendance from 15 minutes before the session start time.",
     coachAttendanceNotYetWindowHint: "from 15 min before start",
+    coachCancelSlotSession: "Cancel session",
+    coachCancelSlotSessionTitle: "Cancel this session?",
+    coachCancelSlotSessionDescription:
+      "All enrolled students will be removed from this time block (and any linked consecutive blocks). This cannot be undone.",
+    coachCancelSlotSessionEmptyDescription:
+      "This will remove the reserved capacity for this time block.",
+    coachCancelSlotSessionSuccess: "Session cancelled",
+    coachSlotCancelledLabel: "Cancelled",
+    coachReactivateSlotSession: "Reactivate session",
+    coachReactivateSlotSessionTitle: "Reactivate this session?",
+    coachReactivateSlotSessionDescription:
+      "Students will be able to book this time block again.",
+    coachReactivateSlotSessionSuccess: "Session reactivated",
     active: "Active",
     portal: "Portal",
 
@@ -1109,6 +1131,15 @@ const translations = {
     shopCoachEmpty: "Ainda não há registos na loja.",
     shopCoachNoUnpaidRegs: "Sem linhas por pagar nos registos recentes.",
     shopCoachNoPaidRegs: "Sem linhas pagas nos registos recentes.",
+    shopCoachRegisterTitle: "Registar compra",
+    shopCoachRegisterHint: "Selecione um aluno e os artigos. Os novos registos ficam em Por pagar até à faturação.",
+    shopCoachSelectStudents: "Alunos",
+    shopCoachSelectStudentsPlaceholder: "Selecionar alunos...",
+    shopCoachNoRosterStudents: "Sem alunos na lista",
+    shopCoachSelectStudentRequired: "Selecione um aluno primeiro.",
+    shopCoachRegisterSuccess: "Compra registada",
+    shopCoachConfirmRegisterTitle: "Confirmar compra",
+    shopCoachConfirmRegisterDescription: "Registar {items} para {student} em {date}?",
     shopTableStudent: "Aluno",
     shopTableItems: "Artigos",
     shopDayTotal: "Total do dia",
@@ -1353,6 +1384,19 @@ const translations = {
     coachAttendanceTooEarlyDescription:
       "Só podes registar presença, falta ou pendente a partir de 15 minutos antes do horário de início da sessão.",
     coachAttendanceNotYetWindowHint: "a partir de 15 min antes do início",
+    coachCancelSlotSession: "Cancelar sessão",
+    coachCancelSlotSessionTitle: "Cancelar esta sessão?",
+    coachCancelSlotSessionDescription:
+      "Todos os alunos inscritos serão removidos deste bloco (e dos blocos consecutivos associados). Esta ação não pode ser desfeita.",
+    coachCancelSlotSessionEmptyDescription:
+      "Isto remove a capacidade reservada para este bloco horário.",
+    coachCancelSlotSessionSuccess: "Sessão cancelada",
+    coachSlotCancelledLabel: "Cancelada",
+    coachReactivateSlotSession: "Reativar sessão",
+    coachReactivateSlotSessionTitle: "Reativar esta sessão?",
+    coachReactivateSlotSessionDescription:
+      "Os alunos voltam a poder inscrever-se neste bloco horário.",
+    coachReactivateSlotSessionSuccess: "Sessão reativada",
     active: "Ativo",
     portal: "Portal",
 

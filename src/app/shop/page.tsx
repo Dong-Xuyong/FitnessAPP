@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import {
   addDoc,
@@ -20,14 +20,19 @@ import { useToast } from "@/hooks/use-toast";
 import { getStudentDisplayName } from "@/lib/student-display";
 import { seedDefaultShopItemsIfEmpty } from "@/lib/shop-catalog";
 import {
+  buildShopPurchaseWritePayload,
   catalogMapFromItems,
   computePurchaseTotal,
+  computeRegistrationDayTotal,
   formatPurchaseSummary,
+  formatShopLinesSummary,
   isShopPurchasePaid,
   isShopPurchaseUnpaid,
   normalizeShopPurchasesFromDoc,
+  type ShopLine,
   type ShopPurchaseLike,
 } from "@/lib/shop-billing";
+import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import { repairShopLinesForPaidPayments, resolveRosterStudentIdClient } from "@/lib/shop-billing-payments";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -59,10 +64,35 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ChevronDown, ChevronUp, Loader2, Pencil, Plus, Store, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Minus, Pencil, Plus, Store, Trash2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+
+function localDateYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function rosterStudentPhotoUrl(
+  roster: Array<{ id: string } & Record<string, unknown>>,
+  rosterId: string
+): string {
+  const match = roster.find((s) => s.id === rosterId) as Record<string, unknown> | undefined;
+  const fromRoster = String(match?.photoUrl ?? "").trim();
+  if (fromRoster) return fromRoster;
+  return slotStudentPlaceholderPhotoUrl(rosterId);
+}
+
+function shopRegistrationStudentId(rosterRow: { id: string; userId?: string }): string {
+  const uid = String(rosterRow.userId ?? "").trim();
+  return uid || rosterRow.id;
+}
 
 type ShopItemRow = {
   id: string;
@@ -141,6 +171,28 @@ export default function CoachShopPage() {
   }, [db, user?.uid]);
   const { data: rows, isLoading: regsLoading } = useCollection<ShopRegRow>(shopQuery);
 
+  const rosterQuery = useMemoFirebase(() => {
+    if (!db || !user?.uid) return null;
+    return collection(db, "personalTrainers", user.uid, "students");
+  }, [db, user?.uid]);
+  const { data: rosterStudents, isLoading: rosterLoading } = useCollection<{
+    id: string;
+    firstName?: string;
+    lastName?: string;
+    userId?: string;
+    photoUrl?: string;
+  }>(rosterQuery);
+
+  const rosterStudentsSorted = useMemo(() => {
+    const list = [...(rosterStudents || [])] as Array<{ id: string } & Record<string, unknown>>;
+    list.sort((a, b) =>
+      getStudentDisplayName(a, a.id).localeCompare(getStudentDisplayName(b, b.id), undefined, {
+        sensitivity: "base",
+      })
+    );
+    return list;
+  }, [rosterStudents]);
+
   const authReady = mounted && !isUserLoading;
   const catalogLoading = !authReady || itemsLoading;
   const registrationsLoading = !authReady || regsLoading;
@@ -197,7 +249,110 @@ export default function CoachShopPage() {
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
   const [coachRegsUnpaidOpen, setCoachRegsUnpaidOpen] = useState(true);
   const [coachRegsPaidOpen, setCoachRegsPaidOpen] = useState(false);
+  const [coachRegisterOpen, setCoachRegisterOpen] = useState(false);
+  const [regRosterStudentId, setRegRosterStudentId] = useState("");
+  const [regQuantities, setRegQuantities] = useState<Record<string, number>>({});
+  const [savingReg, setSavingReg] = useState(false);
+  const [confirmRegOpen, setConfirmRegOpen] = useState(false);
   const shopRepairTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const activeShopItems = useMemo(
+    () => (shopItems || []).filter((item) => item.active !== false),
+    [shopItems]
+  );
+
+  const emptyRegQuantities = useCallback((): Record<string, number> => {
+    const next: Record<string, number> = {};
+    for (const item of activeShopItems) next[item.id] = 0;
+    return next;
+  }, [activeShopItems]);
+
+  useEffect(() => {
+    setRegQuantities(emptyRegQuantities());
+  }, [emptyRegQuantities]);
+
+  const regLinesForSave = useMemo((): ShopLine[] => {
+    return Object.entries(regQuantities)
+      .filter(([, qty]) => Math.floor(qty) > 0)
+      .map(([itemId, qty]) => ({ itemId, quantity: Math.floor(qty) }));
+  }, [regQuantities]);
+
+  const regDayTotal = useMemo(
+    () => computeRegistrationDayTotal(regLinesForSave, catalogMap),
+    [regLinesForSave, catalogMap]
+  );
+
+  const regItemsSummary = useMemo(
+    () => formatShopLinesSummary(regLinesForSave, catalogMap),
+    [regLinesForSave, catalogMap]
+  );
+
+  const regStudentDisplayName = useMemo(() => {
+    if (!regRosterStudentId) return "";
+    const row = rosterStudentsSorted.find((s) => s.id === regRosterStudentId);
+    return row ? getStudentDisplayName(row, "—") : "";
+  }, [regRosterStudentId, rosterStudentsSorted]);
+
+  const clampRegQty = (n: number) => Math.max(0, Math.min(999, Math.floor(n)));
+
+  const bumpRegQty = (itemId: string, delta: number) => {
+    setRegQuantities((prev) => ({
+      ...prev,
+      [itemId]: clampRegQty((prev[itemId] ?? 0) + delta),
+    }));
+  };
+
+  const canRegisterPurchase =
+    authReady &&
+    Boolean(user?.uid) &&
+    Boolean(regRosterStudentId) &&
+    activeShopItems.length > 0 &&
+    regLinesForSave.length > 0 &&
+    regDayTotal > 0;
+
+  const handleRegisterPurchase = async () => {
+    if (!db || !user?.uid || !regRosterStudentId || !canRegisterPurchase) return;
+    const rosterRow = rosterStudentsSorted.find((s) => s.id === regRosterStudentId);
+    if (!rosterRow) {
+      toast({ variant: "destructive", title: t("shopCoachSelectStudentRequired") });
+      return;
+    }
+    const studentId = shopRegistrationStudentId(
+      rosterRow as { id: string; userId?: string }
+    );
+    const dateStr = localDateYmd(new Date());
+    setSavingReg(true);
+    try {
+      const now = new Date();
+      const colRef = collection(db, "personalTrainers", user.uid, "shopRegistrations");
+      const batch = writeBatch(db);
+      for (const line of regLinesForSave) {
+        const payload = buildShopPurchaseWritePayload({
+          studentId,
+          trainerId: user.uid,
+          date: dateStr,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          now,
+        });
+        batch.set(doc(colRef), payload);
+      }
+      await batch.commit();
+      setNameByStudentId((prev) => ({
+        ...prev,
+        [studentId]: regStudentDisplayName || prev[studentId] || studentId.slice(0, 8),
+      }));
+      setRegQuantities(emptyRegQuantities());
+      setConfirmRegOpen(false);
+      setCoachRegsUnpaidOpen(true);
+      toast({ title: t("shopCoachRegisterSuccess"), description: t("shopSaveBillingHint") });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast({ variant: "destructive", title: t("shopSaveFailed"), description: msg });
+    } finally {
+      setSavingReg(false);
+    }
+  };
 
   useEffect(() => {
     if (!db || !user?.uid) return;
@@ -257,6 +412,22 @@ export default function CoachShopPage() {
       cancelled = true;
     };
   }, [db, sortedRows]);
+
+  useEffect(() => {
+    if (!rosterStudentsSorted.length) return;
+    setNameByStudentId((prev) => {
+      const next = { ...prev };
+      for (const s of rosterStudentsSorted) {
+        const display = getStudentDisplayName(s, s.id.slice(0, 8));
+        const authOrRosterId = shopRegistrationStudentId(
+          s as { id: string; userId?: string }
+        );
+        next[authOrRosterId] = display;
+        next[s.id] = display;
+      }
+      return next;
+    });
+  }, [rosterStudentsSorted]);
 
   const openNewItem = () => {
     setEditingItem(null);
@@ -466,6 +637,191 @@ export default function CoachShopPage() {
         </Card>
 
         <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>{t("shopCoachRegisterTitle")}</CardTitle>
+            <CardDescription>{t("shopCoachRegisterHint")}</CardDescription>
+          </CardHeader>
+
+          <Collapsible open={coachRegisterOpen} onOpenChange={setCoachRegisterOpen}>
+            <div className="px-6">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border bg-muted/30 px-4 py-3 text-sm hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="font-medium truncate">
+                    {regRosterStudentId ? regStudentDisplayName : t("shopCoachSelectStudentsPlaceholder")}
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="font-bold tabular-nums text-base">
+                      {`${t("shopPurchase")} · €${regDayTotal.toFixed(2)}`}
+                    </span>
+                    {coachRegisterOpen ? (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </span>
+                </button>
+              </CollapsibleTrigger>
+            </div>
+
+            <CollapsibleContent>
+          <CardContent className="space-y-5 pt-4">
+            <div className="space-y-1.5">
+              <Label>{t("shopCoachSelectStudents")}</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 w-full justify-between font-normal px-3"
+                    disabled={!authReady || rosterLoading}
+                  >
+                    <span
+                      className={cn(
+                        "truncate text-left",
+                        !regRosterStudentId && "text-muted-foreground"
+                      )}
+                    >
+                      {rosterLoading ? (
+                        t("shopLoadingDay")
+                      ) : !regRosterStudentId ? (
+                        t("shopCoachSelectStudentsPlaceholder")
+                      ) : (
+                        regStudentDisplayName
+                      )}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-2" align="start">
+                  <div className="max-h-60 overflow-y-auto space-y-0.5">
+                    {rosterStudentsSorted.length === 0 ? (
+                      <p className="text-sm text-muted-foreground px-2 py-1.5">
+                        {t("shopCoachNoRosterStudents")}
+                      </p>
+                    ) : (
+                      rosterStudentsSorted.map((s) => {
+                        const checked = regRosterStudentId === s.id;
+                        const name = getStudentDisplayName(s, "—");
+                        const initial =
+                          name !== "—" ? name.trim().charAt(0).toUpperCase() || "?" : "?";
+                        const photoSrc = rosterStudentPhotoUrl(rosterStudentsSorted, s.id);
+                        return (
+                          <div
+                            key={s.id}
+                            role="button"
+                            tabIndex={0}
+                            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted cursor-pointer"
+                            onClick={() => setRegRosterStudentId(checked ? "" : s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setRegRosterStudentId(checked ? "" : s.id);
+                              }
+                            }}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(value) => {
+                                setRegRosterStudentId(value ? s.id : "");
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <Avatar className="h-7 w-7 shrink-0 border border-border/50">
+                              <AvatarImage src={photoSrc} alt="" />
+                              <AvatarFallback className="text-[10px]">{initial}</AvatarFallback>
+                            </Avatar>
+                            <span className="truncate">{name}</span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {catalogLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm py-4 justify-center">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t("shopLoadingDay")}
+              </div>
+            ) : activeShopItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2">{t("shopCatalogEmpty")}</p>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {activeShopItems.map((item) => {
+                    const qty = regQuantities[item.id] ?? 0;
+                    return (
+                      <div
+                        key={item.id}
+                        className={cn(
+                          "flex items-center justify-between gap-3 rounded-xl border p-4 transition-colors",
+                          qty > 0 ? "border-primary/40 bg-primary/5" : "bg-muted/20"
+                        )}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{item.name}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            €{Number(item.price ?? 0).toFixed(2)} / un.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg"
+                            onClick={() => bumpRegQty(item.id, -1)}
+                            disabled={!regRosterStudentId || qty === 0}
+                          >
+                            <Minus className="h-3.5 w-3.5" />
+                          </Button>
+                          <span className="w-8 text-center font-semibold tabular-nums text-sm">
+                            {qty}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg"
+                            onClick={() => bumpRegQty(item.id, 1)}
+                            disabled={!regRosterStudentId}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  className="w-full"
+                  size="lg"
+                  disabled={!canRegisterPurchase || savingReg}
+                  onClick={() => {
+                    if (!regRosterStudentId) {
+                      toast({ variant: "destructive", title: t("shopCoachSelectStudentRequired") });
+                      return;
+                    }
+                    setConfirmRegOpen(true);
+                  }}
+                >
+                  {savingReg ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  {`${t("shopPurchase")} · €${regDayTotal.toFixed(2)}`}
+                </Button>
+              </>
+            )}
+          </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </Card>
+
+        <Card>
           <CardHeader>
             <CardTitle>{t("shopCoachTableTitle")}</CardTitle>
             <CardDescription>{t("shopCoachTableHint")}</CardDescription>
@@ -476,10 +832,11 @@ export default function CoachShopPage() {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {t("shopLoadingDay")}
               </div>
-            ) : sortedRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">{t("shopCoachEmpty")}</p>
             ) : (
               <div className="space-y-3">
+                {sortedRows.length === 0 && unpaidRegRows.length === 0 && paidRegRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2 text-center mb-2">{t("shopCoachEmpty")}</p>
+                ) : null}
                 <Collapsible open={coachRegsUnpaidOpen} onOpenChange={setCoachRegsUnpaidOpen}>
                   <CollapsibleTrigger asChild>
                     <button
@@ -665,6 +1022,30 @@ export default function CoachShopPage() {
             )}
           </CardContent>
         </Card>
+
+        <AlertDialog open={confirmRegOpen} onOpenChange={setConfirmRegOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("shopCoachConfirmRegisterTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("shopCoachConfirmRegisterDescription")
+                  .replace("{items}", regItemsSummary)
+                  .replace("{student}", regStudentDisplayName)
+                  .replace("{date}", localDateYmd(new Date()))}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={savingReg}>{t("cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={savingReg || !canRegisterPurchase}
+                onClick={() => void handleRegisterPurchase()}
+              >
+                {savingReg ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {t("shopPurchase")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <Dialog open={itemDialogOpen} onOpenChange={setItemDialogOpen}>
           <DialogContent>
