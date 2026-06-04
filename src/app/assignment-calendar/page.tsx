@@ -69,6 +69,7 @@ import {
   type EditWorkoutSessionDialogSession,
 } from "@/components/EditWorkoutSessionDialog";
 import { clearAllTrainerWorkoutPlans } from "@/lib/firestore/clear-trainer-assignments";
+import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import { cn } from "@/lib/utils";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import {
@@ -913,15 +914,36 @@ function isActiveWorkoutPlanDoc(p: Record<string, unknown>): boolean {
 
 type PrimaryUnlockedPlan = { id: string; title: string };
 
+function buildCompletedWorkoutPlanIds(
+  plans: Array<Record<string, unknown> & { id?: string }>,
+  sessions: Array<Record<string, unknown> & { workoutPlanId?: string; completedAt?: unknown }> = []
+): Set<string> {
+  const completed = new Set<string>();
+  for (const p of plans) {
+    const pid = String(p.id || "").trim();
+    if (!pid) continue;
+    if (p.completedAt || p.status === "completed") completed.add(pid);
+  }
+  for (const sess of sessions) {
+    const wid = String(sess.workoutPlanId || "").trim();
+    if (wid && sess.completedAt) completed.add(wid);
+  }
+  return completed;
+}
+
 /**
- * Primary unlocked active plan: first unlocked step in the earliest sequence group
- * (lexicographic group id), else the most recently assigned non-sequence active plan.
+ * Primary unlocked active plan: first effectively unlocked step in the earliest sequence group
+ * (matches profile/student UI via `isSequenceStepEffectiveUnlocked`), else the most recently
+ * assigned non-sequence active plan.
  */
 function pickPrimaryUnlockedPlan(
-  plans: Array<Record<string, unknown> & { id?: string }>
+  plans: Array<Record<string, unknown> & { id?: string }>,
+  completedPlanIds: ReadonlySet<string> = new Set()
 ): PrimaryUnlockedPlan | null {
   const active = plans.filter(isActiveWorkoutPlanDoc);
-  const unlocked = active.filter((p) => p.studentUnlocked !== false);
+  const unlocked = active.filter((p) =>
+    isSequenceStepEffectiveUnlocked(p as Parameters<typeof isSequenceStepEffectiveUnlocked>[0], completedPlanIds)
+  );
   if (!unlocked.length) return null;
   const asRow = (p: Record<string, unknown> & { id?: string }): PrimaryUnlockedPlan | null => {
     const id = String(p?.id || "").trim();
@@ -1488,12 +1510,37 @@ export default function AssignmentCalendarPage() {
       await Promise.all(
         fids.map(async (fid) => {
           try {
-            const snap = await getDocs(
-              collection(db, "personalTrainers", user.uid, "students", fid, "workoutPlans")
+            const storageId =
+              resolveWorkoutPlansStorageStudentId(
+                fid,
+                rosterStudentsSorted as Array<{ id: string; userId?: string; email?: string }>,
+                (portalStudents || []) as Array<{ id: string; email?: string }>
+              ) || fid;
+            const plansPath = collection(
+              db,
+              "personalTrainers",
+              user.uid,
+              "students",
+              storageId,
+              "workoutPlans"
             );
+            const sessionsPath = collection(
+              db,
+              "personalTrainers",
+              user.uid,
+              "students",
+              storageId,
+              "workoutSessions"
+            );
+            const [plansSnap, sessionsSnap] = await Promise.all([
+              getDocs(plansPath),
+              getDocs(sessionsPath),
+            ]);
             if (cancelled) return;
-            const planRows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id?: string }));
-            const picked = pickPrimaryUnlockedPlan(planRows);
+            const planRows = plansSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id?: string }));
+            const sessionRows = sessionsSnap.docs.map((d) => d.data() as Record<string, unknown> & { workoutPlanId?: string; completedAt?: unknown });
+            const completedIds = buildCompletedWorkoutPlanIds(planRows, sessionRows);
+            const picked = pickPrimaryUnlockedPlan(planRows, completedIds);
             if (picked) next[fid] = picked;
           } catch {
             /* skip */
@@ -1510,7 +1557,7 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, planMetaRefreshTick]);
+  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, portalStudents, planMetaRefreshTick]);
 
   useEffect(() => {
     if (!db || !user || !expandedRosterPlanKey) return;
