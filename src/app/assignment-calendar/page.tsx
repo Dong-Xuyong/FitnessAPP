@@ -357,8 +357,19 @@ function CalendarDayRosterRow({
   const slotMeta = slotMetaKey ? rosterPlanMetaByKey[slotMetaKey] : undefined;
   const unlockedMeta = unlockedMetaKey ? rosterPlanMetaByKey[unlockedMetaKey] : undefined;
 
-  const expandPlanId =
-    bucket === "completed" && slotPlanId && slotMeta?.isCompleted ? slotPlanId : displayPlanId;
+  const slotPlanSupersededByUnlocked =
+    !!slotPlanId &&
+    !!slotMeta?.isCompleted &&
+    !!unlockedId &&
+    unlockedId !== slotPlanId;
+  const effectivePlanId =
+    bucket === "completed" && slotPlanId && slotMeta?.isCompleted
+      ? slotPlanId
+      : slotPlanSupersededByUnlocked
+        ? unlockedId
+        : displayPlanId;
+
+  const expandPlanId = effectivePlanId;
   const rosterExpandKey = expandPlanId ? `${fid}__${expandPlanId}` : "";
   const prefetchedSessionTitle =
     rosterExpandKey ? String(sessionRosterSessionTitleByExpandKey[rosterExpandKey] || "").trim() : "";
@@ -398,9 +409,12 @@ function CalendarDayRosterRow({
         } else {
           programLabel = t("calendarRosterSlotPlanNotOnProfile");
         }
-      } else if (slotMeta?.isCompleted && unlockedId && unlockedId !== slotPlanId) {
+      } else if (slotPlanSupersededByUnlocked) {
         programLabel =
-          String(unlockedMeta?.title || "").trim() || unlockedTitle || slotTitle || t("calendarRosterSlotPlanNotOnProfile");
+          String(unlockedMeta?.title || "").trim() ||
+          unlockedTitle ||
+          slotTitle ||
+          t("calendarRosterSlotPlanNotOnProfile");
       } else if (slotTitle) {
         programLabel = slotTitle;
       } else if (sessionLogTitleForSubtitle) {
@@ -450,19 +464,21 @@ function CalendarDayRosterRow({
     (s) => s.id === row.studentId || String((s as Record<string, unknown>).userId || "") === row.studentId
   ) as (Record<string, unknown> & { id: string }) | undefined;
   const studentProfileId = rosterMatch?.id ?? row.studentId;
-  const resolvedTitleForContext = slotPlanId
-    ? hasSlotMeta
-      ? String(slotMeta?.title || "").trim()
-      : ""
-    : unlockedId
-      ? hasUnlockedMeta
-        ? String(unlockedMeta?.title || "").trim()
+  const resolvedTitleForContext = slotPlanSupersededByUnlocked
+    ? String(unlockedMeta?.title || "").trim() || unlockedTitle
+    : slotPlanId
+      ? hasSlotMeta
+        ? String(slotMeta?.title || "").trim()
         : ""
-      : inferredIdRaw
-        ? hasInferredMeta
-          ? String(inferredMeta?.title || "").trim()
+      : unlockedId
+        ? hasUnlockedMeta
+          ? String(unlockedMeta?.title || "").trim()
           : ""
-        : "";
+        : inferredIdRaw
+          ? hasInferredMeta
+            ? String(inferredMeta?.title || "").trim()
+            : ""
+          : "";
   const hasProgramContext =
     Boolean(displayPlanId) &&
     (Boolean(resolvedTitleForContext) ||
@@ -740,7 +756,7 @@ function CalendarDayRosterRow({
                 </Link>
               </Button>
               <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                <Link href={coachSessionHrefForPlan(displayPlanId)}>
+                <Link href={coachSessionHrefForPlan(expandPlanId)}>
                   <ClipboardList className="h-4 w-4 shrink-0" />
                   {t("calendarRosterLogSession")}
                 </Link>
