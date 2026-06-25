@@ -117,6 +117,8 @@ import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
 import { BodyCompositionTrendChart } from "@/components/BodyCompositionTrendChart";
+import { CoachBodyMetricForm } from "@/components/CoachBodyMetricForm";
+import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
 import {
   buildPaymentAmounts,
@@ -2011,6 +2013,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const portalOnly = !effectiveRoster && !!globalStudent;
   const isLoading = rosterLoading || (!rosterStudent && globalLoading);
+  const coachBodyMetricGlobalStudentId = String(
+    (globalStudent as { id?: string } | null)?.id ||
+      (effectiveRoster as { userId?: string } | null)?.userId ||
+      id
+  );
   const student = effectiveRoster
     ? effectiveRoster
     : globalStudent
@@ -2496,7 +2503,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                     </span>
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="p-6 pt-0">
+                <CardContent className="p-6 pt-0 space-y-4">
                   {bodyCompositionCoachData.length > 0 ? (
                     <BodyCompositionTrendChart
                       data={bodyCompositionCoachData}
@@ -2529,10 +2536,22 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       </ResponsiveContainer>
                     </div>
                   ) : (
-                    <div className="h-[300px] flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground border-2 border-dashed rounded-lg px-4">
+                    <div className="min-h-[180px] flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground px-4">
                       <p>{t("noBodyCompositionData")}</p>
                       <p className="text-xs">{t("noWeightRecords")}</p>
                     </div>
+                  )}
+                  {user && (
+                    <CoachBodyMetricForm
+                      trainerId={user.uid}
+                      rosterStudentId={id}
+                      globalStudentId={coachBodyMetricGlobalStudentId}
+                      canWriteSession={!portalOnly}
+                      initialWeightKg={student?.weightKg}
+                      initialBodyFatPercent={(student as { bodyFatPercent?: number } | null)?.bodyFatPercent}
+                      existingWeightHistory={(globalStudent as { weightHistory?: unknown } | null)?.weightHistory}
+                      compact={bodyCompositionCoachData.length > 0 || weightChartData.length > 0}
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -2640,7 +2659,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       <div key={session.id} className="border rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="font-semibold">{session.workoutTitle || "Untitled Workout"}</p>
+                            <p className="font-semibold">
+                              {isCoachBodyMetricSession(session)
+                                ? t("coachBodyMetricSessionTitle")
+                                : session.workoutTitle || "Untitled Workout"}
+                            </p>
                             <p className="text-xs text-muted-foreground">
                               {session.completedAt
                                 ? new Date(session.completedAt).toLocaleDateString(undefined, {

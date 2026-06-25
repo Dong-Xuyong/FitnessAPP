@@ -939,6 +939,14 @@ const translations = {
     bodyCompositionChartTitle: "Weight & body fat",
     bodyCompositionChartDesc: "Points from completed workouts when you log weight or body fat.",
     noBodyCompositionData: "No body metrics in your sessions yet. Log them when you finish a workout.",
+    coachBodyMetricTitle: "Log body metrics",
+    coachBodyMetricDesc: "Record the athlete's current weight and/or body fat. Updates their profile and progress chart.",
+    coachBodyMetricSave: "Save metrics",
+    coachBodyMetricSaved: "Body metrics saved",
+    coachBodyMetricSavedDesc: "Weight and body fat were updated for this athlete.",
+    coachBodyMetricSaveFailed: "Could not save body metrics",
+    coachBodyMetricRequired: "Enter at least weight or body fat (%).",
+    coachBodyMetricSessionTitle: "Body metrics (coach)",
 
     // Student Exercises
     exerciseLibraryShared: "Exercise library shared by your coach.",
@@ -2002,6 +2010,14 @@ const translations = {
     bodyCompositionChartTitle: "Peso e gordura corporal",
     bodyCompositionChartDesc: "Pontos de treinos concluídos quando registas peso ou gordura corporal.",
     noBodyCompositionData: "Ainda sem métricas corporais nas sessões. Regista-as ao terminar um treino.",
+    coachBodyMetricTitle: "Registar métricas corporais",
+    coachBodyMetricDesc: "Registe o peso e/ou a gordura corporal do atleta. Atualiza o perfil e o gráfico de progresso.",
+    coachBodyMetricSave: "Guardar métricas",
+    coachBodyMetricSaved: "Métricas corporais guardadas",
+    coachBodyMetricSavedDesc: "Peso e gordura corporal foram atualizados para este atleta.",
+    coachBodyMetricSaveFailed: "Não foi possível guardar as métricas",
+    coachBodyMetricRequired: "Introduza pelo menos o peso ou a gordura corporal (%).",
+    coachBodyMetricSessionTitle: "Métricas corporais (treinador)",
 
     // Student Exercises
     exerciseLibraryShared: "Biblioteca de exercícios partilhada pelo seu treinador.",
