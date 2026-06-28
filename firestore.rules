@@ -64,11 +64,27 @@ service cloud.firestore {
         get(/databases/$(database)/documents/students/$(request.auth.uid)).data.trainerId == personalTrainerId;
     }
 
-    /** Linked student (roster doc id) may merge only weight / body fat on their roster record. */
+    /** Linked student (roster doc id) may merge only body metric fields on their roster record. */
     function linkedStudentBodyMetricsMerge(personalTrainerId, studentId) {
       return canStudentAccessTrainerStudentPath(personalTrainerId, studentId) &&
         request.auth.uid != studentId &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['weightKg', 'bodyFatPercent']);
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'weightKg',
+          'bodyFatPercent',
+          'leanMassKg',
+          'fatMassKg',
+          'visceralFatScore',
+          'armRightCm',
+          'armLeftCm',
+          'chestCm',
+          'abdominalCm',
+          'glutesCm',
+          'thighRightCm',
+          'thighLeftCm',
+          'calfRightCm',
+          'calfLeftCm',
+          'weightHistory'
+        ]);
     }
 
     function completedAtWriteValid() {

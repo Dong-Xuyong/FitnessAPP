@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from "next/link";
@@ -13,19 +12,29 @@ import {
   CreditCard,
   User,
   Store,
-  Menu,
   Globe,
   ShieldBan,
   AlertCircle,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
 import { useAuth, useUser, useFirestore } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc, getDoc } from "firebase/firestore";
@@ -218,6 +227,106 @@ function StudentSidebarIdentity({
   );
 }
 
+function StudentSidebarPanel({
+  profile,
+  user,
+  visibleNavItems,
+  navLinkActive,
+  locale,
+  setLocale,
+  t,
+  onSignOut,
+}: {
+  profile: { firstName?: string; fullName?: string; photoUrl?: string } | null;
+  user: ReturnType<typeof useUser>["user"];
+  visibleNavItems: typeof navItems;
+  navLinkActive: (item: (typeof navItems)[number]) => boolean;
+  locale: string;
+  setLocale: (locale: "en" | "pt") => void;
+  t: (key: (typeof navItems)[number]["key"] | "logout") => string;
+  onSignOut: () => void;
+}) {
+  const { isMobile, state, setOpenMobile } = useSidebar();
+  const collapsed = !isMobile && state === "collapsed";
+
+  const closeMobile = () => {
+    if (isMobile) setOpenMobile(false);
+  };
+
+  return (
+    <>
+      <SidebarHeader
+        className={cn(
+          "border-b shrink-0",
+          isMobile ? "p-6 pb-4" : collapsed ? "p-2" : "p-6 pb-4"
+        )}
+      >
+        <StudentSidebarIdentity
+          profile={profile}
+          user={user}
+          layout={isMobile ? "horizontal" : "vertical"}
+          collapsed={collapsed}
+          onNavigate={isMobile ? closeMobile : undefined}
+        />
+      </SidebarHeader>
+
+      <SidebarContent className={cn(isMobile ? "px-4 py-4" : collapsed ? "px-2" : "px-4")}>
+        <SidebarMenu className="space-y-1">
+          {visibleNavItems.map((item) => {
+            const isActive = navLinkActive(item);
+            return (
+              <SidebarMenuItem key={item.key}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={isActive}
+                  tooltip={t(item.key)}
+                  size="lg"
+                  className={cn(
+                    "font-medium",
+                    isActive
+                      ? "bg-accent/10 text-accent hover:bg-accent/10 hover:text-accent"
+                      : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
+                  )}
+                >
+                  <Link href={item.href} onClick={closeMobile}>
+                    <item.icon className="h-5 w-5" />
+                    <span>{t(item.key)}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarContent>
+
+      <SidebarFooter
+        className={cn(
+          "border-t shrink-0 space-y-2",
+          isMobile ? "p-4 pb-8 space-y-3" : collapsed ? "p-2" : "p-4"
+        )}
+      >
+        <StudentSidebarUtilityControls locale={locale} setLocale={setLocale} collapsed={collapsed} />
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={t("logout")}
+              size="lg"
+              className="font-medium text-muted-foreground hover:bg-accent/5 hover:text-accent"
+              onClick={() => {
+                closeMobile();
+                onSignOut();
+              }}
+            >
+              <LogOut className="h-5 w-5" />
+              <span>{t("logout")}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+    </>
+  );
+}
+
 export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -229,11 +338,6 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<{ firstName?: string; fullName?: string; photoUrl?: string } | null>(null);
   const [isBlocked, setIsBlocked] = useState(false);
   const [isOpenAccess, setIsOpenAccess] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
-
-  const sidebarWidth = desktopSidebarCollapsed ? "w-[70px]" : "w-64";
-  const mainMargin = desktopSidebarCollapsed ? "md:ml-[70px]" : "md:ml-64";
 
   const fetchStudentProfile = useCallback(async () => {
     if (!db || !user?.uid) return;
@@ -311,160 +415,27 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <TooltipProvider delayDuration={0}>
-      <div className="flex min-h-screen bg-background">
-        <aside
-          className={cn(
-            "border-r bg-card hidden md:flex flex-col fixed inset-y-0 transition-all duration-300 ease-in-out z-40",
-            sidebarWidth
-          )}
-        >
-          <div className={cn("border-b shrink-0", desktopSidebarCollapsed ? "p-2" : "p-6 pb-4")}>
-            <StudentSidebarIdentity
-              profile={profile}
-              user={user}
-              layout="vertical"
-              collapsed={desktopSidebarCollapsed}
-            />
-          </div>
+    <SidebarProvider>
+      <Sidebar collapsible="icon">
+        <StudentSidebarPanel
+          profile={profile}
+          user={user}
+          visibleNavItems={visibleNavItems}
+          navLinkActive={navLinkActive}
+          locale={locale}
+          setLocale={setLocale}
+          t={t}
+          onSignOut={handleSignOut}
+        />
+        <SidebarRail />
+      </Sidebar>
 
-          <nav className={cn("flex-1 space-y-1 overflow-y-auto min-h-0", desktopSidebarCollapsed ? "px-2" : "px-4")}>
-            {visibleNavItems.map((item) => {
-              const isActive = navLinkActive(item);
-              const linkClass = cn(
-                "flex items-center gap-3 rounded-md text-sm font-medium transition-colors",
-                desktopSidebarCollapsed ? "justify-center px-3 py-3" : "px-4 py-3",
-                isActive
-                  ? "bg-accent/10 text-accent"
-                  : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
-              );
+      <SidebarInset>
+        <header className="flex shrink-0 items-center gap-2 border-b p-3 md:hidden">
+          <SidebarTrigger className="shadow-sm" />
+        </header>
 
-              if (desktopSidebarCollapsed) {
-                return (
-                  <Tooltip key={item.key}>
-                    <TooltipTrigger asChild>
-                      <Link href={item.href} className={linkClass}>
-                        <item.icon className="h-5 w-5 shrink-0" />
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">{t(item.key)}</TooltipContent>
-                  </Tooltip>
-                );
-              }
-
-              return (
-                <Link key={item.key} href={item.href} className={linkClass}>
-                  <item.icon className="h-5 w-5 shrink-0" />
-                  <span className="truncate">{t(item.key)}</span>
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className={cn("border-t mt-auto shrink-0 space-y-2", desktopSidebarCollapsed ? "p-2" : "p-4")}>
-            <StudentSidebarUtilityControls
-              locale={locale}
-              setLocale={setLocale}
-              collapsed={desktopSidebarCollapsed}
-            />
-            {desktopSidebarCollapsed ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-full text-muted-foreground"
-                    onClick={handleSignOut}
-                  >
-                    <LogOut className="h-5 w-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">{t("logout")}</TooltipContent>
-              </Tooltip>
-            ) : (
-              <Button
-                variant="ghost"
-                className="w-full justify-start gap-3 text-muted-foreground"
-                onClick={handleSignOut}
-              >
-                <LogOut className="h-5 w-5" />
-                {t("logout")}
-              </Button>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setDesktopSidebarCollapsed((prev) => !prev)}
-            className="absolute -right-3 top-16 z-50 flex h-6 w-6 items-center justify-center rounded-full border bg-card shadow-md hover:bg-accent/10 transition-colors"
-            aria-label={desktopSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {desktopSidebarCollapsed ? (
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            ) : (
-              <ChevronLeft className="h-3 w-3 text-muted-foreground" />
-            )}
-          </button>
-        </aside>
-
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-72 p-0 flex flex-col h-full">
-          <SheetTitle className="sr-only">Student navigation</SheetTitle>
-          <div className="p-6 border-b shrink-0">
-            <StudentSidebarIdentity
-              profile={profile}
-              user={user}
-              layout="horizontal"
-              onNavigate={() => setMobileOpen(false)}
-            />
-          </div>
-          <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-            {visibleNavItems.map((item) => (
-              <Link
-                key={item.key}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors",
-                  navLinkActive(item)
-                    ? "bg-accent/10 text-accent"
-                    : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
-                )}
-              >
-                <item.icon className="h-5 w-5" />
-                {t(item.key)}
-              </Link>
-            ))}
-          </nav>
-          <div className="p-4 pb-8 border-t mt-auto space-y-3">
-            <StudentSidebarUtilityControls locale={locale} setLocale={setLocale} />
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-3 text-muted-foreground"
-              onClick={() => {
-                setMobileOpen(false);
-                handleSignOut();
-              }}
-            >
-              <LogOut className="h-5 w-5" />
-              {t("logout")}
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-
-        <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", mainMargin)}>
-        <Button
-          variant="outline"
-          size="icon"
-          className="md:hidden fixed top-3 left-3 z-50 shadow-sm bg-background/95 backdrop-blur"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open menu"
-        >
-          <Menu className="h-5 w-5" />
-        </Button>
-
-        <main className="flex-1 p-4 md:p-6 overflow-x-hidden overflow-y-auto min-w-0">
+        <div className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 min-w-0">
           {reminder.show && !isBlocked ? (
             <Alert
               variant={reminder.variant === "overdue" ? "destructive" : "default"}
@@ -523,9 +494,8 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
           ) : (
             children
           )}
-        </main>
         </div>
-      </div>
-    </TooltipProvider>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

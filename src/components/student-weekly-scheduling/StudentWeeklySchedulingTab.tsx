@@ -23,6 +23,7 @@ import { Loader2, CalendarClock, AlertTriangle, CheckCircle2, Info, ChevronDown,
 import { useFirestore, useDoc, useCollection, useMemoFirebase } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import {
   normalizeVacationPeriods,
   normalizeOpenAvailabilityBlocks,
@@ -588,22 +589,20 @@ export function StudentWeeklySchedulingTab({
                               sessionsPerWeek > 0 &&
                               effectivePattern.length >= sessionsPerWeek;
                             return (
-                              <button
+                              <Button
                                 key={time}
                                 type="button"
+                                variant={isSelected ? "default" : "outline"}
+                                size="sm"
                                 disabled={disabledDueToLimit}
                                 onClick={() => toggleSlot(key, time)}
-                                className={[
-                                  "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                                  isSelected
-                                    ? "bg-primary text-primary-foreground border-primary"
-                                    : disabledDueToLimit
-                                      ? "bg-muted text-muted-foreground border-muted opacity-40 cursor-not-allowed"
-                                      : "bg-background text-foreground border-border hover:bg-accent hover:text-accent-foreground",
-                                ].join(" ")}
+                                className={cn(
+                                  "rounded-md px-3 py-1.5 text-xs font-medium h-auto",
+                                  disabledDueToLimit && "bg-muted text-muted-foreground border-muted opacity-40"
+                                )}
                               >
                                 {time}
-                              </button>
+                              </Button>
                             );
                           })}
                         </div>
