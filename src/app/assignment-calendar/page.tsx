@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -35,7 +36,7 @@ import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, Timestamp } from "
 import {
   CalendarDays, CalendarPlus, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
   Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp, ListOrdered,
-  ExternalLink, ClipboardList, History, Pencil,
+  ExternalLink, ClipboardList, History, Pencil, RotateCcw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -68,6 +69,7 @@ import {
   type EditWorkoutSessionDialogSession,
 } from "@/components/EditWorkoutSessionDialog";
 import { clearAllTrainerWorkoutPlans } from "@/lib/firestore/clear-trainer-assignments";
+import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import { cn } from "@/lib/utils";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import {
@@ -91,6 +93,7 @@ import {
   type OpenAvailabilityBlock,
   type VacationPeriod,
 } from "@/lib/trainer-availability";
+import { isSessionSlotCancelled } from "@/lib/session-slot-enrollment";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -117,6 +120,7 @@ type SessionSlot = {
   startTime: string;   // "09:00"
   maxStudents: number;
   students: SlotStudent[];
+  cancelledAt?: string;
 };
 
 type WeekAssignment = {
@@ -353,8 +357,19 @@ function CalendarDayRosterRow({
   const slotMeta = slotMetaKey ? rosterPlanMetaByKey[slotMetaKey] : undefined;
   const unlockedMeta = unlockedMetaKey ? rosterPlanMetaByKey[unlockedMetaKey] : undefined;
 
-  const expandPlanId =
-    bucket === "completed" && slotPlanId && slotMeta?.isCompleted ? slotPlanId : displayPlanId;
+  const slotPlanSupersededByUnlocked =
+    !!slotPlanId &&
+    !!slotMeta?.isCompleted &&
+    !!unlockedId &&
+    unlockedId !== slotPlanId;
+  const effectivePlanId =
+    bucket === "completed" && slotPlanId && slotMeta?.isCompleted
+      ? slotPlanId
+      : slotPlanSupersededByUnlocked
+        ? unlockedId
+        : displayPlanId;
+
+  const expandPlanId = effectivePlanId;
   const rosterExpandKey = expandPlanId ? `${fid}__${expandPlanId}` : "";
   const prefetchedSessionTitle =
     rosterExpandKey ? String(sessionRosterSessionTitleByExpandKey[rosterExpandKey] || "").trim() : "";
@@ -394,9 +409,12 @@ function CalendarDayRosterRow({
         } else {
           programLabel = t("calendarRosterSlotPlanNotOnProfile");
         }
-      } else if (slotMeta?.isCompleted && unlockedId && unlockedId !== slotPlanId) {
+      } else if (slotPlanSupersededByUnlocked) {
         programLabel =
-          String(unlockedMeta?.title || "").trim() || unlockedTitle || slotTitle || t("calendarRosterSlotPlanNotOnProfile");
+          String(unlockedMeta?.title || "").trim() ||
+          unlockedTitle ||
+          slotTitle ||
+          t("calendarRosterSlotPlanNotOnProfile");
       } else if (slotTitle) {
         programLabel = slotTitle;
       } else if (sessionLogTitleForSubtitle) {
@@ -446,19 +464,21 @@ function CalendarDayRosterRow({
     (s) => s.id === row.studentId || String((s as Record<string, unknown>).userId || "") === row.studentId
   ) as (Record<string, unknown> & { id: string }) | undefined;
   const studentProfileId = rosterMatch?.id ?? row.studentId;
-  const resolvedTitleForContext = slotPlanId
-    ? hasSlotMeta
-      ? String(slotMeta?.title || "").trim()
-      : ""
-    : unlockedId
-      ? hasUnlockedMeta
-        ? String(unlockedMeta?.title || "").trim()
+  const resolvedTitleForContext = slotPlanSupersededByUnlocked
+    ? String(unlockedMeta?.title || "").trim() || unlockedTitle
+    : slotPlanId
+      ? hasSlotMeta
+        ? String(slotMeta?.title || "").trim()
         : ""
-      : inferredIdRaw
-        ? hasInferredMeta
-          ? String(inferredMeta?.title || "").trim()
+      : unlockedId
+        ? hasUnlockedMeta
+          ? String(unlockedMeta?.title || "").trim()
           : ""
-        : "";
+        : inferredIdRaw
+          ? hasInferredMeta
+            ? String(inferredMeta?.title || "").trim()
+            : ""
+          : "";
   const hasProgramContext =
     Boolean(displayPlanId) &&
     (Boolean(resolvedTitleForContext) ||
@@ -736,7 +756,7 @@ function CalendarDayRosterRow({
                 </Link>
               </Button>
               <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                <Link href={coachSessionHrefForPlan(displayPlanId)}>
+                <Link href={coachSessionHrefForPlan(expandPlanId)}>
                   <ClipboardList className="h-4 w-4 shrink-0" />
                   {t("calendarRosterLogSession")}
                 </Link>
@@ -910,15 +930,36 @@ function isActiveWorkoutPlanDoc(p: Record<string, unknown>): boolean {
 
 type PrimaryUnlockedPlan = { id: string; title: string };
 
+function buildCompletedWorkoutPlanIds(
+  plans: Array<Record<string, unknown> & { id?: string }>,
+  sessions: Array<Record<string, unknown> & { workoutPlanId?: string; completedAt?: unknown }> = []
+): Set<string> {
+  const completed = new Set<string>();
+  for (const p of plans) {
+    const pid = String(p.id || "").trim();
+    if (!pid) continue;
+    if (p.completedAt || p.status === "completed") completed.add(pid);
+  }
+  for (const sess of sessions) {
+    const wid = String(sess.workoutPlanId || "").trim();
+    if (wid && sess.completedAt) completed.add(wid);
+  }
+  return completed;
+}
+
 /**
- * Primary unlocked active plan: first unlocked step in the earliest sequence group
- * (lexicographic group id), else the most recently assigned non-sequence active plan.
+ * Primary unlocked active plan: first effectively unlocked step in the earliest sequence group
+ * (matches profile/student UI via `isSequenceStepEffectiveUnlocked`), else the most recently
+ * assigned non-sequence active plan.
  */
 function pickPrimaryUnlockedPlan(
-  plans: Array<Record<string, unknown> & { id?: string }>
+  plans: Array<Record<string, unknown> & { id?: string }>,
+  completedPlanIds: ReadonlySet<string> = new Set()
 ): PrimaryUnlockedPlan | null {
   const active = plans.filter(isActiveWorkoutPlanDoc);
-  const unlocked = active.filter((p) => p.studentUnlocked !== false);
+  const unlocked = active.filter((p) =>
+    isSequenceStepEffectiveUnlocked(p as Parameters<typeof isSequenceStepEffectiveUnlocked>[0], completedPlanIds)
+  );
   if (!unlocked.length) return null;
   const asRow = (p: Record<string, unknown> & { id?: string }): PrimaryUnlockedPlan | null => {
     const id = String(p?.id || "").trim();
@@ -1059,6 +1100,8 @@ export default function AssignmentCalendarPage() {
   const [isAddingStudent, setIsAddingStudent] = useState(false);
   const [slotMaxOverride, setSlotMaxOverride] = useState<number>(4);
   const [isSavingSlotMax, setIsSavingSlotMax] = useState(false);
+  const [isCancelingSlot, setIsCancelingSlot] = useState(false);
+  const [isReactivatingSlot, setIsReactivatingSlot] = useState(false);
 
   // Roster
   const studentsQuery = useMemoFirebase(() => {
@@ -1483,12 +1526,37 @@ export default function AssignmentCalendarPage() {
       await Promise.all(
         fids.map(async (fid) => {
           try {
-            const snap = await getDocs(
-              collection(db, "personalTrainers", user.uid, "students", fid, "workoutPlans")
+            const storageId =
+              resolveWorkoutPlansStorageStudentId(
+                fid,
+                rosterStudentsSorted as Array<{ id: string; userId?: string; email?: string }>,
+                (portalStudents || []) as Array<{ id: string; email?: string }>
+              ) || fid;
+            const plansPath = collection(
+              db,
+              "personalTrainers",
+              user.uid,
+              "students",
+              storageId,
+              "workoutPlans"
             );
+            const sessionsPath = collection(
+              db,
+              "personalTrainers",
+              user.uid,
+              "students",
+              storageId,
+              "workoutSessions"
+            );
+            const [plansSnap, sessionsSnap] = await Promise.all([
+              getDocs(plansPath),
+              getDocs(sessionsPath),
+            ]);
             if (cancelled) return;
-            const planRows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id?: string }));
-            const picked = pickPrimaryUnlockedPlan(planRows);
+            const planRows = plansSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id?: string }));
+            const sessionRows = sessionsSnap.docs.map((d) => d.data() as Record<string, unknown> & { workoutPlanId?: string; completedAt?: unknown });
+            const completedIds = buildCompletedWorkoutPlanIds(planRows, sessionRows);
+            const picked = pickPrimaryUnlockedPlan(planRows, completedIds);
             if (picked) next[fid] = picked;
           } catch {
             /* skip */
@@ -1505,7 +1573,7 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, planMetaRefreshTick]);
+  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, portalStudents, planMetaRefreshTick]);
 
   useEffect(() => {
     if (!db || !user || !expandedRosterPlanKey) return;
@@ -2226,7 +2294,11 @@ export default function AssignmentCalendarPage() {
 
   const openManageSlot = (time: string) => {
     const existing = slotsByTime.get(time) ?? null;
-    if (isBookingBlockedAtTime(time) && !(existing?.students?.length)) {
+    if (
+      isBookingBlockedAtTime(time) &&
+      !(existing?.students?.length) &&
+      !isSessionSlotCancelled(existing)
+    ) {
       toast({ title: "Dia de férias — não é possível criar novos blocos", variant: "destructive" });
       return;
     }
@@ -2272,6 +2344,10 @@ export default function AssignmentCalendarPage() {
 
   const handleAddStudent = async () => {
     if (!managingSlot || !addStudentId || !db || !user) return;
+    if (isSessionSlotCancelled(managingSlot.slot)) {
+      toast({ title: t("coachSlotCancelledLabel"), description: t("coachReactivateSlotSessionDescription"), variant: "destructive" });
+      return;
+    }
     if (
       isNewBookingBlocked({
         dateStr: managingSlot.date,
@@ -2358,6 +2434,116 @@ export default function AssignmentCalendarPage() {
     }
   };
 
+  const handleCancelSlotSession = async () => {
+    if (!managingSlot || !db || !user) return;
+    const { date, startTime, slot } = managingSlot;
+    const docId = slotDocId(date, startTime);
+    const maxS = Math.min(20, Math.max(1, slotMaxOverride || slot?.maxStudents || defaultMaxStudents));
+    setIsCancelingSlot(true);
+    try {
+      const nextSlots = [...sessionSlots];
+
+      const markCancelled = async (time: string) => {
+        const id = slotDocId(date, time);
+        const existing = nextSlots.find((s) => s.id === id && s.date === date);
+        const cancelledSlot: SessionSlot = {
+          id,
+          date,
+          startTime: time,
+          maxStudents: existing?.maxStudents ?? maxS,
+          students: [],
+          cancelledAt: new Date().toISOString(),
+        };
+        await setDoc(doc(db, "personalTrainers", user.uid, "sessionSlots", id), cancelledSlot);
+        const idx = nextSlots.findIndex((s) => s.id === id);
+        if (idx >= 0) nextSlots[idx] = cancelledSlot;
+        else nextSlots.push(cancelledSlot);
+      };
+
+      if (slot && slot.students.length > 0) {
+        const processed = new Set<string>();
+        for (const st of slot.students) {
+          const sessionStart = st.sessionStart ?? startTime;
+          const procKey = `${st.studentId}@${sessionStart}`;
+          if (processed.has(procKey)) continue;
+          processed.add(procKey);
+
+          const enrolledDur = st.sessionDurationMin ?? slotDurationMin;
+          const freeCount = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
+          const blocksToFree = consecutiveSlotBlocksFrom(
+            timeSlots,
+            sessionStart,
+            freeCount,
+            slotDurationMin
+          );
+
+          for (const t of blocksToFree) {
+            const id = slotDocId(date, t);
+            const slotIdx = nextSlots.findIndex((s) => s.id === id && s.date === date);
+            if (slotIdx < 0) continue;
+            const s = nextSlots[slotIdx];
+            const newStudents = s.students.filter((row) => {
+              if (row.studentId !== st.studentId) return true;
+              const rowStart = row.sessionStart ?? s.startTime;
+              return rowStart !== sessionStart;
+            });
+            if (newStudents.length === 0) {
+              if (t === startTime) {
+                await markCancelled(t);
+              } else {
+                await deleteDoc(doc(db, "personalTrainers", user.uid, "sessionSlots", id));
+                nextSlots.splice(slotIdx, 1);
+              }
+            } else {
+              const { cancelledAt: _removed, ...rest } = s;
+              const newSlot: SessionSlot = { ...rest, students: newStudents };
+              await setDoc(doc(db, "personalTrainers", user.uid, "sessionSlots", id), newSlot);
+              nextSlots[slotIdx] = newSlot;
+            }
+          }
+        }
+      } else {
+        await markCancelled(startTime);
+      }
+
+      setSessionSlots(nextSlots);
+      setManagingSlot(null);
+      toast({ title: t("coachCancelSlotSessionSuccess") });
+    } catch {
+      toast({ title: t("error") || "Error", variant: "destructive" });
+    } finally {
+      setIsCancelingSlot(false);
+    }
+  };
+
+  const handleReactivateSlotSession = async () => {
+    if (!managingSlot || !db || !user) return;
+    const { date, startTime, slot } = managingSlot;
+    const docId = slotDocId(date, startTime);
+    const maxS = Math.min(20, Math.max(1, slotMaxOverride || slot?.maxStudents || defaultMaxStudents));
+    setIsReactivatingSlot(true);
+    try {
+      const activeSlot: SessionSlot = {
+        id: docId,
+        date,
+        startTime,
+        maxStudents: maxS,
+        students: [],
+      };
+      await setDoc(doc(db, "personalTrainers", user.uid, "sessionSlots", docId), activeSlot);
+      setSessionSlots((prev) => {
+        const idx = prev.findIndex((s) => s.id === docId);
+        return idx >= 0 ? prev.map((s) => (s.id === docId ? activeSlot : s)) : [...prev, activeSlot];
+      });
+      setManagingSlot({ date, startTime, slot: activeSlot });
+      toast({ title: t("coachReactivateSlotSessionSuccess") });
+    } catch {
+      toast({ title: t("error") || "Error", variant: "destructive" });
+    } finally {
+      setIsReactivatingSlot(false);
+    }
+  };
+
   const handleSaveSlotMax = async () => {
     if (!managingSlot || !db || !user) return;
     const { date, startTime, slot } = managingSlot;
@@ -2397,6 +2583,14 @@ export default function AssignmentCalendarPage() {
     const slot = slotsByTime.get(time);
     const entry = slot?.students.find((s) => s.studentId === filterStudentId);
     const isEnrolled = !!entry;
+    if (!isEnrolled && isSessionSlotCancelled(slot)) {
+      toast({
+        title: t("coachSlotCancelledLabel"),
+        description: t("coachReactivateSlotSessionDescription"),
+        variant: "destructive",
+      });
+      return;
+    }
     if (!isEnrolled && isBookingBlockedAtTime(time)) {
       toast({ title: "Dia de férias — não é possível inscrever", variant: "destructive" });
       return;
@@ -3052,11 +3246,14 @@ export default function AssignmentCalendarPage() {
           <DialogContent className="max-w-md">
             {managingSlot && (() => {
               const slotStudents = managingSlot.slot?.students ?? [];
+              const isCancelled = isSessionSlotCancelled(managingSlot.slot);
               const maxS = slotMaxOverride || defaultMaxStudents;
               const persistedMax = managingSlot.slot?.maxStudents ?? defaultMaxStudents;
               const canSaveSlotMax =
+                !isCancelled &&
                 Math.min(20, Math.max(1, slotMaxOverride || defaultMaxStudents)) !== persistedMax;
               const canAdd =
+                !isCancelled &&
                 slotStudents.length < maxS &&
                 !isNewBookingBlocked({
                   dateStr: managingSlot.date,
@@ -3070,6 +3267,11 @@ export default function AssignmentCalendarPage() {
                     <DialogTitle className="flex items-center gap-2">
                       <Clock className="h-4 w-4 text-primary" />
                       {managingSlot.startTime} – {addMin(managingSlot.startTime, slotDurationMin)}
+                      {isCancelled && (
+                        <Badge variant="outline" className="text-destructive border-destructive/40">
+                          {t("coachSlotCancelledLabel")}
+                        </Badge>
+                      )}
                     </DialogTitle>
                     <DialogDescription>
                       {new Date(managingSlot.date + "T12:00:00").toLocaleDateString(undefined, {
@@ -3080,6 +3282,12 @@ export default function AssignmentCalendarPage() {
 
                   <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
 
+                    {isCancelled && (
+                      <p className="text-sm text-muted-foreground rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2">
+                        {t("coachReactivateSlotSessionDescription")}
+                      </p>
+                    )}
+
                     {/* Capacity */}
                     <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 border">
                       <Users className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -3089,10 +3297,11 @@ export default function AssignmentCalendarPage() {
                         value={slotMaxOverride}
                         onChange={(e) => setSlotMaxOverride(Number(e.target.value) || defaultMaxStudents)}
                         className="w-16 h-7 text-sm text-center"
+                        disabled={isCancelled}
                       />
                       <Button size="sm" variant="outline" className="h-7 text-xs"
                         onClick={handleSaveSlotMax}
-                        disabled={!canSaveSlotMax || isSavingSlotMax}>
+                        disabled={!canSaveSlotMax || isSavingSlotMax || isCancelled}>
                         {isSavingSlotMax && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
                         Guardar
                       </Button>
@@ -3288,8 +3497,97 @@ export default function AssignmentCalendarPage() {
                     )}
                   </div>
 
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setManagingSlot(null)}>Fechar</Button>
+                  <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                    {isCancelled ? (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="default"
+                            className="w-full sm:w-auto gap-2"
+                            disabled={isReactivatingSlot}
+                          >
+                            {isReactivatingSlot ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RotateCcw className="h-4 w-4" />
+                            )}
+                            {t("coachReactivateSlotSession")}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t("coachReactivateSlotSessionTitle")}</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {t("coachReactivateSlotSessionDescription")}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel disabled={isReactivatingSlot}>{t("cancel")}</AlertDialogCancel>
+                            <AlertDialogAction
+                              disabled={isReactivatingSlot}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                void handleReactivateSlotSession();
+                              }}
+                            >
+                              {isReactivatingSlot && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                              {t("coachReactivateSlotSession")}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    ) : (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            className="w-full sm:w-auto gap-2"
+                            disabled={isCancelingSlot}
+                          >
+                            {isCancelingSlot ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                            {t("coachCancelSlotSession")}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t("coachCancelSlotSessionTitle")}</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {slotStudents.length > 0
+                                ? t("coachCancelSlotSessionDescription")
+                                : t("coachCancelSlotSessionEmptyDescription")}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel disabled={isCancelingSlot}>{t("cancel")}</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              disabled={isCancelingSlot}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                void handleCancelSlotSession();
+                              }}
+                            >
+                              {isCancelingSlot && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                              {t("coachCancelSlotSession")}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                    <Button
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                      onClick={() => setManagingSlot(null)}
+                      disabled={isCancelingSlot || isReactivatingSlot}
+                    >
+                      Fechar
+                    </Button>
                   </DialogFooter>
                 </>
               );
@@ -3691,9 +3989,11 @@ export default function AssignmentCalendarPage() {
                     const hasEnoughBlocks = !isEnrolled && blocksForSession.length === slotsNeededForTime;
                     const allFree = hasEnoughBlocks && blocksForSession.every((t2) => {
                       const s2 = slotsByTime.get(t2);
+                      if (isSessionSlotCancelled(s2)) return false;
                       return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
                     });
-                    const isFull = !isEnrolled && (!hasEnoughBlocks || !allFree);
+                    const isCancelled = isSessionSlotCancelled(slot);
+                    const isFull = !isEnrolled && (!hasEnoughBlocks || !allFree || isCancelled);
                     const docKey = slotDocId(selectedDateStr, time);
                     const busy = isTogglingSlot === docKey ||
                       (isContinuation && isTogglingSlot === slotDocId(selectedDateStr, myEntry?.sessionStart ?? time));
@@ -3702,6 +4002,7 @@ export default function AssignmentCalendarPage() {
                       <div key={time} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${
                         isSessionStart  ? "border-primary/50 bg-primary/5"
                         : isContinuation ? "border-primary/20 bg-primary/5 ml-4"
+                        : isCancelled    ? "border-destructive/30 bg-destructive/5 opacity-80"
                         : isFull         ? "border-border bg-muted/10 opacity-60"
                         : "border-border bg-transparent hover:bg-muted/20"
                       }`}>
@@ -3769,6 +4070,8 @@ export default function AssignmentCalendarPage() {
                                 </Badge>
                               )}
                             </div>
+                          ) : isCancelled ? (
+                            <span className="text-xs font-medium text-destructive">{t("coachSlotCancelledLabel")}</span>
                           ) : !hasEnoughBlocks ? (
                             <span className="text-xs text-muted-foreground">Bloco incompleto</span>
                           ) : isFull ? (
@@ -3806,7 +4109,8 @@ export default function AssignmentCalendarPage() {
                     const slot = slotsByTime.get(time);
                     const maxS = slot?.maxStudents ?? defaultMaxStudents;
                     const count = slot?.students.length ?? 0;
-                    const isFull = count >= maxS;
+                    const isCancelled = isSessionSlotCancelled(slot);
+                    const isFull = !isCancelled && count >= maxS;
                     const hasStudents = count > 0;
 
                     return (
@@ -3814,7 +4118,9 @@ export default function AssignmentCalendarPage() {
                         key={time}
                         onClick={() => openManageSlot(time)}
                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-all hover:shadow-sm ${
-                          isFull
+                          isCancelled
+                            ? "border-destructive/35 bg-destructive/5 hover:bg-destructive/10"
+                            : isFull
                             ? "border-primary/40 bg-primary/5 hover:bg-primary/10"
                             : hasStudents
                             ? "border-accent/30 bg-accent/5 hover:bg-accent/10"
@@ -3828,9 +4134,11 @@ export default function AssignmentCalendarPage() {
                           </span>
                         </div>
                         <div className={`w-0.5 h-8 rounded-full shrink-0 ${
-                          isFull ? "bg-primary" : hasStudents ? "bg-accent" : "bg-border"}`} />
+                          isCancelled ? "bg-destructive/50"
+                          : isFull ? "bg-primary" : hasStudents ? "bg-accent" : "bg-border"}`} />
                         <div className={`flex items-center gap-1 text-xs font-semibold shrink-0 tabular-nums ${
-                          isFull ? "text-primary" : hasStudents ? "text-accent" : "text-muted-foreground"}`}>
+                          isCancelled ? "text-destructive"
+                          : isFull ? "text-primary" : hasStudents ? "text-accent" : "text-muted-foreground"}`}>
                           <Users className="h-3.5 w-3.5" /> {count}/{maxS}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -3856,13 +4164,19 @@ export default function AssignmentCalendarPage() {
                                 );
                               })}
                             </div>
+                          ) : isCancelled ? (
+                            <span className="text-xs font-medium text-destructive">{t("coachSlotCancelledLabel")}</span>
                           ) : (
                             <span className="text-xs text-muted-foreground/60">Vazio</span>
                           )}
                         </div>
-                        <span className={`text-lg shrink-0 ${isFull ? "text-muted-foreground/40" : "text-primary/60 font-light"}`}>
-                          {isFull ? "●" : "+"}
-                        </span>
+                        {isCancelled ? (
+                          <RotateCcw className="h-4 w-4 shrink-0 text-destructive/70" aria-hidden />
+                        ) : (
+                          <span className={`text-lg shrink-0 ${isFull ? "text-muted-foreground/40" : "text-primary/60 font-light"}`}>
+                            {isFull ? "●" : "+"}
+                          </span>
+                        )}
                       </button>
                     );
                   })}

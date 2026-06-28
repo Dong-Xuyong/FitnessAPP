@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
@@ -94,12 +95,14 @@ export function SequenceTemplatePicker({
           const isSelected = selectedId === option.id;
           return (
             <li key={option.id}>
-              <button
+              <Button
                 type="button"
+                variant={isSelected ? "default" : "outline"}
                 onClick={() => onSelect(option.id)}
                 className={cn(
-                  "w-full rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm text-left transition-colors",
-                  isSelected ? "border-primary ring-2 ring-primary/20" : "hover:bg-muted/50"
+                  "w-full h-auto flex-col items-start rounded-lg p-3 space-y-1.5 text-sm text-left transition-colors",
+                  !isSelected && "bg-muted/30 hover:bg-muted/50",
+                  isSelected && "ring-2 ring-primary/20"
                 )}
               >
                 <p className="font-medium text-foreground truncate">{option.name}</p>
@@ -107,7 +110,7 @@ export function SequenceTemplatePicker({
                 <p className="text-xs text-muted-foreground">
                   {option.sequenceRepeatCycles}× {t("sequenceTemplateCycles")}
                 </p>
-              </button>
+              </Button>
             </li>
           );
         })}

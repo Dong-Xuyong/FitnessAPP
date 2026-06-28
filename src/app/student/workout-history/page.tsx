@@ -296,10 +296,11 @@ export default function StudentWorkoutHistoryPage() {
                 return (
                   <div key={session.id} className="rounded-lg border overflow-hidden bg-card">
                     {!isEditing ? (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
                         className={cn(
-                          "flex w-full items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                          "flex w-full h-auto items-start gap-3 px-3 py-2.5 text-left justify-start font-normal hover:bg-muted/30"
                         )}
                         aria-expanded={isExpanded}
                         onClick={toggleExpanded}
@@ -321,7 +322,7 @@ export default function StudentWorkoutHistoryPage() {
                         <span className="shrink-0 self-center text-muted-foreground" aria-hidden>
                           {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                         </span>
-                      </button>
+                      </Button>
                     ) : (
                       <div className="flex items-start gap-3 px-3 py-2.5">
                         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
@@ -377,12 +378,14 @@ export default function StudentWorkoutHistoryPage() {
                                   const rating = idx + 1;
                                   const selected = editDifficultyRating === rating;
                                   return (
-                                    <button
+                                    <Button
                                       key={rating}
                                       type="button"
+                                      variant={selected ? "default" : "outline"}
+                                      size="icon"
                                       aria-pressed={selected}
                                       className={cn(
-                                        "h-10 w-10 rounded-xl border-2 text-lg flex items-center justify-center transition-colors",
+                                        "h-10 w-10 rounded-xl border-2 text-lg",
                                         selected
                                           ? "border-primary bg-primary/10 ring-2 ring-primary/30"
                                           : "border-border hover:bg-muted/60"
@@ -392,7 +395,7 @@ export default function StudentWorkoutHistoryPage() {
                                       }
                                     >
                                       {DIFFICULTY_FACES[idx]}
-                                    </button>
+                                    </Button>
                                   );
                                 })}
                               </div>
@@ -412,12 +415,14 @@ export default function StudentWorkoutHistoryPage() {
                                   const rating = idx + 1;
                                   const selected = editMoodRating === rating;
                                   return (
-                                    <button
+                                    <Button
                                       key={rating}
                                       type="button"
+                                      variant={selected ? "default" : "outline"}
+                                      size="icon"
                                       aria-pressed={selected}
                                       className={cn(
-                                        "h-10 w-10 rounded-xl border-2 text-lg flex items-center justify-center transition-colors",
+                                        "h-10 w-10 rounded-xl border-2 text-lg",
                                         selected
                                           ? "border-primary bg-primary/10 ring-2 ring-primary/30"
                                           : "border-border hover:bg-muted/60"
@@ -425,7 +430,7 @@ export default function StudentWorkoutHistoryPage() {
                                       onClick={() => setEditMoodRating((prev) => (prev === rating ? null : rating))}
                                     >
                                       {MOOD_FACES[idx]}
-                                    </button>
+                                    </Button>
                                   );
                                 })}
                               </div>

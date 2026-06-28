@@ -31,6 +31,7 @@ import {
   normalizeTrainingAccessMode,
   type TrainingAccessMode,
 } from "@/lib/student-training-access";
+import { isSessionSlotCancelled } from "@/lib/session-slot-enrollment";
 import {
   buildLatestPerfByExerciseName,
   buildLatestPerfByPlanId,
@@ -70,7 +71,14 @@ type SlotStudent = {
   sessionAttendance?: SessionAttendanceStatus;
   sessionAttendanceAt?: string;
 };
-type SessionSlot = { id: string; date: string; startTime: string; maxStudents: number; students: SlotStudent[] };
+type SessionSlot = {
+  id: string;
+  date: string;
+  startTime: string;
+  maxStudents: number;
+  students: SlotStudent[];
+  cancelledAt?: string;
+};
 
 interface WorkoutPlan {
   id: string;
@@ -490,17 +498,26 @@ export default function StudentWorkoutsPage() {
     (s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId)
   );
 
-  const timeSlots = useMemo(
-    () =>
-      resolveDaySlotTimes({
-        dateStr: selectedDateStr,
-        weeklySched: selectedDaySched,
-        openBlocks: openAvailabilityBlocks,
-        slotDurationMin,
-        vacationPeriods,
-      }),
-    [selectedDateStr, selectedDaySched, openAvailabilityBlocks, slotDurationMin, vacationPeriods]
-  );
+  const timeSlots = useMemo(() => {
+    const resolved = resolveDaySlotTimes({
+      dateStr: selectedDateStr,
+      weeklySched: selectedDaySched,
+      openBlocks: openAvailabilityBlocks,
+      slotDurationMin,
+      vacationPeriods,
+    });
+    const bookedTimes = sessionSlots
+      .filter((s) => s.date === selectedDateStr)
+      .map((s) => s.startTime);
+    return [...new Set([...resolved, ...bookedTimes])].sort();
+  }, [
+    selectedDateStr,
+    selectedDaySched,
+    openAvailabilityBlocks,
+    slotDurationMin,
+    vacationPeriods,
+    sessionSlots,
+  ]);
 
   const showStudentDaySchedule =
     studentDayBookable({
@@ -688,6 +705,15 @@ export default function StudentWorkoutsPage() {
     const existingAtTime = slotsByTime.get(time);
     const myEntry = existingAtTime?.students.find(s => s.studentId === myId);
     const isEnrolled = !!myEntry;
+
+    if (!isEnrolled && isSessionSlotCancelled(existingAtTime)) {
+      toast({
+        title: t("coachSlotCancelledLabel"),
+        description: t("coachReactivateSlotSessionDescription"),
+        variant: "destructive",
+      });
+      return;
+    }
 
     if (!isEnrolled && isBookingBlockedAtTime(time)) {
       toast({ title: "O treinador está de férias neste dia", variant: "destructive" });
@@ -1051,11 +1077,13 @@ export default function StudentWorkoutsPage() {
                     const hasEnoughBlocks = !isEnrolled
                       && blocksForSession.length === slotsNeededForTime
                       && areConsecutiveBlocks(blocksForSession, slotDurationMin);
+                    const isSlotCancelled = isSessionSlotCancelled(slot);
                     const allBlocksFree = hasEnoughBlocks && blocksForSession.every(t2 => {
                       const s2 = slotsByTime.get(t2);
+                      if (isSessionSlotCancelled(s2)) return false;
                       return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
                     });
-                    const isFull = !isEnrolled && (!hasEnoughBlocks || !allBlocksFree);
+                    const isFull = !isEnrolled && (!hasEnoughBlocks || !allBlocksFree || isSlotCancelled);
                     const slotStartsAt = getSlotStartDate(selectedDateStr, time);
                     const isBookingCutoffPassed =
                       !isEnrolled && slotStartsAt.getTime() - Date.now() <= SESSION_SIGNUP_CUTOFF_MS;
@@ -1080,6 +1108,8 @@ export default function StudentWorkoutsPage() {
                             ? "border-accent/50 bg-accent/10 shadow-sm"
                             : isContinuation
                             ? "border-accent/20 bg-accent/5 ml-5 border-dashed"
+                            : isSlotCancelled
+                            ? "border-destructive/30 bg-destructive/5 opacity-70"
                             : isFull || isBookingCutoffPassed
                             ? "border-border bg-muted/20 opacity-60"
                             : "border-border bg-card hover:bg-muted/30 hover:border-primary/30 cursor-pointer"
@@ -1089,6 +1119,7 @@ export default function StudentWorkoutsPage() {
                         <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-full ${
                           isSessionStart ? "bg-accent"
                           : isContinuation ? "bg-accent/40"
+                          : isSlotCancelled ? "bg-destructive/50"
                           : isFull || isBookingCutoffPassed ? "bg-muted-foreground/20"
                           : "bg-primary/40"
                         }`} />
@@ -1141,6 +1172,8 @@ export default function StudentWorkoutsPage() {
                                     <p className="text-xs text-destructive/70">{t("sessionCancelClosedDesc")}</p>
                                   )}
                                 </div>
+                              ) : isSlotCancelled ? (
+                                <span className="text-xs font-medium text-destructive">{t("coachSlotCancelledLabel")}</span>
                               ) : isBookingCutoffPassed ? (
                                 <div className="flex items-center gap-1.5">
                                   <Lock className="h-3 w-3 text-muted-foreground/60 shrink-0" />
@@ -1201,7 +1234,13 @@ export default function StudentWorkoutsPage() {
                           </Button>
                         ) : (
                           <Badge variant="secondary" className="shrink-0 text-xs gap-1">
-                            {isBookingCutoffPassed ? <><Lock className="h-3 w-3" /> Fechado</> : "Cheio"}
+                            {isSlotCancelled ? (
+                              t("coachSlotCancelledLabel")
+                            ) : isBookingCutoffPassed ? (
+                              <><Lock className="h-3 w-3" /> Fechado</>
+                            ) : (
+                              "Cheio"
+                            )}
                           </Badge>
                         )}
                       </div>

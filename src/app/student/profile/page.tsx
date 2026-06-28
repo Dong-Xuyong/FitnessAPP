@@ -322,9 +322,10 @@ export default function StudentProfilePage() {
                   tabIndex={-1}
                   onChange={handleCropFileChosen}
                 />
-                <button
+                <Button
                   type="button"
-                  className="relative group rounded-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  variant="ghost"
+                  className="relative group h-auto w-auto rounded-full p-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isUploadingPhoto}
                   aria-label={t("uploadProfilePhoto")}
                   onClick={() => setPhotoDialogOpen(true)}
@@ -348,7 +349,7 @@ export default function StudentProfilePage() {
                       <Camera className="h-6 w-6 text-white" />
                     )}
                   </div>
-                </button>
+                </Button>
               </div>
 
               <div className="space-y-2">
@@ -445,8 +446,14 @@ export default function StudentProfilePage() {
                 </div>
               </div>
 
+              <p className="text-sm text-muted-foreground pt-2">
+                {t("bodyMetricsProfileHint")}{" "}
+                <Link href="/student/progress" className="text-primary underline-offset-4 hover:underline">
+                  {t("myProgress")}
+                </Link>
+              </p>
+
               <div className="space-y-2">
-                <Label htmlFor="goalType">{t("primaryFitnessGoal")}</Label>
                 <Select value={formData.goalType} onValueChange={(v) => setFormData({...formData, goalType: v})}>
                   <SelectTrigger id="goalType">
                     <SelectValue />

@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Award, Calendar, Target, Flame, Scale } from "lucide-react";
-import { BodyCompositionTrendChart } from "@/components/BodyCompositionTrendChart";
-import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
+import { Award, Calendar, Target, Flame } from "lucide-react";
+import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { countCompletedWorkoutSessionsInMonth } from "@/lib/student-monthly-workout-completion";
 import { useUser, useFirestore } from "@/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
@@ -32,9 +33,12 @@ export function StudentProgressPanel() {
   const [personalBests, setPersonalBests] = useState<
     Array<{ exerciseName: string; oneRm: number; weight: number; reps: number; date: string }>
   >([]);
-  const [bodyCompositionChartData, setBodyCompositionChartData] = useState<
-    ReturnType<typeof bodyCompositionPointsFromSessions>
-  >([]);
+  const [metricsContext, setMetricsContext] = useState<{
+    trainerId: string;
+    rosterStudentId: string;
+    profile: Record<string, unknown>;
+    weightHistory: unknown;
+  } | null>(null);
 
   useEffect(() => {
     if (!db || !user?.uid) return;
@@ -59,9 +63,13 @@ export function StudentProgressPanel() {
 
         if (cancelled) return;
 
-        setBodyCompositionChartData(
-          bodyCompositionPointsFromSessions(sessionsSnap.docs.map((d) => d.data()))
-        );
+        const studentData = studentSnap.data() as Record<string, unknown>;
+        setMetricsContext({
+          trainerId: String(trainerId),
+          rosterStudentId: resolvedStudentId,
+          profile: studentData,
+          weightHistory: studentData.weightHistory,
+        });
 
         const sessionRows = sessionsSnap.docs.map((d) => ({
           data: d.data() as Record<string, unknown>,
@@ -254,22 +262,17 @@ export function StudentProgressPanel() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Scale className="h-5 w-5 text-primary shrink-0" />
-            {t("bodyCompositionChartTitle")}
-          </CardTitle>
-          <CardDescription>{t("bodyCompositionChartDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent className="p-6 pt-0">
-          <BodyCompositionTrendChart
-            data={bodyCompositionChartData}
-            emptyLabel={t("noBodyCompositionData")}
-            chartClassName="h-[300px] w-full min-h-[260px]"
-          />
-        </CardContent>
-      </Card>
+      {metricsContext && user?.uid && (
+        <BodyMetricsPanel
+          trainerId={metricsContext.trainerId}
+          rosterStudentId={metricsContext.rosterStudentId}
+          globalStudentId={user.uid}
+          canWriteSession
+          source="student"
+          initialProfile={metricsContext.profile}
+          existingWeightHistory={metricsContext.weightHistory}
+        />
+      )}
 
       <div className="grid lg:grid-cols-1 gap-6">
         <Card>
@@ -283,19 +286,21 @@ export function StudentProgressPanel() {
                   const active = selectedStrengthExercises.includes(exercise);
                   const disabled = !active && selectedStrengthExercises.length >= 3;
                   return (
-                    <button
+                    <Button
                       key={exercise}
                       type="button"
-                      className={`px-3 py-1.5 rounded-full border text-sm transition-colors ${
-                        active
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-background text-foreground"
-                      } ${disabled ? "opacity-50 cursor-not-allowed" : "hover:border-primary/60"}`}
+                      variant={active ? "default" : "outline"}
+                      size="sm"
+                      className={cn(
+                        "rounded-full px-3 py-1.5 text-sm h-auto",
+                        !active && !disabled && "hover:border-primary/60",
+                        disabled && "opacity-50"
+                      )}
                       onClick={() => toggleStrengthExercise(exercise)}
                       disabled={disabled}
                     >
                       {exercise}
-                    </button>
+                    </Button>
                   );
                 })}
               </div>

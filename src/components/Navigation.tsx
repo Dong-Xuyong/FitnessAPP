@@ -4,30 +4,46 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
-import { 
-  LayoutDashboard, 
-  Users, 
-  Dumbbell, 
-  LineChart, 
+import {
+  LayoutDashboard,
+  Users,
+  Dumbbell,
+  LineChart,
   CalendarDays,
-  LogOut, 
+  LogOut,
   Search,
   User,
   Store,
-  ChevronLeft,
-  ChevronRight,
-  Menu,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
 import { initiateSignOut } from "@/firebase/non-blocking-login";
 import { doc } from "firebase/firestore";
 import { useState, useEffect } from "react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Globe } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const navItemKeys = [
@@ -46,6 +62,19 @@ type TrainerNavProfile = {
   lastName?: string;
   photoUrl?: string;
 } | null;
+
+type SidebarTranslate = (
+  key:
+    | "dashboard"
+    | "students"
+    | "programs"
+    | "exercises"
+    | "assignmentCalendar"
+    | "coachProgressNav"
+    | "myProfile"
+    | "shop"
+    | "logout"
+) => string;
 
 function trainerDisplayName(trainer: TrainerNavProfile): string {
   if (!trainer) return "Trainer";
@@ -86,7 +115,7 @@ function TrainerSidebarIdentity({
           <Link
             href="/dashboard"
             onClick={onNavigate}
-            className="flex justify-center rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5"
+            className="flex justify-center rounded-lg p-2 -m-2 transition-colors hover:bg-sidebar-accent"
           >
             <Avatar className="h-10 w-10 shrink-0 ring-2 ring-primary/10">
               <AvatarImage src={avatarSrc} alt="" />
@@ -103,8 +132,8 @@ function TrainerSidebarIdentity({
 
   const wrapClass =
     layout === "vertical"
-      ? "flex flex-col items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5"
-      : "flex flex-row items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5";
+      ? "flex flex-col items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-sidebar-accent"
+      : "flex flex-row items-center gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-sidebar-accent";
 
   const textAlign = layout === "vertical" ? "text-center" : "text-left";
 
@@ -208,26 +237,11 @@ function TrainerSidebarUtilityControls({
   );
 }
 
-/* ─── Shared sidebar nav content ─── */
-type SidebarTranslate = (
-  key:
-    | "dashboard"
-    | "students"
-    | "programs"
-    | "exercises"
-    | "assignmentCalendar"
-    | "coachProgressNav"
-    | "myProfile"
-    | "shop"
-    | "logout"
-) => string;
-
-function SidebarContent({
+function AppSidebar({
   pathname,
   trainer,
   user,
   onSignOut,
-  onNavClick,
   t,
   locale,
   setLocale,
@@ -236,62 +250,85 @@ function SidebarContent({
   trainer: TrainerNavProfile;
   user: { uid?: string; photoURL?: string | null; email?: string | null; displayName?: string | null } | null;
   onSignOut: () => void;
-  onNavClick?: () => void;
   t: SidebarTranslate;
   locale: string;
   setLocale: (locale: "en" | "pt") => void;
 }) {
+  const { state, isMobile, setOpenMobile } = useSidebar();
+  const collapsed = state === "collapsed" && !isMobile;
+
+  const handleNavClick = () => {
+    if (isMobile) setOpenMobile(false);
+  };
+
+  const handleSignOut = () => {
+    handleNavClick();
+    onSignOut();
+  };
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="p-6 pb-4 border-b shrink-0">
+    <Sidebar collapsible="icon" className="border-sidebar-border">
+      <SidebarHeader className={cn("border-b border-sidebar-border", collapsed ? "p-2" : "p-4 pb-4")}>
         <TrainerSidebarIdentity
           trainer={trainer}
           user={user}
-          layout="horizontal"
-          onNavigate={onNavClick}
+          layout={isMobile ? "horizontal" : "vertical"}
+          collapsed={collapsed}
+          onNavigate={handleNavClick}
         />
-      </div>
+      </SidebarHeader>
 
-      {/* Nav Items */}
-      <nav className="flex-1 px-2 space-y-1 mt-2">
-        {navItemKeys.map((item) => (
-          <Link
-            key={item.key}
-            href={item.href}
-            onClick={onNavClick}
-            className={cn(
-              "flex items-center gap-3 px-3 py-3 rounded-md text-sm font-medium transition-colors",
-              pathname === item.href
-                ? "bg-secondary text-primary"
-                : "text-muted-foreground hover:bg-accent/10 hover:text-primary"
-            )}
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarMenu>
+            {navItemKeys.map((item) => (
+              <SidebarMenuItem key={item.key}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname === item.href}
+                  tooltip={t(item.key)}
+                  size="lg"
+                >
+                  <Link href={item.href} onClick={handleNavClick}>
+                    <item.icon className="h-5 w-5" />
+                    <span>{t(item.key)}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
+
+      <SidebarFooter
+        className={cn("border-t border-sidebar-border space-y-2", collapsed ? "p-2" : "p-4")}
+      >
+        <TrainerSidebarUtilityControls locale={locale} setLocale={setLocale} collapsed={collapsed} />
+        {collapsed ? (
+          <SidebarMenuButton
+            tooltip={t("logout")}
+            className="text-muted-foreground"
+            onClick={handleSignOut}
           >
-            <item.icon className="h-5 w-5 shrink-0" />
-            <span className="truncate">{t(item.key)}</span>
-          </Link>
-        ))}
-      </nav>
+            <LogOut className="h-5 w-5" />
+          </SidebarMenuButton>
+        ) : (
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 text-muted-foreground"
+            onClick={handleSignOut}
+          >
+            <LogOut className="h-5 w-5" />
+            {t("logout")}
+          </Button>
+        )}
+      </SidebarFooter>
 
-      {/* Bottom: theme, language, logout */}
-      <div className="p-4 border-t mt-auto space-y-3 shrink-0">
-        <TrainerSidebarUtilityControls locale={locale} setLocale={setLocale} />
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-3 text-muted-foreground"
-          onClick={() => {
-            onNavClick?.();
-            onSignOut();
-          }}
-        >
-          <LogOut className="h-5 w-5" />
-          {t("logout")}
-        </Button>
-      </div>
-    </div>
+      <SidebarRail />
+    </Sidebar>
   );
 }
 
-/* ─── Main Navigation component ─── */
 export function Navigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -299,8 +336,6 @@ export function Navigation({ children }: { children: React.ReactNode }) {
   const db = useFirestore();
   const { user } = useUser();
   const { t, locale, setLocale } = useI18n();
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   const trainerRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -315,141 +350,25 @@ export function Navigation({ children }: { children: React.ReactNode }) {
     router.push("/");
   };
 
-  const sidebarWidth = collapsed ? "w-[70px]" : "w-64";
-  const mainMargin = collapsed ? "md:ml-[70px]" : "md:ml-64";
-
   return (
-    <TooltipProvider delayDuration={0}>
-      <div className="flex min-h-screen bg-background">
-
-        {/* ── DESKTOP Sidebar ── */}
-        <aside
-          className={cn(
-            "border-r bg-card hidden md:flex flex-col fixed inset-y-0 transition-all duration-300 ease-in-out z-40",
-            sidebarWidth
-          )}
-        >
-          {/* Logo */}
-          <div className={cn("border-b shrink-0", collapsed ? "p-2" : "p-4 pb-4")}>
-            <TrainerSidebarIdentity
-              trainer={trainer as TrainerNavProfile}
-              user={user}
-              layout="vertical"
-              collapsed={collapsed}
-            />
-          </div>
-
-          {/* Nav Items */}
-          <nav className="flex-1 px-2 space-y-1 mt-2">
-            {navItemKeys.map((item) => {
-              const isActive = pathname === item.href;
-              const linkClass = cn(
-                "flex items-center gap-3 px-3 py-3 rounded-md text-sm font-medium transition-colors",
-                collapsed ? "justify-center" : "",
-                isActive
-                  ? "bg-secondary text-primary"
-                  : "text-muted-foreground hover:bg-accent/10 hover:text-primary"
-              );
-
-              if (collapsed) {
-                return (
-                  <Tooltip key={item.key}>
-                    <TooltipTrigger asChild>
-                      <Link href={item.href} className={linkClass}>
-                        <item.icon className="h-5 w-5 shrink-0" />
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">{t(item.key)}</TooltipContent>
-                  </Tooltip>
-                );
-              }
-
-              return (
-                <Link key={item.key} href={item.href} className={linkClass}>
-                  <item.icon className="h-5 w-5 shrink-0" />
-                  <span className="truncate">{t(item.key)}</span>
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Bottom: theme, language, logout */}
-          <div className={cn("border-t mt-auto shrink-0 space-y-2", collapsed ? "p-2" : "p-4")}>
-            <TrainerSidebarUtilityControls locale={locale} setLocale={setLocale} collapsed={collapsed} />
-            {collapsed ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-full text-muted-foreground"
-                    onClick={handleSignOut}
-                  >
-                    <LogOut className="h-5 w-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">Logout</TooltipContent>
-              </Tooltip>
-            ) : (
-              <Button
-                variant="ghost"
-                className="w-full justify-start gap-3 text-muted-foreground"
-                onClick={handleSignOut}
-              >
-                <LogOut className="h-5 w-5" />
-                {t("logout")}
-              </Button>
-            )}
-          </div>
-
-          {/* Collapse Toggle Button */}
-          <button
-            onClick={() => setCollapsed((prev) => !prev)}
-            className="absolute -right-3 top-16 z-50 flex h-6 w-6 items-center justify-center rounded-full border bg-card shadow-md hover:bg-accent/10 transition-colors"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? (
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            ) : (
-              <ChevronLeft className="h-3 w-3 text-muted-foreground" />
-            )}
-          </button>
-        </aside>
-
-        {/* ── MOBILE Sheet Sidebar ── */}
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetContent side="left" className="p-0 w-72">
-            <SheetTitle className="sr-only">Main navigation</SheetTitle>
-            <SidebarContent
-              pathname={pathname}
-              trainer={trainer as TrainerNavProfile}
-              user={user}
-              onSignOut={handleSignOut}
-              onNavClick={() => setMobileOpen(false)}
-              t={t}
-              locale={locale}
-              setLocale={setLocale}
-            />
-          </SheetContent>
-        </Sheet>
-
-        {/* Main Content */}
-        <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", mainMargin)}>
-          <Button
-            variant="outline"
-            size="icon"
-            className="md:hidden fixed top-3 left-3 z-50 shadow-sm bg-background/95 backdrop-blur"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
-          >
-            <Menu className="h-5 w-5" />
-          </Button>
-
-          <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto px-4 pt-14 pb-4 md:p-6">
-            {children}
-          </main>
+    <SidebarProvider>
+      <AppSidebar
+        pathname={pathname}
+        trainer={trainer as TrainerNavProfile}
+        user={user}
+        onSignOut={handleSignOut}
+        t={t}
+        locale={locale}
+        setLocale={setLocale}
+      />
+      <SidebarInset>
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:hidden sticky top-0 z-50 bg-background/95 backdrop-blur">
+          <SidebarTrigger className="-ml-1 shadow-sm" />
+        </header>
+        <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto px-4 pb-4 md:p-6">
+          {children}
         </div>
-      </div>
-    </TooltipProvider>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

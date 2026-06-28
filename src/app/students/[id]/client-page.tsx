@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { 
   Mail, 
   Calendar, 
@@ -34,7 +34,6 @@ import {
   ShieldOff,
   ChevronDown,
   ChevronUp,
-  Scale,
   ListOrdered,
   GripVertical,
 } from "lucide-react";
@@ -115,8 +114,8 @@ import {
 } from "@/components/SequenceTemplatePicker";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
-import { bodyCompositionPointsFromSessions } from "@/lib/body-composition-from-sessions";
-import { BodyCompositionTrendChart } from "@/components/BodyCompositionTrendChart";
+import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
+import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
 import {
   buildPaymentAmounts,
@@ -1727,46 +1726,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
     (a: any, b: any) => (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
   );
 
-  const weightChartData = useMemo(() => {
-    const global = (globalStudent || {}) as any;
-    const history = Array.isArray(global.weightHistory) ? global.weightHistory : [];
-
-    const normalized = history
-      .map((entry: any) => {
-        const dateValue = entry?.date || entry?.checkedAt || "";
-        const weightValue = Number(entry?.weightKg ?? entry?.weight);
-        const timestamp = Date.parse(dateValue);
-        return {
-          timestamp,
-          weight: Number.isFinite(weightValue) ? weightValue : NaN,
-        };
-      })
-      .filter((entry: any) => Number.isFinite(entry.timestamp) && Number.isFinite(entry.weight))
-      .sort((a: any, b: any) => a.timestamp - b.timestamp)
-      .map((entry: any) => ({
-        date: new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        weight: Number(entry.weight.toFixed(1)),
-      }));
-
-    if (normalized.length > 0) return normalized;
-
-    const currentWeight = Number(global.weightKg);
-    if (Number.isFinite(currentWeight) && currentWeight > 0) {
-      return [
-        {
-          date: new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-          weight: Number(currentWeight.toFixed(1)),
-        },
-      ];
-    }
-
-    return [];
-  }, [globalStudent]);
-
-  const bodyCompositionCoachData = useMemo(
-    () => bodyCompositionPointsFromSessions(workoutSessions || []),
-    [workoutSessions]
-  );
 
   const strengthByExercise = useMemo(() => {
     const exerciseMap = new Map<string, Map<string, { timestamp: number; date: string; oneRm: number }>>();
@@ -2011,6 +1970,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const portalOnly = !effectiveRoster && !!globalStudent;
   const isLoading = rosterLoading || (!rosterStudent && globalLoading);
+  const coachBodyMetricGlobalStudentId = String(
+    (globalStudent as { id?: string } | null)?.id ||
+      (effectiveRoster as { userId?: string } | null)?.userId ||
+      id
+  );
   const student = effectiveRoster
     ? effectiveRoster
     : globalStudent
@@ -2473,69 +2437,21 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
           <TabsContent value="progress" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Scale className="h-5 w-5 text-primary shrink-0" />
-                    {t("bodyCompositionChartTitle")}
-                  </CardTitle>
-                  <CardDescription>
-                    {t("bodyCompositionChartDesc")}{" "}
-                    <span className="text-muted-foreground/90">
-                      · {t("goal")} {student.goalWeightKg ?? "—"} kg
-                      {Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent) > 0
-                        ? ` · ${t("bodyFatGoalLabel").replace(
-                            "{n}",
-                            String(
-                              Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent)
-                            )
-                          )}`
-                        : ""}{" "}
-                      (
-                      <span className="capitalize">{student.goalType?.replace("_", " ") || "—"}</span>)
-                    </span>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-6 pt-0">
-                  {bodyCompositionCoachData.length > 0 ? (
-                    <BodyCompositionTrendChart
-                      data={bodyCompositionCoachData}
-                      emptyLabel={t("noBodyCompositionData")}
-                      chartClassName="h-[300px] w-full min-h-[260px]"
-                    />
-                  ) : weightChartData.length > 0 ? (
-                    <div className="h-[300px] w-full min-h-[260px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={weightChartData}>
-                          <defs>
-                            <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                              <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                          <XAxis dataKey="date" />
-                          <YAxis domain={["dataMin - 2", "dataMax + 2"]} />
-                          <Tooltip />
-                          <Area
-                            type="monotone"
-                            dataKey="weight"
-                            stroke="hsl(var(--primary))"
-                            fillOpacity={1}
-                            fill="url(#colorWeight)"
-                            strokeWidth={3}
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <div className="h-[300px] flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground border-2 border-dashed rounded-lg px-4">
-                      <p>{t("noBodyCompositionData")}</p>
-                      <p className="text-xs">{t("noWeightRecords")}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              {user && (
+                <BodyMetricsPanel
+                  trainerId={user.uid}
+                  rosterStudentId={id}
+                  globalStudentId={coachBodyMetricGlobalStudentId}
+                  canWriteSession={!portalOnly}
+                  source="coach"
+                  initialProfile={(globalStudent as Record<string, unknown> | null) ?? (student as Record<string, unknown> | null)}
+                  existingWeightHistory={(globalStudent as { weightHistory?: unknown } | null)?.weightHistory}
+                  goalWeightKg={student?.goalWeightKg}
+                  goalBodyFatPercent={Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent) || null}
+                  goalType={student?.goalType}
+                  showGoals
+                />
+              )}
 
               <Card>
                 <CardHeader>
@@ -2640,7 +2556,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       <div key={session.id} className="border rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="font-semibold">{session.workoutTitle || "Untitled Workout"}</p>
+                            <p className="font-semibold">
+                              {isCoachBodyMetricSession(session)
+                                ? t("coachBodyMetricSessionTitle")
+                                : session.workoutTitle || "Untitled Workout"}
+                            </p>
                             <p className="text-xs text-muted-foreground">
                               {session.completedAt
                                 ? new Date(session.completedAt).toLocaleDateString(undefined, {
