@@ -1,6 +1,37 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findSequenceAppendContext } from "./workout-plan-sequence";
+import {
+  buildCompletedWorkoutPlanIds,
+  findSequenceAppendContext,
+  isSequenceStepEffectiveUnlocked,
+} from "./workout-plan-sequence";
+
+describe("buildCompletedWorkoutPlanIds", () => {
+  it("includes completed plan docs and logged sessions", () => {
+    const completed = buildCompletedWorkoutPlanIds(
+      [
+        { id: "a", status: "completed" },
+        { id: "b", completedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "c" },
+      ],
+      [{ workoutPlanId: "d", completedAt: "2026-01-02T00:00:00.000Z" }]
+    );
+    assert.deepEqual([...completed].sort(), ["a", "b", "d"]);
+  });
+});
+
+describe("isSequenceStepEffectiveUnlocked", () => {
+  it("unlocks when prior step is completed even if studentUnlocked is false", () => {
+    const plan = {
+      id: "step-b",
+      sequenceGroupId: "grp",
+      studentUnlocked: false,
+      sequenceUnlockAfterPlanId: "step-a",
+    };
+    assert.equal(isSequenceStepEffectiveUnlocked(plan, new Set(["step-a"])), true);
+    assert.equal(isSequenceStepEffectiveUnlocked(plan, new Set()), false);
+  });
+});
 
 describe("findSequenceAppendContext", () => {
   it("returns null when no sequence plans exist", () => {

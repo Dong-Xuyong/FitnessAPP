@@ -208,6 +208,7 @@ const translations = {
     calendarRosterSessionDurationSuffix: "· {minutes} min",
     calendarRosterExpandDetails: "Show workout details",
     calendarRosterPlanDetailsTitle: "Plan details",
+    calendarRosterLastSessionTitle: "Last session",
     calendarRosterOpenManagement: "Open on student profile",
     calendarRosterLogSession: "Log session",
     calendarRosterSectionNoPlan: "No workout plan linked",
@@ -217,6 +218,7 @@ const translations = {
     calendarRosterSlotPlanNotOnProfile:
       "This booking’s plan is not on the student’s profile (missing or outdated link).",
     calendarRosterPlanDetailEmpty: "No exercises in this plan.",
+    calendarRosterNoLastPerformance: "No previous log for this exercise.",
     calendarRosterPlanDetailError: "Could not load workout details.",
     calendarRosterNoEffectivePlan: "No workout plan available to expand.",
     calendarRosterSessionLogTitle: "Session log",
@@ -1300,6 +1302,7 @@ const translations = {
     calendarRosterSessionDurationSuffix: "· {minutes} min",
     calendarRosterExpandDetails: "Ver detalhes do treino",
     calendarRosterPlanDetailsTitle: "Detalhes do plano",
+    calendarRosterLastSessionTitle: "Última sessão",
     calendarRosterOpenManagement: "Abrir na ficha",
     calendarRosterLogSession: "Registar treino",
     calendarRosterSectionNoPlan: "Sem treino associado",
@@ -1309,6 +1312,7 @@ const translations = {
     calendarRosterSlotPlanNotOnProfile:
       "O plano desta reserva não está na ficha do aluno (ligação em falta ou desatualizada).",
     calendarRosterPlanDetailEmpty: "Este plano não tem exercícios.",
+    calendarRosterNoLastPerformance: "Sem registo anterior deste exercício.",
     calendarRosterPlanDetailError: "Não foi possível carregar os detalhes do treino.",
     calendarRosterNoEffectivePlan: "Não há plano para mostrar aqui.",
     calendarRosterSessionLogTitle: "Registo do treino",

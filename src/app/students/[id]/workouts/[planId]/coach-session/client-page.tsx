@@ -12,8 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dumbbell, CheckCircle2, Save, Loader2, X, StickyNote, ChevronDown, ChevronUp } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { commitFinishedWorkoutSession, exerciseHasLoggedSet } from "@/lib/workout-session-finish";
+import { resolveSequenceEffectiveUnlock } from "@/lib/workout-plan-sequence";
 import { cn } from "@/lib/utils";
 import { getStudentDisplayName } from "@/lib/student-display";
 
@@ -43,6 +44,8 @@ interface WorkoutPlan {
   exercises: WorkoutExercise[];
   personalTrainerId: string;
   studentUnlocked?: boolean;
+  sequenceGroupId?: string | null;
+  sequenceUnlockAfterPlanId?: string | null;
   sequenceNextPlanId?: string | null;
 }
 
@@ -99,12 +102,16 @@ export default function CoachWorkoutSessionPage({
   const [sessionBodyWeightKg, setSessionBodyWeightKg] = useState("");
   const [sessionBodyFatPercent, setSessionBodyFatPercent] = useState("");
   const [sessionFeedbackOpen, setSessionFeedbackOpen] = useState(false);
+  const [sequenceUnlockPending, setSequenceUnlockPending] = useState(false);
+  const [effectivelyUnlocked, setEffectivelyUnlocked] = useState(true);
   const metricsPrefilledRef = useRef(false);
 
   useEffect(() => {
     metricsPrefilledRef.current = false;
     setSessionBodyWeightKg("");
     setSessionBodyFatPercent("");
+    setSequenceUnlockPending(false);
+    setEffectivelyUnlocked(true);
   }, [planId, storageStudentId]);
 
   useEffect(() => {
@@ -165,6 +172,46 @@ export default function CoachWorkoutSessionPage({
     };
   }, [db, user?.uid, storageStudentId, planId]);
 
+  useEffect(() => {
+    if (!db || !user?.uid || !workout) return;
+    if (workout.studentUnlocked !== false) {
+      setEffectivelyUnlocked(true);
+      setSequenceUnlockPending(false);
+      return;
+    }
+    let cancelled = false;
+    setSequenceUnlockPending(true);
+    void resolveSequenceEffectiveUnlock(db, user.uid, storageStudentId, { ...workout, id: planId })
+      .then(async (unlocked) => {
+        if (cancelled) return;
+        setEffectivelyUnlocked(unlocked);
+        setSequenceUnlockPending(false);
+        if (unlocked && workout.studentUnlocked === false) {
+          try {
+            await updateDoc(
+              doc(db, "personalTrainers", user.uid, "students", storageStudentId, "workoutPlans", planId),
+              { studentUnlocked: true }
+            );
+            if (!cancelled) {
+              setWorkout((prev) => (prev ? { ...prev, studentUnlocked: true } : prev));
+            }
+          } catch (e) {
+            console.error("Failed to heal sequence unlock flag:", e);
+          }
+        }
+      })
+      .catch((e) => {
+        console.error("Sequence unlock check failed:", e);
+        if (!cancelled) {
+          setEffectivelyUnlocked(false);
+          setSequenceUnlockPending(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user?.uid, storageStudentId, planId, workout]);
+
   const exercises = workout?.exercises || [];
   const totalExercises = exercises.length;
 
@@ -179,7 +226,7 @@ export default function CoachWorkoutSessionPage({
       setIsFinished(true);
       return;
     }
-    if (workout.studentUnlocked === false) return;
+    if (workout.studentUnlocked === false && !effectivelyUnlocked) return;
     setIsSaving(true);
     try {
       const parsedBw = parseOptionalBodyWeightKg(sessionBodyWeightKg);
@@ -212,7 +259,9 @@ export default function CoachWorkoutSessionPage({
 
   const studentLabel = rosterRow ? getStudentDisplayName(rosterRow, storageStudentId) : storageStudentId;
 
-  if (isLoadingWorkout) {
+  const isSequenceLocked = workout?.studentUnlocked === false && !effectivelyUnlocked;
+
+  if (isLoadingWorkout || (workout && workout.studentUnlocked === false && sequenceUnlockPending)) {
     return (
       <Navigation>
         <div className="flex items-center justify-center h-[60vh]">
@@ -236,7 +285,7 @@ export default function CoachWorkoutSessionPage({
     );
   }
 
-  if (workout.studentUnlocked === false) {
+  if (isSequenceLocked) {
     return (
       <Navigation>
         <div className="text-center py-20 space-y-4 max-w-md mx-auto px-4">

@@ -73,6 +73,11 @@ import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import { cn } from "@/lib/utils";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import {
+  buildPlanExerciseLastPerformance,
+  formatLastSessionPerformanceLabel,
+  type LastSessionPerf,
+} from "@/lib/last-session-performance";
+import {
   coachDayShowsSchedule,
   dayHasOpenBlocks,
   dayIsWeeklyAvailable,
@@ -219,6 +224,13 @@ function attendanceRosterRowAccentClassName(att: SessionAttendanceStatus): strin
   }
 }
 
+type RosterPlanDetailLastSession = {
+  title: string;
+  exercises: RosterSessionLogExercise[];
+  sessionId: string;
+  rawExercises: unknown;
+};
+
 type RosterPlanDetailEntry =
   | { status: "loading" }
   | { status: "error" }
@@ -232,6 +244,10 @@ type RosterPlanDetailEntry =
         sets?: number;
         reps?: string;
       }>;
+      /** Last logged weight/reps per plan exercise (newest session for plan, else any session). */
+      exercisePerformance: Array<{ name: string; perf?: LastSessionPerf }>;
+      /** Newest completed session for this plan (any day), when the athlete has done it before. */
+      lastSession?: RosterPlanDetailLastSession | null;
     };
 
 type RosterSessionLogExercise = { name: string; setLines: string[] };
@@ -250,6 +266,73 @@ type RosterSessionLogEntry =
       /** Firestore `exercises` field for EditWorkoutSessionDialog. */
       rawExercises: unknown;
     };
+
+function RosterSessionExerciseList({
+  exercises,
+  emptyLabel,
+}: {
+  exercises: RosterSessionLogExercise[];
+  emptyLabel: string;
+}) {
+  if (exercises.length === 0) {
+    return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
+  }
+  return (
+    <ul className="space-y-2">
+      {exercises.map((exercise, index) => (
+        <li
+          key={`${exercise.name}-${index}`}
+          className="rounded-md border bg-background p-2 text-sm"
+        >
+          <p className="font-medium">{exercise.name}</p>
+          <div className="text-xs text-muted-foreground mt-1 space-y-0.5 tabular-nums leading-relaxed">
+            {exercise.setLines.map((line, li) => (
+              <p key={li}>{line}</p>
+            ))}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RosterPlanExercisePerformanceList({
+  items,
+  emptyLabel,
+  noPerfLabel,
+  t,
+}: {
+  items: Array<{ name: string; perf?: LastSessionPerf }>;
+  emptyLabel: string;
+  noPerfLabel: string;
+  t: (key: TranslationKey) => string;
+}) {
+  if (items.length === 0) {
+    return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
+  }
+  return (
+    <ul className="space-y-2">
+      {items.map((item, index) => {
+        const lastHint = formatLastSessionPerformanceLabel(item.perf, {
+          weighted: (weight, reps) =>
+            t("lastSessionPerformance").replace("{weight}", String(weight)).replace("{reps}", String(reps)),
+          bodyweight: (reps) => t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+        });
+        return (
+          <li
+            key={`${item.name}-${index}`}
+            className="rounded-md border bg-background p-2 text-sm"
+          >
+            <p className="font-medium">{item.name}</p>
+            <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
+              {lastHint ?? noPerfLabel}
+            </p>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 /** Normalizes `workoutSessions` exercise rows for the completed-roster expand panel. */
 function buildSessionLogExercisesFromDoc(data: Record<string, unknown>): RosterSessionLogExercise[] {
@@ -645,25 +728,10 @@ function CalendarDayRosterRow({
                   </Button>
                 ) : null}
               </div>
-              {sessionLog.exercises.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("calendarRosterPlanDetailEmpty")}</p>
-              ) : (
-                <ul className="space-y-2">
-                  {sessionLog.exercises.map((exercise, index) => (
-                    <li
-                      key={`${exercise.name}-${index}`}
-                      className="rounded-md border bg-background p-2 text-sm"
-                    >
-                      <p className="font-medium">{exercise.name}</p>
-                      <div className="text-xs text-muted-foreground mt-1 space-y-0.5 tabular-nums leading-relaxed">
-                        {exercise.setLines.map((line, li) => (
-                          <p key={li}>{line}</p>
-                        ))}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <RosterSessionExerciseList
+                exercises={sessionLog.exercises}
+                emptyLabel={t("calendarRosterPlanDetailEmpty")}
+              />
               <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
                 <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
                   <Link
@@ -721,30 +789,66 @@ function CalendarDayRosterRow({
           <p className="text-xs text-destructive">{t("calendarRosterPlanDetailError")}</p>
         ) : (
           <>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              {t("calendarRosterPlanDetailsTitle")}
-              {rosterDetail.title ? (
-                <span className="font-medium text-foreground normal-case"> — {rosterDetail.title}</span>
-              ) : null}
-            </p>
-            {rosterDetail.exercises.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t("calendarRosterPlanDetailEmpty")}</p>
+            {rosterDetail.lastSession ? (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide min-w-0">
+                    {t("calendarRosterLastSessionTitle")}
+                    <span className="font-medium text-foreground normal-case">
+                      {" "}
+                      —{" "}
+                      {rosterDetail.lastSession.title.trim()
+                        ? rosterDetail.lastSession.title
+                        : rosterDetail.title || t("calendarRosterUntitledSession")}
+                    </span>
+                  </p>
+                  {onRequestEditRosterSession ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 shrink-0"
+                      title={t("editSession")}
+                      aria-label={t("editSession")}
+                      onClick={() =>
+                        onRequestEditRosterSession({
+                          storageFid: fid,
+                          session: {
+                            id: rosterDetail.lastSession!.sessionId,
+                            workoutTitle: rosterDetail.lastSession!.title,
+                            exercises: rosterDetail.lastSession!.rawExercises,
+                          },
+                        })
+                      }
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
+                <RosterSessionExerciseList
+                  exercises={rosterDetail.lastSession.exercises}
+                  emptyLabel={t("calendarRosterPlanDetailEmpty")}
+                />
+              </>
             ) : (
-              <ul className="space-y-2">
-                {rosterDetail.exercises.map((exercise, index) => (
-                  <li
-                    key={`${exercise.exerciseName || exercise.name || "ex"}-${index}`}
-                    className="rounded-md border bg-background p-2 text-sm"
-                  >
-                    <p className="font-medium">
-                      {exercise.exerciseName || exercise.name || `${t("exerciseName")} ${index + 1}`}
-                    </p>
-                    {exercise.notes ? (
-                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{exercise.notes}</p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  {t("calendarRosterPlanDetailsTitle")}
+                  {rosterDetail.title ? (
+                    <span className="font-medium text-foreground normal-case"> — {rosterDetail.title}</span>
+                  ) : null}
+                </p>
+                {rosterDetail.exercises.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("calendarRosterPlanDetailEmpty")}</p>
+                ) : (
+                  <RosterPlanExercisePerformanceList
+                    items={rosterDetail.exercisePerformance}
+                    emptyLabel={t("calendarRosterPlanDetailEmpty")}
+                    noPerfLabel={t("calendarRosterNoLastPerformance")}
+                    t={t}
+                  />
+                )}
+              </>
             )}
             <div className="flex flex-col sm:flex-row gap-2 pt-1">
               <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
@@ -1585,7 +1689,7 @@ export default function AssignmentCalendarPage() {
 
     setRosterPlanDetailByKey((prev) => {
       const cur = prev[expandedRosterPlanKey];
-      if (cur?.status === "ready" || cur?.status === "loading") return prev;
+      if (cur?.status === "loading") return prev;
       return { ...prev, [expandedRosterPlanKey]: { status: "loading" } };
     });
 
@@ -1593,22 +1697,49 @@ export default function AssignmentCalendarPage() {
     const key = expandedRosterPlanKey;
     (async () => {
       try {
-        const snap = await getDoc(
-          doc(db, "personalTrainers", user.uid, "students", storageFid, "workoutPlans", planId)
-        );
+        const [planSnap, sessionsSnap] = await Promise.all([
+          getDoc(doc(db, "personalTrainers", user.uid, "students", storageFid, "workoutPlans", planId)),
+          getDocs(collection(db, "personalTrainers", user.uid, "students", storageFid, "workoutSessions")),
+        ]);
         if (cancelled) return;
-        if (!snap.exists()) {
+        if (!planSnap.exists()) {
           setRosterPlanDetailByKey((p) => ({ ...p, [key]: { status: "error" } }));
           return;
         }
-        const data = snap.data() as Record<string, unknown>;
+        const data = planSnap.data() as Record<string, unknown>;
         const exercises = Array.isArray(data.exercises)
           ? (data.exercises as Array<{ exerciseName?: string; name?: string; notes?: string }>)
           : [];
         const title = String(data.title || "").trim();
+
+        type SessionCand = { t: number; id: string; data: Record<string, unknown> };
+        const allSessions: Array<Record<string, unknown> & { workoutPlanId?: string; completedAt?: unknown; exercises?: unknown[] }> = [];
+        const planSessions: SessionCand[] = [];
+        for (const docSnap of sessionsSnap.docs) {
+          const sessionData = docSnap.data() as Record<string, unknown>;
+          allSessions.push(sessionData as typeof allSessions[number]);
+          if (String(sessionData.workoutPlanId || "").trim() !== planId) continue;
+          if (!sessionData.completedAt) continue;
+          const t = firestoreScalarToDate(sessionData.completedAt)?.getTime() ?? 0;
+          if (t <= 0) continue;
+          planSessions.push({ t, id: docSnap.id, data: sessionData });
+        }
+        planSessions.sort((a, b) => b.t - a.t);
+        const latestSession = planSessions[0];
+        const lastSession = latestSession
+          ? {
+              title: String(latestSession.data.workoutTitle || "").trim(),
+              exercises: buildSessionLogExercisesFromDoc(latestSession.data),
+              sessionId: latestSession.id,
+              rawExercises: latestSession.data.exercises,
+            }
+          : null;
+
+        const exercisePerformance = buildPlanExerciseLastPerformance(exercises, planId, allSessions);
+
         setRosterPlanDetailByKey((p) => ({
           ...p,
-          [key]: { status: "ready", title, exercises },
+          [key]: { status: "ready", title, exercises, exercisePerformance, lastSession },
         }));
       } catch {
         if (!cancelled) setRosterPlanDetailByKey((p) => ({ ...p, [key]: { status: "error" } }));
@@ -1617,7 +1748,7 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [expandedRosterPlanKey, db, user]);
+  }, [expandedRosterPlanKey, db, user, planMetaRefreshTick, sessionLogRefreshTick]);
 
   /** Load same-day `workoutSessions` row for expanded roster key (plan id match) — completed section UI. */
   useEffect(() => {
@@ -4337,6 +4468,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
+                          onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />
                       ))}
