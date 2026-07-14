@@ -605,7 +605,7 @@ const translations = {
     excelNoRowsFound: "No exercise or program rows found in the workbook.",
     excelImportConfirmTitle: "Import from Excel?",
     excelExercisesInstruction:
-      "You may add more exercise rows below (name and description only). New names create exercises; existing names are updated.",
+      "You may add more exercise rows below (name, description, and optional YouTube video URL). New names create exercises; existing names are updated.",
     excelProgramsInstruction:
       "You may add more program rows below. Use program name, exercise name, and coach notes (Nota do Treinador). New program names create a program; existing programs update coach notes or add exercises.",
     excelImportConfirmDesc:
@@ -1701,7 +1701,7 @@ const translations = {
     excelNoRowsFound: "Não foram encontradas linhas de exercícios ou programas.",
     excelImportConfirmTitle: "Importar do Excel?",
     excelExercisesInstruction:
-      "Pode adicionar mais linhas de exercícios abaixo (apenas nome e descrição). Nomes novos criam exercícios; nomes existentes são atualizados.",
+      "Pode adicionar mais linhas de exercícios abaixo (nome, descrição e URL de vídeo do YouTube opcional). Nomes novos criam exercícios; nomes existentes são atualizados.",
     excelProgramsInstruction:
       "Pode adicionar mais linhas de programas abaixo. Use nome do programa, nome do exercício e Nota do Treinador. Nomes de programa novos criam um programa; programas existentes atualizam notas ou acrescentam exercícios.",
     excelImportConfirmDesc:

@@ -1,7 +1,12 @@
 export type LastSessionPerf = { weight: number; reps: number };
 
 export function normalizeExerciseKey(name: string): string {
-  return name.trim().toLowerCase();
+  return name
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 /** Best set (first logged set) per exercise name from a completed session document. */

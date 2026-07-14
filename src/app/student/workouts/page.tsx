@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Progress } from "@/components/ui/progress";
 import {
-  Dumbbell, Clock, Play, Loader2, AlertTriangle,
+  Dumbbell, Clock, Play, CirclePlay, ExternalLink, Loader2, AlertTriangle,
   CalendarDays, Users, UserPlus, UserMinus, ChevronDown, ChevronUp, StickyNote,
   CheckCircle2, Lock, CalendarCheck, TrendingUp, Zap,
 } from "lucide-react";
@@ -32,6 +32,7 @@ import {
   type TrainingAccessMode,
 } from "@/lib/student-training-access";
 import { isSessionSlotCancelled } from "@/lib/session-slot-enrollment";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   buildLatestPerfByExerciseName,
   buildLatestPerfByPlanId,
@@ -39,6 +40,7 @@ import {
   normalizeExerciseKey,
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
+import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
 import {
   dayHasOpenBlocks,
   getEffectiveSessionDurationMin,
@@ -254,6 +256,14 @@ export default function StudentWorkoutsPage() {
   const [lastPerfByExercise, setLastPerfByExercise] = useState<Record<string, LastSessionPerf>>(
     {}
   );
+  const [exerciseVideoUrlByName, setExerciseVideoUrlByName] = useState<Record<string, string>>({});
+  const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
+    title: string;
+    url: string;
+  } | null>(null);
+  const embeddedExerciseVideoUrl = selectedExerciseVideo
+    ? getYouTubeEmbedUrl(selectedExerciseVideo.url)
+    : null;
 
   /** Roster document id under the trainer (falls back to auth uid until first fetch). */
   const myId = rosterDocId || user?.uid || "";
@@ -279,12 +289,13 @@ export default function StudentWorkoutsPage() {
         setRosterDocId(rid);
         setTrainingAccessMode(globalAccessMode);
 
-        const [rosterDoc, trainerDoc, slotsSnap, plansSnap, sessionsSnap] = await Promise.all([
+        const [rosterDoc, trainerDoc, slotsSnap, plansSnap, sessionsSnap, exercisesSnap] = await Promise.all([
           getDoc(doc(db!, "personalTrainers", tid, "students", rid)),
           getDoc(doc(db!, "personalTrainers", tid)),
           getDocs(collection(db!, "personalTrainers", tid, "sessionSlots")),
           getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutPlans")),
           getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutSessions")),
+          getDocs(collection(db!, "exercises")),
         ]);
         if (cancelled) return;
 
@@ -406,6 +417,16 @@ export default function StudentWorkoutsPage() {
         activePlans.sort((a,b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || ""));
 
         if (!cancelled) { setWorkouts(activePlans); }
+        if (!cancelled) {
+          const videoUrls: Record<string, string> = {};
+          for (const exerciseDoc of exercisesSnap.docs) {
+            const exercise = exerciseDoc.data();
+            const name = String(exercise.name || "").trim();
+            const videoUrl = String(exercise.videoUrl || "").trim();
+            if (name && videoUrl) videoUrls[normalizeExerciseKey(name)] = videoUrl;
+          }
+          setExerciseVideoUrlByName(videoUrls);
+        }
       } catch (e) { console.error(e); }
       finally { if (!cancelled) setIsLoading(false); }
     }
@@ -1318,6 +1339,7 @@ export default function StudentWorkoutsPage() {
                             ) : (w.exercises || []).map((ex: any, idx: number) => {
                               const prescribed = ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : null;
                               const exKey = normalizeExerciseKey(String(ex.exerciseName || ""));
+                              const videoUrl = exerciseVideoUrlByName[exKey];
                               const lastPerf = lastPerfByPlanId[w.id]?.[exKey] ?? lastPerfByExercise[exKey];
                               const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
                                 weighted: (weight, reps) =>
@@ -1331,7 +1353,27 @@ export default function StudentWorkoutsPage() {
                                     {idx + 1}
                                   </div>
                                   <div className="space-y-0.5 min-w-0 flex-1">
-                                    <p className="text-sm font-semibold">{ex.exerciseName}</p>
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p className="text-sm font-semibold">{ex.exerciseName}</p>
+                                      {videoUrl ? (
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-7 w-7 -mt-1 shrink-0 text-primary hover:text-primary"
+                                          onClick={() =>
+                                            setSelectedExerciseVideo({
+                                              title: String(ex.exerciseName || ""),
+                                              url: videoUrl,
+                                            })
+                                          }
+                                          title={t("watchDemo")}
+                                          aria-label={`${t("watchDemo")}: ${ex.exerciseName}`}
+                                        >
+                                          <CirclePlay className="h-4 w-4" />
+                                        </Button>
+                                      ) : null}
+                                    </div>
                                     {prescribed && (
                                       <p className="text-xs text-muted-foreground">
                                         {t("prescribedSetsReps")}: <span className="font-medium text-foreground">{prescribed}</span>
@@ -1387,6 +1429,42 @@ export default function StudentWorkoutsPage() {
           )}
         </div>
       ) : null}
+
+      <Dialog
+        open={!!selectedExerciseVideo}
+        onOpenChange={(open) => !open && setSelectedExerciseVideo(null)}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t("watchDemo")} — {selectedExerciseVideo?.title}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedExerciseVideo ? (
+            embeddedExerciseVideoUrl ? (
+              <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                <iframe
+                  className="h-full w-full"
+                  src={embeddedExerciseVideoUrl}
+                  title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <a
+                href={selectedExerciseVideo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+              >
+                {t("watchDemo")}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

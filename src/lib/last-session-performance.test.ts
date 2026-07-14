@@ -1,8 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildPlanExerciseLastPerformance } from "./last-session-performance";
+import { buildPlanExerciseLastPerformance, normalizeExerciseKey } from "./last-session-performance";
 
 describe("buildPlanExerciseLastPerformance", () => {
+  it("matches exercise names regardless of spacing, punctuation, or accents", () => {
+    assert.equal(normalizeExerciseKey("Lat Pull Down"), normalizeExerciseKey("lat pulldown"));
+    assert.equal(normalizeExerciseKey("Tríceps Francês"), normalizeExerciseKey("triceps-frances"));
+  });
+
   it("prefers the latest session for this plan, then falls back to exercise name", () => {
     const items = buildPlanExerciseLastPerformance(
       [{ exerciseName: "Leg Press" }, { exerciseName: "Squat" }],

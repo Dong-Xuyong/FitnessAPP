@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Dumbbell,
   CheckCircle2,
@@ -17,6 +18,8 @@ import {
   StickyNote,
   ChevronDown,
   ChevronUp,
+  CirclePlay,
+  ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
@@ -43,6 +46,7 @@ import {
   normalizeExerciseKey,
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
+import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
 
 const SESSION_QUERY_LIMIT = 40;
 const NOTE_MAX_LENGTH = 500;
@@ -120,6 +124,11 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [isSaving, setIsSaving] = useState(false);
   const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
   const [lastPerfLookup, setLastPerfLookup] = useState<Record<string, LastSessionPerf>>({});
+  const [exerciseVideoUrlByName, setExerciseVideoUrlByName] = useState<Record<string, string>>({});
+  const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
+    title: string;
+    url: string;
+  } | null>(null);
   const [difficultyNotes, setDifficultyNotes] = useState("");
   const [moodNotes, setMoodNotes] = useState("");
   const [sessionDifficultyRating, setSessionDifficultyRating] = useState<number | null>(null);
@@ -133,6 +142,9 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [priorStepCompletedOverride, setPriorStepCompletedOverride] = useState(false);
   const prefilledSignatureRef = useRef<string | null>(null);
   const metricsPrefilledRef = useRef(false);
+  const embeddedExerciseVideoUrl = selectedExerciseVideo
+    ? getYouTubeEmbedUrl(selectedExerciseVideo.url)
+    : null;
 
   useEffect(() => {
     prefilledSignatureRef.current = null;
@@ -165,12 +177,25 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
           setSessionBodyWeightKg(wPref);
           setSessionBodyFatPercent(bfPref);
         }
-        const planDoc = await getDoc(
-          doc(db!, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans", workoutId)
-        );
+        const [planDoc, exercisesSnap] = await Promise.all([
+          getDoc(
+            doc(db!, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans", workoutId)
+          ),
+          getDocs(collection(db!, "exercises")),
+        ]);
         if (planDoc.exists() && !cancelled) {
           const workoutData = { ...planDoc.data(), personalTrainerId: trainerId } as WorkoutPlan;
           setWorkout(workoutData);
+        }
+        if (!cancelled) {
+          const videoUrls: Record<string, string> = {};
+          for (const exerciseDoc of exercisesSnap.docs) {
+            const exercise = exerciseDoc.data();
+            const name = String(exercise.name || "").trim();
+            const videoUrl = String(exercise.videoUrl || "").trim();
+            if (name && videoUrl) videoUrls[normalizeExerciseKey(name)] = videoUrl;
+          }
+          setExerciseVideoUrlByName(videoUrls);
         }
       } catch (e) {
         console.error("Error fetching workout:", e);
@@ -525,6 +550,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   }
 
   return (
+    <>
       <div className="max-w-2xl mx-auto space-y-6">
         <header className="space-y-1">
           <Link
@@ -686,7 +712,9 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
           {exercises.map((exercise, index) => {
             const log = logs[index] ?? { weight: "", reps: "" };
             const logged = exerciseHasLoggedSet(log);
-            const prevPerf = lastPerfLookup[normalizeExerciseKey(exercise.exerciseName)];
+            const exerciseKey = normalizeExerciseKey(exercise.exerciseName);
+            const videoUrl = exerciseVideoUrlByName[exerciseKey];
+            const prevPerf = lastPerfLookup[exerciseKey];
             const lastHint = formatLastSessionPerformanceLabel(prevPerf, {
               weighted: (weight, reps) =>
                 t("lastSessionPerformance")
@@ -704,7 +732,27 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                       <Badge variant="outline" className="text-xs mb-1">
                         {t("exercises")} {index + 1}/{totalExercises}
                       </Badge>
-                      <CardTitle className="text-2xl">{exercise.exerciseName}</CardTitle>
+                      <div className="flex items-start gap-2">
+                        <CardTitle className="text-2xl flex-1">{exercise.exerciseName}</CardTitle>
+                        {videoUrl ? (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 -mt-1 shrink-0 text-primary hover:text-primary"
+                            onClick={() =>
+                              setSelectedExerciseVideo({
+                                title: exercise.exerciseName,
+                                url: videoUrl,
+                              })
+                            }
+                            title={t("watchDemo")}
+                            aria-label={`${t("watchDemo")}: ${exercise.exerciseName}`}
+                          >
+                            <CirclePlay className="h-5 w-5" />
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
 
@@ -770,5 +818,41 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
           </Button>
         </CardFooter>
       </div>
+      <Dialog
+        open={!!selectedExerciseVideo}
+        onOpenChange={(open) => !open && setSelectedExerciseVideo(null)}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t("watchDemo")} — {selectedExerciseVideo?.title}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedExerciseVideo ? (
+            embeddedExerciseVideoUrl ? (
+              <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                <iframe
+                  className="h-full w-full"
+                  src={embeddedExerciseVideoUrl}
+                  title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <a
+                href={selectedExerciseVideo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+              >
+                {t("watchDemo")}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
