@@ -36,7 +36,7 @@ import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, Timestamp } from "
 import {
   CalendarDays, CalendarPlus, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
   Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp, ListOrdered,
-  ExternalLink, ClipboardList, History, Pencil, RotateCcw,
+  CirclePlay, ExternalLink, ClipboardList, History, Pencil, RotateCcw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -75,6 +75,7 @@ import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import {
   buildPlanExerciseLastPerformance,
   formatLastSessionPerformanceLabel,
+  normalizeExerciseKey,
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
 import {
@@ -243,9 +244,19 @@ type RosterPlanDetailEntry =
         notes?: string;
         sets?: number;
         reps?: string;
+        restTimeSeconds?: number;
       }>;
       /** Last logged weight/reps per plan exercise (newest session for plan, else any session). */
-      exercisePerformance: Array<{ name: string; perf?: LastSessionPerf }>;
+      exercisePerformance: Array<{
+        name: string;
+        perf?: LastSessionPerf;
+        plan?: {
+          sets?: number;
+          reps?: string;
+          restTimeSeconds?: number;
+          notes?: string;
+        };
+      }>;
       /** Newest completed session for this plan (any day), when the athlete has done it before. */
       lastSession?: RosterPlanDetailLastSession | null;
     };
@@ -300,11 +311,22 @@ function RosterPlanExercisePerformanceList({
   items,
   emptyLabel,
   noPerfLabel,
+  exerciseVideoUrlByName,
   t,
 }: {
-  items: Array<{ name: string; perf?: LastSessionPerf }>;
+  items: Array<{
+    name: string;
+    perf?: LastSessionPerf;
+    plan?: {
+      sets?: number;
+      reps?: string;
+      restTimeSeconds?: number;
+      notes?: string;
+    };
+  }>;
   emptyLabel: string;
   noPerfLabel: string;
+  exerciseVideoUrlByName: Record<string, string>;
   t: (key: TranslationKey) => string;
 }) {
   if (items.length === 0) {
@@ -318,12 +340,46 @@ function RosterPlanExercisePerformanceList({
             t("lastSessionPerformance").replace("{weight}", String(weight)).replace("{reps}", String(reps)),
           bodyweight: (reps) => t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
         });
+        const sets = Number(item.plan?.sets);
+        const reps = String(item.plan?.reps ?? "").trim();
+        const restSeconds = Number(item.plan?.restTimeSeconds);
+        const hasPrescribedPlan = Number.isFinite(sets) && sets > 0 && (reps || restSeconds > 0);
+        const prescribedPlan = hasPrescribedPlan
+          ? t("calendarRosterExercisePlan")
+              .replace("{sets}", String(sets))
+              .replace("{reps}", reps || "—")
+              .replace("{seconds}", String(restSeconds > 0 ? restSeconds : "—"))
+          : String(item.plan?.notes || "").trim();
+        const videoUrl = exerciseVideoUrlByName[normalizeExerciseKey(item.name)];
         return (
           <li
             key={`${item.name}-${index}`}
             className="rounded-md border bg-background p-2 text-sm"
           >
-            <p className="font-medium">{item.name}</p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium">{item.name}</p>
+              {videoUrl ? (
+                <Button
+                  asChild
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 -mt-1 -mr-1 shrink-0 text-primary hover:text-primary"
+                >
+                  <a
+                    href={videoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={t("watchDemo")}
+                    aria-label={`${t("watchDemo")}: ${item.name}`}
+                  >
+                    <CirclePlay className="h-4 w-4" />
+                  </a>
+                </Button>
+              ) : null}
+            </div>
+            {prescribedPlan ? (
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{prescribedPlan}</p>
+            ) : null}
             <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
               {lastHint ?? noPerfLabel}
             </p>
@@ -380,6 +436,7 @@ type CalendarDayRosterRowProps = {
   setExpandedRosterPlanKey: Dispatch<SetStateAction<string | null>>;
   rosterPlanDetailByKey: Record<string, RosterPlanDetailEntry>;
   rosterSessionLogByKey: Record<string, RosterSessionLogEntry>;
+  exerciseVideoUrlByName: Record<string, string>;
   onRequestEditRosterSession?: (payload: {
     storageFid: string;
     session: EditWorkoutSessionDialogSession;
@@ -401,6 +458,7 @@ function CalendarDayRosterRow({
   setExpandedRosterPlanKey,
   rosterPlanDetailByKey,
   rosterSessionLogByKey,
+  exerciseVideoUrlByName,
   onRequestEditRosterSession,
   t,
 }: CalendarDayRosterRowProps) {
@@ -845,6 +903,7 @@ function CalendarDayRosterRow({
                     items={rosterDetail.exercisePerformance}
                     emptyLabel={t("calendarRosterPlanDetailEmpty")}
                     noPerfLabel={t("calendarRosterNoLastPerformance")}
+                    exerciseVideoUrlByName={exerciseVideoUrlByName}
                     t={t}
                   />
                 )}
@@ -1213,6 +1272,21 @@ export default function AssignmentCalendarPage() {
     return collection(db, "personalTrainers", user.uid, "students");
   }, [db, user]);
   const { data: rosterStudents, isLoading: isLoadingRoster } = useCollection(studentsQuery);
+
+  const exercisesQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "exercises");
+  }, [db, user]);
+  const { data: exerciseLibrary } = useCollection(exercisesQuery);
+  const exerciseVideoUrlByName = useMemo(() => {
+    const urls: Record<string, string> = {};
+    for (const exercise of (exerciseLibrary || []) as Array<Record<string, unknown>>) {
+      const name = String(exercise.name || "").trim();
+      const videoUrl = String(exercise.videoUrl || "").trim();
+      if (name && videoUrl) urls[normalizeExerciseKey(name)] = videoUrl;
+    }
+    return urls;
+  }, [exerciseLibrary]);
 
   const portalStudentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -1708,7 +1782,14 @@ export default function AssignmentCalendarPage() {
         }
         const data = planSnap.data() as Record<string, unknown>;
         const exercises = Array.isArray(data.exercises)
-          ? (data.exercises as Array<{ exerciseName?: string; name?: string; notes?: string }>)
+          ? (data.exercises as Array<{
+              exerciseName?: string;
+              name?: string;
+              notes?: string;
+              sets?: number;
+              reps?: string;
+              restTimeSeconds?: number;
+            }>)
           : [];
         const title = String(data.title || "").trim();
 
@@ -1735,7 +1816,12 @@ export default function AssignmentCalendarPage() {
             }
           : null;
 
-        const exercisePerformance = buildPlanExerciseLastPerformance(exercises, planId, allSessions);
+        const exercisePerformance = buildPlanExerciseLastPerformance(exercises, planId, allSessions).map(
+          (performance, index) => ({
+            ...performance,
+            plan: exercises[index],
+          })
+        );
 
         setRosterPlanDetailByKey((p) => ({
           ...p,
@@ -4440,6 +4526,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
+                          exerciseVideoUrlByName={exerciseVideoUrlByName}
                           t={t}
                         />
                       ))}
@@ -4468,6 +4555,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
+                          exerciseVideoUrlByName={exerciseVideoUrlByName}
                           onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />
@@ -4497,6 +4585,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
+                          exerciseVideoUrlByName={exerciseVideoUrlByName}
                           onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />
