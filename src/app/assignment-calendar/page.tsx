@@ -278,6 +278,30 @@ type RosterSessionLogEntry =
       rawExercises: unknown;
     };
 
+function getYouTubeEmbedUrl(videoUrl: string): string | null {
+  try {
+    const url = new URL(videoUrl);
+    const host = url.hostname.toLowerCase();
+    let videoId = "";
+
+    if (host === "youtu.be") {
+      videoId = url.pathname.split("/")[1] || "";
+    } else if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+      if (url.pathname.startsWith("/shorts/") || url.pathname.startsWith("/embed/")) {
+        videoId = url.pathname.split("/")[2] || "";
+      } else if (url.pathname === "/watch") {
+        videoId = url.searchParams.get("v") || "";
+      }
+    }
+
+    return /^[a-zA-Z0-9_-]{6,}$/.test(videoId)
+      ? `https://www.youtube-nocookie.com/embed/${videoId}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function RosterSessionExerciseList({
   exercises,
   emptyLabel,
@@ -329,64 +353,95 @@ function RosterPlanExercisePerformanceList({
   exerciseVideoUrlByName: Record<string, string>;
   t: (key: TranslationKey) => string;
 }) {
+  const [selectedVideo, setSelectedVideo] = useState<{ title: string; url: string } | null>(null);
+  const embeddedVideoUrl = selectedVideo ? getYouTubeEmbedUrl(selectedVideo.url) : null;
+
   if (items.length === 0) {
     return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
   }
   return (
-    <ul className="space-y-2">
-      {items.map((item, index) => {
-        const lastHint = formatLastSessionPerformanceLabel(item.perf, {
-          weighted: (weight, reps) =>
-            t("lastSessionPerformance").replace("{weight}", String(weight)).replace("{reps}", String(reps)),
-          bodyweight: (reps) => t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
-        });
-        const sets = Number(item.plan?.sets);
-        const reps = String(item.plan?.reps ?? "").trim();
-        const restSeconds = Number(item.plan?.restTimeSeconds);
-        const hasPrescribedPlan = Number.isFinite(sets) && sets > 0 && (reps || restSeconds > 0);
-        const prescribedPlan = hasPrescribedPlan
-          ? t("calendarRosterExercisePlan")
-              .replace("{sets}", String(sets))
-              .replace("{reps}", reps || "—")
-              .replace("{seconds}", String(restSeconds > 0 ? restSeconds : "—"))
-          : String(item.plan?.notes || "").trim();
-        const videoUrl = exerciseVideoUrlByName[normalizeExerciseKey(item.name)];
-        return (
-          <li
-            key={`${item.name}-${index}`}
-            className="rounded-md border bg-background p-2 text-sm"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <p className="font-medium">{item.name}</p>
-              {videoUrl ? (
-                <Button
-                  asChild
-                  size="icon"
-                  variant="ghost"
-                  className="h-7 w-7 -mt-1 -mr-1 shrink-0 text-primary hover:text-primary"
-                >
-                  <a
-                    href={videoUrl}
-                    target="_blank"
-                    rel="noreferrer"
+    <>
+      <ul className="space-y-2">
+        {items.map((item, index) => {
+          const lastHint = formatLastSessionPerformanceLabel(item.perf, {
+            weighted: (weight, reps) =>
+              t("lastSessionPerformance").replace("{weight}", String(weight)).replace("{reps}", String(reps)),
+            bodyweight: (reps) => t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+          });
+          const sets = Number(item.plan?.sets);
+          const reps = String(item.plan?.reps ?? "").trim();
+          const restSeconds = Number(item.plan?.restTimeSeconds);
+          const hasPrescribedPlan = Number.isFinite(sets) && sets > 0 && (reps || restSeconds > 0);
+          const prescribedPlan = hasPrescribedPlan
+            ? t("calendarRosterExercisePlan")
+                .replace("{sets}", String(sets))
+                .replace("{reps}", reps || "—")
+                .replace("{seconds}", String(restSeconds > 0 ? restSeconds : "—"))
+            : String(item.plan?.notes || "").trim();
+          const videoUrl = exerciseVideoUrlByName[normalizeExerciseKey(item.name)];
+          return (
+            <li
+              key={`${item.name}-${index}`}
+              className="rounded-md border bg-background p-2 text-sm"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-medium">{item.name}</p>
+                {videoUrl ? (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 -mt-1 -mr-1 shrink-0 text-primary hover:text-primary"
+                    onClick={() => setSelectedVideo({ title: item.name, url: videoUrl })}
                     title={t("watchDemo")}
                     aria-label={`${t("watchDemo")}: ${item.name}`}
                   >
                     <CirclePlay className="h-4 w-4" />
-                  </a>
-                </Button>
+                  </Button>
+                ) : null}
+              </div>
+              {prescribedPlan ? (
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{prescribedPlan}</p>
               ) : null}
-            </div>
-            {prescribedPlan ? (
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{prescribedPlan}</p>
-            ) : null}
-            <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
-              {lastHint ?? noPerfLabel}
-            </p>
-          </li>
-        );
-      })}
-    </ul>
+              <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
+                {lastHint ?? noPerfLabel}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      <Dialog open={!!selectedVideo} onOpenChange={(open) => !open && setSelectedVideo(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t("watchDemo")} — {selectedVideo?.title}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedVideo ? (
+            embeddedVideoUrl ? (
+              <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                <iframe
+                  className="h-full w-full"
+                  src={embeddedVideoUrl}
+                  title={`${t("watchDemo")}: ${selectedVideo.title}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <a
+                href={selectedVideo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+              >
+                {t("watchDemo")}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
