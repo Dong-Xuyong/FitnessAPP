@@ -27,6 +27,7 @@ export function CoachBodyMetricForm({
 }: CoachBodyMetricFormProps) {
   const initialProfile = {
     weightKg: initialWeightKg,
+    fatMassPercent: initialBodyFatPercent,
     bodyFatPercent: initialBodyFatPercent,
   };
 

@@ -19,7 +19,14 @@ function readMetricFromSession(sessionData: Record<string, unknown>, key: BodyMe
   for (const [sessionField, metricKey] of Object.entries(SESSION_FIELD_TO_METRIC)) {
     if (metricKey !== key) continue;
     const v = Number(sessionData[sessionField]);
-    if (Number.isFinite(v) && v > 0) return Number(v.toFixed(key === "bodyFatPercent" ? 1 : 2));
+    if (Number.isFinite(v) && v > 0) {
+      return Number(v.toFixed(key === "bodyFatPercent" || key === "fatMassPercent" ? 1 : 2));
+    }
+  }
+  // Legacy sessions store fat % as sessionBodyFatPercent / bodyFatPercent
+  if (key === "fatMassPercent") {
+    const legacy = Number(sessionData.sessionBodyFatPercent ?? sessionData.bodyFatPercent);
+    if (Number.isFinite(legacy) && legacy > 0) return Number(legacy.toFixed(1));
   }
   return null;
 }
@@ -29,6 +36,14 @@ function readMetricFromHistory(entry: BodyMetricHistoryEntry, key: BodyMetricKey
   if (Number.isFinite(direct) && direct > 0) return direct;
   if (key === "weightKg") {
     const legacy = Number(entry.weightKg ?? entry.weight);
+    if (Number.isFinite(legacy) && legacy > 0) return legacy;
+  }
+  if (key === "fatMassPercent") {
+    const legacy = Number(entry.bodyFatPercent);
+    if (Number.isFinite(legacy) && legacy > 0) return legacy;
+  }
+  if (key === "bodyFatPercent") {
+    const legacy = Number(entry.fatMassPercent);
     if (Number.isFinite(legacy) && legacy > 0) return legacy;
   }
   return null;

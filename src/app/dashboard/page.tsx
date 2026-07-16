@@ -3,11 +3,12 @@
 
 import { Suspense } from "react";
 import { Navigation } from "@/components/Navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Users, Loader2, Weight, Target, UserPlus, Dumbbell, Trash2, Pencil, X,
-  Search, Banknote,
+  Search, Banknote, Cake,
 } from "lucide-react";
+import { isBirthdayToday } from "@/lib/coach-birthday-reminders";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -422,11 +423,10 @@ function DashboardContent() {
         <header className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
           <div className="min-w-0">
             <h2 className="text-2xl sm:text-3xl font-bold font-headline">{t("welcomeCoach")} {trainer?.lastName || ""}</h2>
-            <p className="text-muted-foreground text-sm sm:text-base">{t("overviewDescription")}</p>
           </div>
-          <Button asChild className="w-full sm:w-auto shrink-0">
-            <Link href="/students" className="gap-2">
-              <UserPlus className="h-4 w-4" /> {t("manageRoster")}
+          <Button asChild size="icon" className="shrink-0" title={t("manageRoster")}>
+            <Link href="/students" aria-label={t("manageRoster")}>
+              <UserPlus className="h-4 w-4" aria-hidden />
             </Link>
           </Button>
         </header>
@@ -436,7 +436,6 @@ function DashboardContent() {
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between space-y-0">
               <div className="min-w-0">
                 <CardTitle>{t("students")}</CardTitle>
-                <CardDescription>{t("studentsCardDescription")}</CardDescription>
               </div>
               <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full sm:w-auto shrink-0">
                 <Button
@@ -524,6 +523,7 @@ function DashboardContent() {
                     <div className="space-y-2 max-h-[min(60vh,520px)] overflow-y-auto pr-1">
                       {filteredDashboardRoster.map((student) => {
                         const pay = dashboardPaymentStatusMap[student.id];
+                        const isBirthday = isBirthdayToday(student.birthDate);
                         return (
                           <Link
                             key={student.id}
@@ -559,10 +559,20 @@ function DashboardContent() {
                                           {t("privateNote")}: {student.coachingNotes.trim()}
                                         </p>
                                       )}
+                                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                      {isBirthday && (
+                                        <Badge
+                                          variant="outline"
+                                          className="text-[9px] h-5 gap-1 uppercase tracking-wide bg-rose-100 text-rose-900 border-rose-200"
+                                        >
+                                          <Cake className="h-3 w-3 shrink-0" />
+                                          {t("coachBirthdayBadge")}
+                                        </Badge>
+                                      )}
                                       {pay && (
                                         <Badge
                                           variant={normalizedPaymentPaid(pay.status) ? "default" : "outline"}
-                                          className={`mt-1.5 text-[9px] h-5 gap-1 uppercase tracking-wide ${
+                                          className={`text-[9px] h-5 gap-1 uppercase tracking-wide ${
                                             normalizedPaymentPaid(pay.status)
                                               ? "bg-green-600 hover:bg-green-600"
                                               : "bg-yellow-100 text-yellow-900 border-yellow-200"
@@ -572,6 +582,7 @@ function DashboardContent() {
                                           {normalizedPaymentPaid(pay.status) ? t("paid") : t("pending")}
                                         </Badge>
                                       )}
+                                      </div>
                                       <div className="flex items-center gap-2 mt-2">
                                         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                                           <Weight className="h-3 w-3" /> {weightText}kg
@@ -646,11 +657,25 @@ function DashboardContent() {
                   )}
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <Button className="flex-1 gap-1" variant="outline" onClick={() => setIsEditing(true)}>
-                    <Pencil className="h-4 w-4" /> {t("edit")}
+                  <Button
+                    className="flex-1"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setIsEditing(true)}
+                    aria-label={t("edit")}
+                    title={t("edit")}
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden />
                   </Button>
-                  <Button className="flex-1 gap-1" variant="destructive" onClick={() => handleDeleteAssignment(selectedAssignment)}>
-                    <Trash2 className="h-4 w-4" /> {t("delete")}
+                  <Button
+                    className="flex-1"
+                    variant="destructive"
+                    size="icon"
+                    onClick={() => handleDeleteAssignment(selectedAssignment)}
+                    aria-label={t("delete")}
+                    title={t("delete")}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
                   </Button>
                 </div>
                 <Button variant="link" className="w-full text-xs" asChild>

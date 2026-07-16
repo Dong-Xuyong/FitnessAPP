@@ -150,6 +150,13 @@ import {
 } from "@/lib/student-training-access";
 import { deleteSequencePlanWithChainRepair } from "@/lib/workout-plan-sequence-delete";
 import { clearStudentAssignedPlans } from "@/lib/firestore/clear-trainer-assignments";
+import {
+  buildLatestPerfByExerciseName,
+  buildLatestPerfByPlanId,
+  formatLastSessionPerformanceLabel,
+  normalizeExerciseKey,
+  type LastSessionPerf,
+} from "@/lib/last-session-performance";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -1243,6 +1250,8 @@ interface SortableWorkoutPlanItemProps {
   setEditingAssignedExerciseNote: (note: string) => void;
   isSavingAssignedExerciseNote: boolean;
   handleSaveAssignedExerciseNote: (plan: any, index: number, note: string) => void;
+  lastPerfByPlanId: Record<string, Record<string, LastSessionPerf>>;
+  lastPerfByExercise: Record<string, LastSessionPerf>;
   t: (key: string) => string;
 }
 
@@ -1260,6 +1269,8 @@ function SortableWorkoutPlanItem({
   setEditingAssignedExerciseNote,
   isSavingAssignedExerciseNote,
   handleSaveAssignedExerciseNote,
+  lastPerfByPlanId,
+  lastPerfByExercise,
   t,
 }: SortableWorkoutPlanItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: plan.id });
@@ -1336,11 +1347,25 @@ function SortableWorkoutPlanItem({
         <div className="px-3 pb-3 border-t bg-muted/10">
           <div className="pt-3 space-y-2">
             {(plan.exercises || []).length > 0 ? (
-              (plan.exercises || []).map((exercise: any, index: number) => (
+              (plan.exercises || []).map((exercise: any, index: number) => {
+                const exerciseName =
+                  exercise.exerciseName || exercise.name || `Exercise ${index + 1}`;
+                const exKey = normalizeExerciseKey(String(exerciseName));
+                const lastPerf =
+                  lastPerfByPlanId[plan.id]?.[exKey] ?? lastPerfByExercise[exKey];
+                const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
+                  weighted: (weight, reps) =>
+                    t("lastSessionPerformance")
+                      .replace("{weight}", String(weight))
+                      .replace("{reps}", String(reps)),
+                  bodyweight: (reps) =>
+                    t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+                });
+                return (
                 <div key={index} className="rounded-md border bg-background p-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium">
-                      {exercise.exerciseName || exercise.name || `Exercise ${index + 1}`}
+                      {exerciseName}
                     </p>
                     <Button
                       size="icon"
@@ -1394,14 +1419,22 @@ function SortableWorkoutPlanItem({
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
-                      {exercise.notes || (
-                        <span className="italic">No notes yet. Click pencil to edit.</span>
-                      )}
-                    </p>
+                    <>
+                      <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
+                        {exercise.notes || (
+                          <span className="italic">No notes yet. Click pencil to edit.</span>
+                        )}
+                      </p>
+                      {lastHint ? (
+                        <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
+                          {lastHint}
+                        </p>
+                      ) : null}
+                    </>
                   )}
                 </div>
-              ))
+                );
+              })
             ) : (
               <p className="text-sm text-muted-foreground">{t("noExercisesDefined")}</p>
             )}
@@ -1667,6 +1700,32 @@ export default function StudentDetailPage({ id }: { id: string }) {
     }
     return s;
   }, [workoutSessions, workoutPlans]);
+
+  const { lastPerfByPlanId, lastPerfByExercise } = useMemo(() => {
+    const parseCompletedAtMs = (ca: unknown): number => {
+      if (ca == null) return 0;
+      if (
+        typeof ca === "object" &&
+        ca !== null &&
+        "toDate" in (ca as object) &&
+        typeof (ca as { toDate?: () => Date }).toDate === "function"
+      ) {
+        return (ca as { toDate: () => Date }).toDate().getTime();
+      }
+      if (typeof ca === "string" && ca.trim()) {
+        const p = Date.parse(ca);
+        return Number.isFinite(p) ? p : 0;
+      }
+      return 0;
+    };
+    const sessionRows = [...(workoutSessions || [])].sort(
+      (a: any, b: any) => parseCompletedAtMs(b.completedAt) - parseCompletedAtMs(a.completedAt)
+    );
+    return {
+      lastPerfByPlanId: buildLatestPerfByPlanId(sessionRows),
+      lastPerfByExercise: buildLatestPerfByExerciseName(sessionRows),
+    };
+  }, [workoutSessions]);
 
   const sessionSlotsRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -2905,6 +2964,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
                               setEditingAssignedExerciseNote={setEditingAssignedExerciseNote}
                               isSavingAssignedExerciseNote={isSavingAssignedExerciseNote}
                               handleSaveAssignedExerciseNote={handleSaveAssignedExerciseNote}
+                              lastPerfByPlanId={lastPerfByPlanId}
+                              lastPerfByExercise={lastPerfByExercise}
                               t={t}
                             />
                           ))}
