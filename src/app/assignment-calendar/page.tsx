@@ -760,25 +760,26 @@ function CalendarDayRosterRow({
           ) : sessionLog.status === "error" ? (
             <>
               <p className="text-xs text-destructive">{t("calendarRosterPlanDetailError")}</p>
-              <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
-                <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={coachSessionHrefForPlan(expandPlanId)}>
-                    <ClipboardList className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterLogOrEditSession")}
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button size="icon" className="h-9 w-9" asChild title={t("calendarRosterLogOrEditSession")}>
+                  <Link href={coachSessionHrefForPlan(expandPlanId)} aria-label={t("calendarRosterLogOrEditSession")}>
+                    <ClipboardList className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+                <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                   <Link
                     href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                    aria-label={t("calendarRosterOpenManagement")}
                   >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterOpenManagement")}
+                    <ExternalLink className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={`/students/${studentProfileId}?tab=workoutHistory`}>
-                    <History className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterViewWorkoutHistory")}
+                <Button variant="outline" size="icon" className="h-9 w-9" asChild title={t("calendarRosterViewWorkoutHistory")}>
+                  <Link
+                    href={`/students/${studentProfileId}?tab=workoutHistory`}
+                    aria-label={t("calendarRosterViewWorkoutHistory")}
+                  >
+                    <History className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
               </div>
@@ -822,19 +823,21 @@ function CalendarDayRosterRow({
                 exercises={sessionLog.exercises}
                 emptyLabel={t("calendarRosterPlanDetailEmpty")}
               />
-              <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
-                <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                   <Link
                     href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                    aria-label={t("calendarRosterOpenManagement")}
                   >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterOpenManagement")}
+                    <ExternalLink className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={`/students/${studentProfileId}?tab=workoutHistory`}>
-                    <History className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterViewWorkoutHistory")}
+                <Button variant="outline" size="icon" className="h-9 w-9" asChild title={t("calendarRosterViewWorkoutHistory")}>
+                  <Link
+                    href={`/students/${studentProfileId}?tab=workoutHistory`}
+                    aria-label={t("calendarRosterViewWorkoutHistory")}
+                  >
+                    <History className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
               </div>
@@ -842,28 +845,26 @@ function CalendarDayRosterRow({
           ) : sessionLog.status === "empty" ? (
             <>
               <p className="text-xs text-muted-foreground mb-2">{t("calendarRosterSessionLogEmpty")}</p>
-              <p className="text-xs text-muted-foreground/90 mb-2 leading-snug">
-                {t("calendarRosterSessionLogCoachHint")}
-              </p>
-              <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
-                <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={coachSessionHrefForPlan(expandPlanId)}>
-                    <ClipboardList className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterLogOrEditSession")}
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button size="icon" className="h-9 w-9" asChild title={t("calendarRosterLogOrEditSession")}>
+                  <Link href={coachSessionHrefForPlan(expandPlanId)} aria-label={t("calendarRosterLogOrEditSession")}>
+                    <ClipboardList className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+                <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                   <Link
                     href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                    aria-label={t("calendarRosterOpenManagement")}
                   >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterOpenManagement")}
+                    <ExternalLink className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={`/students/${studentProfileId}?tab=workoutHistory`}>
-                    <History className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterViewWorkoutHistory")}
+                <Button variant="outline" size="icon" className="h-9 w-9" asChild title={t("calendarRosterViewWorkoutHistory")}>
+                  <Link
+                    href={`/students/${studentProfileId}?tab=workoutHistory`}
+                    aria-label={t("calendarRosterViewWorkoutHistory")}
+                  >
+                    <History className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
               </div>
@@ -941,19 +942,18 @@ function CalendarDayRosterRow({
                 )}
               </>
             )}
-            <div className="flex flex-col sm:flex-row gap-2 pt-1">
-              <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                 <Link
                   href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                  aria-label={t("calendarRosterOpenManagement")}
                 >
-                  <ExternalLink className="h-4 w-4 shrink-0" />
-                  {t("calendarRosterOpenManagement")}
+                  <ExternalLink className="h-4 w-4" aria-hidden />
                 </Link>
               </Button>
-              <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                <Link href={coachSessionHrefForPlan(expandPlanId)}>
-                  <ClipboardList className="h-4 w-4 shrink-0" />
-                  {t("calendarRosterLogSession")}
+              <Button size="icon" className="h-9 w-9" asChild title={t("calendarRosterLogSession")}>
+                <Link href={coachSessionHrefForPlan(expandPlanId)} aria-label={t("calendarRosterLogSession")}>
+                  <ClipboardList className="h-4 w-4" aria-hidden />
                 </Link>
               </Button>
             </div>
@@ -3127,7 +3127,6 @@ export default function AssignmentCalendarPage() {
       <div className="space-y-6">
         <header>
           <h2 className="text-3xl font-bold font-headline">{t("assignmentCalendar")}</h2>
-          <p className="text-muted-foreground">Agenda de sessões com blocos de horário</p>
         </header>
 
         {/* ── Assign to week dialog ─────────────────────────────────────────── */}
@@ -3851,9 +3850,8 @@ export default function AssignmentCalendarPage() {
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-primary" /> Calendário
+                <CalendarDays className="h-4 w-4 text-primary" aria-hidden /> Calendário
               </CardTitle>
-              <CardDescription>Seleciona um dia para ver o horário</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Student filter */}
@@ -4008,15 +4006,17 @@ export default function AssignmentCalendarPage() {
                       </button>
                     </CollapsibleTrigger>
                     <Button
-                      size="sm"
+                      size="icon"
                       variant="ghost"
-                      className="h-7 px-2 gap-1 text-xs shrink-0"
+                      className="h-7 w-7 shrink-0"
                       onClick={(e) => {
                         e.preventDefault();
                         openAvailability();
                       }}
+                      aria-label={t("edit")}
+                      title={t("edit")}
                     >
-                      <Settings2 className="h-3.5 w-3.5" /> Editar
+                      <Settings2 className="h-3.5 w-3.5" aria-hidden />
                     </Button>
                   </div>
                   <CollapsibleContent className="space-y-1">
@@ -4332,19 +4332,27 @@ export default function AssignmentCalendarPage() {
                           )}
                         </div>
                         {isSessionStart ? (
-                          <Button size="sm" variant="outline"
-                            className="shrink-0 h-8 gap-1.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-                            onClick={() => handleCoachToggleStudent(time)} disabled={busy}>
-                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserMinus className="h-3.5 w-3.5" />}
-                            Remover
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="shrink-0 h-8 w-8 border-destructive/40 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleCoachToggleStudent(time)}
+                            disabled={busy}
+                            aria-label={t("remove")}
+                            title={t("remove")}
+                          >
+                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <UserMinus className="h-3.5 w-3.5" aria-hidden />}
                           </Button>
                         ) : isContinuation ? null : !isFull ? (
-                          <Button size="sm"
-                            className="shrink-0 h-8 gap-1.5 text-xs bg-primary/90"
+                          <Button
+                            size="icon"
+                            className="shrink-0 h-8 w-8 bg-primary/90"
                             onClick={() => handleCoachToggleStudent(time)}
-                            disabled={busy || isBookingBlockedAtTime(time)}>
-                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                            Inscrever
+                            disabled={busy || isBookingBlockedAtTime(time)}
+                            aria-label={t("sessionBookingJoin")}
+                            title={t("sessionBookingJoin")}
+                          >
+                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <UserPlus className="h-3.5 w-3.5" aria-hidden />}
                           </Button>
                         ) : null}
                       </div>
@@ -4501,14 +4509,16 @@ export default function AssignmentCalendarPage() {
                   </AlertDialog>
                 ) : null}
                 <Button
-                  size="sm"
-                  className="gap-1.5 shrink-0"
+                  size="icon"
+                  className="shrink-0"
                   onClick={() => {
                     setAssignWeekStudentIds(isFilterActive && filterStudentId ? [filterStudentId] : []);
                     setAssignWeekOpen(true);
                   }}
+                  aria-label={t("assignProgram")}
+                  title={t("assignProgram")}
                 >
-                  <UserPlus className="h-4 w-4" /> {t("assignProgram")}
+                  <UserPlus className="h-4 w-4" aria-hidden />
                 </Button>
               </div>
             </div>

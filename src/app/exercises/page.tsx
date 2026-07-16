@@ -221,17 +221,13 @@ export default function ExercisesPage() {
             <CoachLibraryExcelActions />
           <Dialog open={isAddingExercise} onOpenChange={setIsAddingExercise}>
             <DialogTrigger asChild>
-              <Button className="gap-2 shrink-0">
-                <Plus className="h-4 w-4" />
-                {t("addExerciseBtn")}
+              <Button size="icon" className="shrink-0" aria-label={t("addExerciseBtn")} title={t("addExerciseBtn")}>
+                <Plus className="h-4 w-4" aria-hidden />
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{t("addNewExercise")}</DialogTitle>
-                <DialogDescription>
-                  {t("addNewExerciseDesc")}
-                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

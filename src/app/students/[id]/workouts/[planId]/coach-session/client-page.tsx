@@ -353,47 +353,41 @@ export default function CoachWorkoutSessionPage({
         <header className="space-y-1">
           <Link
             href={`/students/${storageStudentId}?tab=management`}
-            className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-muted/40"
+            aria-label={t("coachWorkoutSessionBack")}
+            title={t("coachWorkoutSessionBack")}
           >
-            <X className="h-3 w-3" /> {t("coachWorkoutSessionBack")}
+            <X className="h-4 w-4" aria-hidden />
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="text-xs">
               {t("coachWorkoutSessionTitle")}
             </Badge>
+            <span className="text-sm text-muted-foreground truncate">{studentLabel}</span>
           </div>
           <h1 className="text-3xl font-bold font-headline tracking-tight">{workout.title}</h1>
-          <p className="text-muted-foreground text-sm">
-            {studentLabel} — {t("coachWorkoutSessionSubtitle")}
-          </p>
         </header>
 
         <Card>
           <Collapsible open={sessionFeedbackOpen} onOpenChange={setSessionFeedbackOpen}>
             <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-              <div className="min-w-0 space-y-1">
-                <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
-                <p className="text-xs text-muted-foreground">{t("sessionFeedbackHint")}</p>
-              </div>
+              <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
               <CollapsibleTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="shrink-0 gap-1.5"
+                  size="icon"
+                  className="shrink-0"
                   aria-expanded={sessionFeedbackOpen}
                   aria-label={
                     sessionFeedbackOpen ? t("coachSessionFeedbackCollapse") : t("coachSessionFeedbackExpand")
                   }
                 >
                   {sessionFeedbackOpen ? (
-                    <ChevronUp className="h-4 w-4" />
+                    <ChevronUp className="h-4 w-4" aria-hidden />
                   ) : (
-                    <ChevronDown className="h-4 w-4" />
+                    <ChevronDown className="h-4 w-4" aria-hidden />
                   )}
-                  <span className="hidden sm:inline">
-                    {sessionFeedbackOpen ? t("coachSessionFeedbackCollapse") : t("coachSessionFeedbackExpand")}
-                  </span>
                 </Button>
               </CollapsibleTrigger>
             </CardHeader>

@@ -487,10 +487,9 @@ export default function StudentShopPage() {
       <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
-            <Store className="h-8 w-8 text-accent shrink-0" />
+            <Store className="h-8 w-8 text-accent shrink-0" aria-hidden />
             {t("shop")}
           </h1>
-          <p className="text-muted-foreground">{t("shopPageDescription")}</p>
         </div>
       </header>
 

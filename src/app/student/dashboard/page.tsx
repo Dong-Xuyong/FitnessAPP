@@ -8,7 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MilestonesTab } from "@/components/MilestonesTab";
-import { Dumbbell, Calendar, Play, TrendingUp, Loader2, Flame, Target, Percent, ClipboardCheck } from "lucide-react";
+import {
+  Dumbbell,
+  Calendar,
+  Play,
+  TrendingUp,
+  Loader2,
+  Flame,
+  Target,
+  Percent,
+  ClipboardCheck,
+  ChevronRight,
+  Info,
+} from "lucide-react";
 import Link from "next/link";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { useI18n } from "@/lib/i18n";
@@ -158,7 +170,6 @@ export default function StudentDashboardPage() {
             setCurrentStreak(0);
             setLastSessionDoneAt(null);
             setMonthlyDoneCount(0);
-            setMonthlyPlannedCount(0);
           }
         }
       } catch (e) {
@@ -234,9 +245,18 @@ export default function StudentDashboardPage() {
   return (
       <Tabs value={activeTab} onValueChange={onDashboardTabChange} className="space-y-6">
         <TabsList className="bg-card border h-auto w-full grid grid-cols-3">
-          <TabsTrigger value="home">{t("myDashboard")}</TabsTrigger>
-          <TabsTrigger value="progress">{t("progress")}</TabsTrigger>
-          <TabsTrigger value="milestones">{t("milestones")}</TabsTrigger>
+          <TabsTrigger value="home" aria-label={t("myDashboard")} title={t("myDashboard")} className="gap-1.5">
+            <Dumbbell className="h-4 w-4" aria-hidden />
+            <span className="sr-only sm:not-sr-only sm:inline truncate">{t("myDashboard")}</span>
+          </TabsTrigger>
+          <TabsTrigger value="progress" aria-label={t("progress")} title={t("progress")} className="gap-1.5">
+            <TrendingUp className="h-4 w-4" aria-hidden />
+            <span className="sr-only sm:not-sr-only sm:inline truncate">{t("progress")}</span>
+          </TabsTrigger>
+          <TabsTrigger value="milestones" aria-label={t("milestones")} title={t("milestones")} className="gap-1.5">
+            <Target className="h-4 w-4" aria-hidden />
+            <span className="sr-only sm:not-sr-only sm:inline truncate">{t("milestones")}</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="home" className="space-y-6">
@@ -258,27 +278,38 @@ export default function StudentDashboardPage() {
             <Card className="md:col-span-2 bg-primary text-primary-foreground">
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle>{t("trainingStatus")}</CardTitle>
-                  <CardDescription className="text-primary-foreground/80">
-                    {trainingStatusDescription}
-                  </CardDescription>
+                  <CardTitle
+                    className="flex items-center gap-2"
+                    title={trainingStatusDescription}
+                  >
+                    {t("trainingStatus")}
+                  </CardTitle>
                 </div>
-                <Dumbbell className="h-8 w-8 opacity-20" />
+                <Dumbbell className="h-8 w-8 opacity-20" aria-hidden />
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>{t("sessionAttendanceStreakTitle")}</span>
+                  <div className="flex justify-between text-sm items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5">
+                      {t("sessionAttendanceStreakTitle")}
+                      <button
+                        type="button"
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-md opacity-80 hover:opacity-100"
+                        title={t("sessionAttendanceStreakHint")}
+                        aria-label={t("sessionAttendanceStreakHint")}
+                      >
+                        <Info className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </span>
                     <span>
                       {currentStreak} {t("sessionsStreakCompact")}{" "}
-                      <Flame className="inline h-4 w-4" />
+                      <Flame className="inline h-4 w-4" aria-hidden />
                     </span>
                   </div>
                   <Progress
                     value={Math.min(currentStreak * 10, 100)}
                     className="h-2 bg-primary-foreground/20"
                   />
-                  <p className="text-xs text-primary-foreground/70">{t("sessionAttendanceStreakHint")}</p>
                 </div>
                 {studentData.trainerId && (
                   <div className="space-y-2 pt-4 border-t border-primary-foreground/15">
@@ -287,9 +318,14 @@ export default function StudentDashboardPage() {
                         <ClipboardCheck className="h-4 w-4" aria-hidden />
                         {t("goalCompletion")}
                       </span>
-                      <span className="text-2xl font-bold tabular-nums">{monthlyDoneCount}</span>
+                      <span
+                        className="text-2xl font-bold tabular-nums"
+                        title={t("workoutsCompletedThisMonth")}
+                        aria-label={`${monthlyDoneCount} ${t("workoutsCompletedThisMonth")}`}
+                      >
+                        {monthlyDoneCount}
+                      </span>
                     </div>
-                    <p className="text-xs text-primary-foreground/70">{t("workoutsCompletedThisMonth")}</p>
                   </div>
                 )}
                 <div className="flex items-center justify-between pt-4">
@@ -303,9 +339,12 @@ export default function StudentDashboardPage() {
                     </span>
                   </div>
                   {studentData.currentProgramId && (
-                    <Button variant="secondary" asChild>
-                      <Link href={`/student/workouts/${studentData.currentProgramId}/session`}>
-                        <Play className="h-4 w-4 mr-2" /> {t("resume")}
+                    <Button variant="secondary" size="icon" asChild title={t("resume")}>
+                      <Link
+                        href={`/student/workouts/${studentData.currentProgramId}/session`}
+                        aria-label={t("resume")}
+                      >
+                        <Play className="h-4 w-4" aria-hidden />
                       </Link>
                     </Button>
                   )}
@@ -366,19 +405,20 @@ export default function StudentDashboardPage() {
               <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2 text-lg">
-                    <Target className="h-5 w-5 text-primary shrink-0" />
+                    <Target className="h-5 w-5 text-primary shrink-0" aria-hidden />
                     {t("milestones")}
                   </CardTitle>
-                  <CardDescription>{t("nextGoalsToCelebrate")}</CardDescription>
                 </div>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="shrink-0 self-stretch sm:self-auto"
+                  size="icon"
+                  className="shrink-0"
                   onClick={() => onDashboardTabChange("milestones")}
+                  aria-label={t("milestonesViewAll")}
+                  title={t("milestonesViewAll")}
                 >
-                  {t("milestonesViewAll")}
+                  <ChevronRight className="h-4 w-4" aria-hidden />
                 </Button>
               </CardHeader>
               <CardContent className="space-y-3">

@@ -464,8 +464,16 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
                       })
                     )}
                   </p>
-                  <Button size="sm" variant="secondary" className="shrink-0 w-fit" asChild>
-                    <Link href="/student/billing">{t("paymentReminderCta")}</Link>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="shrink-0"
+                    asChild
+                    title={t("paymentReminderCta")}
+                  >
+                    <Link href="/student/billing" aria-label={t("paymentReminderCta")}>
+                      <CreditCard className="h-4 w-4" aria-hidden />
+                    </Link>
                   </Button>
                 </AlertDescription>
               </div>

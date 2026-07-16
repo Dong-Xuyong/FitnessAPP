@@ -36,6 +36,7 @@ import {
   ChevronUp,
   ListOrdered,
   GripVertical,
+  Info,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
@@ -116,6 +117,7 @@ import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
+import { ageFromBirthDate, normalizeBirthDateInput } from "@/lib/body-metric-input";
 import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
 import {
   buildPaymentAmounts,
@@ -717,9 +719,7 @@ function BillingTab({
                   <Banknote className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1 space-y-1">
                     <CardTitle className="text-base">{t("billingSettings")}</CardTitle>
-                    {billingConfigOpen ? (
-                      <CardDescription>{t("billingCalcDesc")}</CardDescription>
-                    ) : (
+                    {!billingConfigOpen && (
                       <p className="text-sm text-muted-foreground truncate">{billingConfigSummary}</p>
                     )}
                   </div>
@@ -827,8 +827,13 @@ function BillingTab({
               rows={3}
             />
           </div>
-          <Button onClick={handleSaveBillingConfig} className="gap-2">
-            <Save className="h-4 w-4" /> {t("saveSettings")}
+          <Button
+            onClick={handleSaveBillingConfig}
+            size="icon"
+            aria-label={t("saveSettings")}
+            title={t("saveSettings")}
+          >
+            <Save className="h-4 w-4" aria-hidden />
           </Button>
         </CardContent>
           </CollapsibleContent>
@@ -841,7 +846,6 @@ function BillingTab({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-2 flex-1">
               <CardTitle>{t("paymentHistory")}</CardTitle>
-              <CardDescription>{t("recordPayments")}</CardDescription>
               <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {t("shopBillingUnpaidTitle")}
@@ -889,7 +893,12 @@ function BillingTab({
                   {t("shopBillingTotal")}: €{suggestedRecordPayment.amount.toFixed(2)}
                 </p>
               ) : null}
-              <Button size="sm" className="gap-1 shrink-0 w-full sm:w-auto" onClick={() => {
+              <Button
+                size="icon"
+                className="shrink-0"
+                aria-label={t("recordPayment")}
+                title={t("recordPayment")}
+                onClick={() => {
                 if (!showAddPayment) {
                   setNewPayment({
                     period: suggestedRecordPayment.period,
@@ -903,7 +912,7 @@ function BillingTab({
                 }
                 setShowAddPayment(!showAddPayment);
               }}>
-                <Plus className="h-4 w-4" /> {t("recordPayment")}
+                <Plus className="h-4 w-4" aria-hidden />
               </Button>
             </div>
           </div>
@@ -1047,11 +1056,24 @@ function BillingTab({
                         </div>
                       </div>
                       <div className="flex gap-2 justify-end">
-                        <Button size="sm" variant="outline" onClick={() => setEditingPaymentId(null)}>
-                          {t("cancel")}
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          onClick={() => setEditingPaymentId(null)}
+                          aria-label={t("cancel")}
+                          title={t("cancel")}
+                        >
+                          <X className="h-4 w-4" aria-hidden />
                         </Button>
-                        <Button size="sm" onClick={() => handleUpdatePayment(p.id)}>
-                          {t("save")}
+                        <Button
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleUpdatePayment(p.id)}
+                          aria-label={t("save")}
+                          title={t("save")}
+                        >
+                          <Save className="h-4 w-4" aria-hidden />
                         </Button>
                       </div>
                     </div>
@@ -1157,11 +1179,25 @@ function BillingTab({
                               ? t("pending")
                               : String(p.status ?? "—")}
                         </Badge>
-                        <Button size="sm" variant="outline" onClick={() => startEditPayment(p)}>
-                          {t("edit")}
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          onClick={() => startEditPayment(p)}
+                          aria-label={t("edit")}
+                          title={t("edit")}
+                        >
+                          <Pencil className="h-4 w-4" aria-hidden />
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => setConfirmDeletePaymentId(p.id)}>
-                          {t("delete")}
+                        <Button
+                          size="icon"
+                          variant="destructive"
+                          className="h-8 w-8"
+                          onClick={() => setConfirmDeletePaymentId(p.id)}
+                          aria-label={t("delete")}
+                          title={t("delete")}
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden />
                         </Button>
                       </div>
                     </>
@@ -1391,19 +1427,20 @@ function SortableWorkoutPlanItem({
                       />
                       <div className="flex gap-2">
                         <Button
-                          size="sm"
-                          className="h-7 text-xs gap-1.5"
+                          size="icon"
+                          className="h-7 w-7"
                           onClick={() =>
                             handleSaveAssignedExerciseNote(plan, index, editingAssignedExerciseNote)
                           }
                           disabled={isSavingAssignedExerciseNote}
+                          aria-label={t("save")}
+                          title={t("save")}
                         >
                           {isSavingAssignedExerciseNote ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
                           ) : (
-                            <Save className="h-3 w-3" />
+                            <Save className="h-3 w-3" aria-hidden />
                           )}
-                          {t("save")}
                         </Button>
                         <Button
                           size="sm"
@@ -1489,6 +1526,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [confirmDeletePlanId, setConfirmDeletePlanId] = useState<string | null>(null);
   const [coachingNotes, setCoachingNotes] = useState("");
   const [editStats, setEditStats] = useState({
+    birthDate: "",
     goalWeightKg: "",
     goalBodyFatPercent: "",
     goalType: "",
@@ -2042,8 +2080,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   useEffect(() => {
     if (effectiveRoster) {
+      const roster = effectiveRoster as Record<string, unknown>;
+      const global = (globalStudent as Record<string, unknown> | null) || null;
       setCoachingNotes(effectiveRoster.coachingNotes || "");
       setEditStats({
+        birthDate: normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
         goalWeightKg: effectiveRoster.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
@@ -2054,6 +2095,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
     } else if (globalStudent) {
       setCoachingNotes("");
       setEditStats({
+        birthDate: normalizeBirthDateInput((globalStudent as Record<string, unknown>).birthDate),
         goalWeightKg: globalStudent.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
@@ -2073,6 +2115,9 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const goalsSummary = useMemo(() => {
     const parts: string[] = [];
+    if (editStats.birthDate.trim()) {
+      parts.push(editStats.birthDate);
+    }
     if (editStats.goalWeightKg.trim()) {
       parts.push(`${editStats.goalWeightKg} kg`);
     }
@@ -2104,10 +2149,16 @@ export default function StudentDetailPage({ id }: { id: string }) {
           firstName: normalized.firstName,
           lastName: normalized.lastName,
           email: (g.email as string) || "",
-          age: Number(g.age) || 0,
+          birthDate: normalizeBirthDateInput(g.birthDate) || null,
+          age: Number(g.age) || ageFromBirthDate(normalizeBirthDateInput(g.birthDate)) || 0,
           sex: (g.sex as string) || "other",
           weightKg: Number(g.weightKg) || 0,
           heightCm: Number(g.heightCm) || 0,
+          leanMassPercent: Number(g.leanMassPercent) || 0,
+          fatMassPercent: Number(g.fatMassPercent ?? g.bodyFatPercent) || 0,
+          bodyFatPercent: Number(g.fatMassPercent ?? g.bodyFatPercent) || 0,
+          visceralFatScore: Number(g.visceralFatScore) || 0,
+          bmi: Number(g.bmi) || 0,
           goalType: (g.goalType as string) || "general",
           goalWeightKg: Number(g.goalWeightKg) || 0,
           goalBodyFatPercent: Number(g.goalBodyFatPercent) || 0,
@@ -2139,17 +2190,32 @@ export default function StudentDetailPage({ id }: { id: string }) {
   };
 
   const handleUpdateStudent = async () => {
-    if (portalOnly || !studentRef || !user) return;
+    if (portalOnly || !studentRef || !user || !db) return;
     setIsSaving(true);
     try {
-      // Ensure trainerId is preserved to satisfy security rules
-      updateDocumentNonBlocking(studentRef, {
+      const birthDate = normalizeBirthDateInput(editStats.birthDate);
+      const derivedAge = birthDate ? ageFromBirthDate(birthDate) : null;
+      const patch: Record<string, unknown> = {
         trainerId: user.uid,
         coachingNotes,
+        birthDate: birthDate || null,
         goalWeightKg: Number(editStats.goalWeightKg) || 0,
         goalBodyFatPercent: Number(editStats.goalBodyFatPercent) || 0,
         goalType: editStats.goalType,
-      });
+      };
+      if (derivedAge != null) patch.age = derivedAge;
+
+      // Ensure trainerId is preserved to satisfy security rules
+      updateDocumentNonBlocking(studentRef, patch);
+
+      const globalUid = coachBodyMetricGlobalStudentId;
+      if (globalUid) {
+        updateDocumentNonBlocking(doc(db, "students", globalUid), {
+          birthDate: birthDate || null,
+          ...(derivedAge != null ? { age: derivedAge } : {}),
+        });
+      }
+
       toast({
         title: t("profileUpdated"),
         description: t("coachingDataSaved"),
@@ -2288,6 +2354,15 @@ export default function StudentDetailPage({ id }: { id: string }) {
               <p className="text-xs text-muted-foreground flex items-center gap-2">
                 <Calendar className="h-3 w-3" /> {t("memberSince")} {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
               </p>
+              {editStats.birthDate ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("birthDate")}:{" "}
+                  {new Date(`${editStats.birthDate}T00:00:00`).toLocaleDateString()}
+                  {ageFromBirthDate(editStats.birthDate) != null
+                    ? ` · ${t("age")} ${ageFromBirthDate(editStats.birthDate)}`
+                    : ""}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -2495,27 +2570,28 @@ export default function StudentDetailPage({ id }: { id: string }) {
           </TabsList>
 
           <TabsContent value="progress" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">
               {user && (
-                <BodyMetricsPanel
-                  trainerId={user.uid}
-                  rosterStudentId={id}
-                  globalStudentId={coachBodyMetricGlobalStudentId}
-                  canWriteSession={!portalOnly}
-                  source="coach"
-                  initialProfile={(globalStudent as Record<string, unknown> | null) ?? (student as Record<string, unknown> | null)}
-                  existingWeightHistory={(globalStudent as { weightHistory?: unknown } | null)?.weightHistory}
-                  goalWeightKg={student?.goalWeightKg}
-                  goalBodyFatPercent={Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent) || null}
-                  goalType={student?.goalType}
-                  showGoals
-                />
+                <div className="min-w-0">
+                  <BodyMetricsPanel
+                    trainerId={user.uid}
+                    rosterStudentId={id}
+                    globalStudentId={coachBodyMetricGlobalStudentId}
+                    canWriteSession={!portalOnly}
+                    source="coach"
+                    initialProfile={(globalStudent as Record<string, unknown> | null) ?? (student as Record<string, unknown> | null)}
+                    existingWeightHistory={(globalStudent as { weightHistory?: unknown } | null)?.weightHistory}
+                    goalWeightKg={student?.goalWeightKg}
+                    goalBodyFatPercent={Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent) || null}
+                    goalType={student?.goalType}
+                    showGoals
+                  />
+                </div>
               )}
 
               <Card>
                 <CardHeader>
                   <CardTitle>{t("strengthProgression")}</CardTitle>
-                  <CardDescription>{t("strengthProgressionDesc")}</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px]">
                   {strengthExerciseOptions.length > 0 ? (
@@ -2566,31 +2642,40 @@ export default function StudentDetailPage({ id }: { id: string }) {
               <Card className="bg-accent/5">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Zap className="h-4 w-4 text-accent" />
+                    <Zap className="h-4 w-4 text-accent" aria-hidden />
                     {t("sessionAttendanceStreakTitle")}
+                    <button
+                      type="button"
+                      className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                      title={t("sessionAttendanceStreakHint")}
+                      aria-label={t("sessionAttendanceStreakHint")}
+                    >
+                      <Info className="h-3.5 w-3.5" aria-hidden />
+                    </button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold">
                     {sessionAttendanceStreak} {t("sessionsStreakCompact")}
                   </p>
-                  <p className="text-xs text-muted-foreground">{t("sessionAttendanceStreakHint")}</p>
                 </CardContent>
               </Card>
               <Card className="bg-secondary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <History className="h-4 w-4 text-primary" />
+                    <History className="h-4 w-4 text-primary" aria-hidden />
                     {t("progressCardSessionsTitle")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm font-medium">
+                  <p
+                    className="text-sm font-medium"
+                    title={t("progressCardSessionsHint")}
+                  >
                     {lastSessionAt
                       ? new Date(lastSessionAt).toLocaleDateString()
                       : t("noWorkoutSessions")}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">{t("progressCardSessionsHint")}</p>
                 </CardContent>
               </Card>
             </div>
@@ -2771,9 +2856,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                           <TrendingDown className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                           <div className="min-w-0 flex-1 space-y-1">
                             <CardTitle className="text-base">{t("trainerNotes")}</CardTitle>
-                            {coachingNotesOpen ? (
-                              <CardDescription>{t("privateNotes")}</CardDescription>
-                            ) : (
+                            {!coachingNotesOpen && (
                               <p className="text-sm text-muted-foreground truncate">{coachingNotesSummary}</p>
                             )}
                           </div>
@@ -2797,12 +2880,14 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       </CardContent>
                       <CardFooter className="bg-muted/5 border-t">
                         <Button
-                          className="gap-2 ml-auto"
+                          size="icon"
+                          className="ml-auto"
                           onClick={handleUpdateStudent}
                           disabled={isSaving || portalOnly}
+                          aria-label={t("saveCoachingNotes")}
+                          title={t("saveCoachingNotes")}
                         >
-                          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                          {t("saveCoachingNotes")}
+                          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
                         </Button>
                       </CardFooter>
                     </CollapsibleContent>
@@ -2813,7 +2898,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
                   <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
                     <div className="space-y-1.5">
                       <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
-                      <CardDescription>{t("assignedWorkouts")}</CardDescription>
                     </div>
                     <div className="flex flex-wrap gap-2 shrink-0">
                       <AlertDialog
@@ -2989,9 +3073,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                         >
                           <div className="min-w-0 flex-1 space-y-1">
                             <CardTitle className="text-base">{t("adjustGoals")}</CardTitle>
-                            {goalsOpen ? (
-                              <CardDescription>{t("updateTargetMetrics")}</CardDescription>
-                            ) : (
+                            {!goalsOpen && (
                               <p className="text-sm text-muted-foreground truncate">{goalsSummary}</p>
                             )}
                           </div>
@@ -3005,6 +3087,18 @@ export default function StudentDetailPage({ id }: { id: string }) {
                     </CardHeader>
                     <CollapsibleContent>
                       <CardContent className="space-y-4 pt-0">
+                        <div className="space-y-2">
+                          <Label htmlFor="coach-student-birthDate">{t("birthDate")}</Label>
+                          <Input
+                            id="coach-student-birthDate"
+                            type="date"
+                            value={editStats.birthDate}
+                            onChange={(e) =>
+                              setEditStats({ ...editStats, birthDate: e.target.value })
+                            }
+                            disabled={portalOnly}
+                          />
+                        </div>
                         <div className="space-y-2">
                           <Label>{t("goalWeight")}</Label>
                           <Input

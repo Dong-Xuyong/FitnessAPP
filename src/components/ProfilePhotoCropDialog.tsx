@@ -7,7 +7,6 @@ import "react-easy-crop/react-easy-crop.css";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -15,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { getCroppedImageBlob } from "@/lib/crop-image-to-blob";
 
@@ -73,7 +72,6 @@ export function ProfilePhotoCropDialog({
       <DialogContent className="max-w-lg gap-4 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("profilePhotoAdjustTitle")}</DialogTitle>
-          <DialogDescription>{t("profilePhotoAdjustDesc")}</DialogDescription>
         </DialogHeader>
 
         {!imageSrc ? (
@@ -122,9 +120,14 @@ export function ProfilePhotoCropDialog({
                 onClick={() => void handleSave()}
                 disabled={isSaving || !croppedAreaPixels}
                 className="gap-2"
+                aria-label={t("profilePhotoSaveCropped")}
               >
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {t("profilePhotoSaveCropped")}
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Check className="h-4 w-4" aria-hidden />
+                )}
+                <span className="sm:inline">{t("profilePhotoSaveCropped")}</span>
               </Button>
             </DialogFooter>
           </>

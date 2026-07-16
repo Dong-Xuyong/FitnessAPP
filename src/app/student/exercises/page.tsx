@@ -179,7 +179,6 @@ export default function StudentExercisesPage() {
       <div className="space-y-4">
         <header>
           <h1 className="text-2xl md:text-3xl font-bold font-headline">{t("exercises")}</h1>
-          <p className="text-sm text-muted-foreground">{t("exerciseLibraryShared")}</p>
         </header>
 
         <div className="relative">

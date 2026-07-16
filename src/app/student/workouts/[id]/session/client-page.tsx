@@ -20,6 +20,7 @@ import {
   ChevronUp,
   CirclePlay,
   ExternalLink,
+  Info,
 } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
@@ -555,9 +556,11 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
         <header className="space-y-1">
           <Link
             href="/student/workouts"
-            className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-muted/40"
+            aria-label={t("endSession")}
+            title={t("endSession")}
           >
-            <X className="h-3 w-3" /> {t("endSession")}
+            <X className="h-4 w-4" aria-hidden />
           </Link>
           <h1 className="text-2xl font-bold">{workout.title}</h1>
         </header>
@@ -565,16 +568,23 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
         <Card>
           <Collapsible open={sessionFeedbackOpen} onOpenChange={setSessionFeedbackOpen}>
             <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-              <div className="min-w-0 space-y-1">
+              <div className="min-w-0 flex items-center gap-2">
                 <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
-                <p className="text-xs text-muted-foreground">{t("sessionFeedbackHint")}</p>
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                  title={t("sessionFeedbackHint")}
+                  aria-label={t("sessionFeedbackHint")}
+                >
+                  <Info className="h-3.5 w-3.5" aria-hidden />
+                </button>
               </div>
               <CollapsibleTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="shrink-0 gap-1.5"
+                  size="icon"
+                  className="shrink-0"
                   aria-expanded={sessionFeedbackOpen}
                   aria-label={
                     sessionFeedbackOpen ? t("sessionFeedbackCollapse") : t("sessionFeedbackExpand")
@@ -585,9 +595,6 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                   ) : (
                     <ChevronDown className="h-4 w-4" />
                   )}
-                  <span className="hidden sm:inline">
-                    {sessionFeedbackOpen ? t("sessionFeedbackCollapse") : t("sessionFeedbackExpand")}
-                  </span>
                 </Button>
               </CollapsibleTrigger>
             </CardHeader>
@@ -661,12 +668,17 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
             </div>
             <div className="grid sm:grid-cols-2 gap-4 pt-1">
               <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="session-body-weight-kg">
+                <label className="text-sm font-medium inline-flex items-center gap-1.5" htmlFor="session-body-weight-kg">
                   {t("currentWeightKg")}
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                    title={t("sessionBodyWeightHint")}
+                    aria-label={t("sessionBodyWeightHint")}
+                  >
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </button>
                 </label>
-                <p id="session-body-weight-hint" className="text-xs text-muted-foreground">
-                  {t("sessionBodyWeightHint")}
-                </p>
                 <Input
                   id="session-body-weight-kg"
                   type="number"
@@ -678,16 +690,20 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                   value={sessionBodyWeightKg}
                   onChange={(e) => setSessionBodyWeightKg(e.target.value)}
                   className="text-lg font-bold h-12"
-                  aria-describedby="session-body-weight-hint"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="session-body-fat-percent">
+                <label className="text-sm font-medium inline-flex items-center gap-1.5" htmlFor="session-body-fat-percent">
                   {t("bodyFatPercent")}
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                    title={t("sessionBodyFatHint")}
+                    aria-label={t("sessionBodyFatHint")}
+                  >
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </button>
                 </label>
-                <p id="session-body-fat-hint" className="text-xs text-muted-foreground">
-                  {t("sessionBodyFatHint")}
-                </p>
                 <Input
                   id="session-body-fat-percent"
                   type="number"

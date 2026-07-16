@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Award, Calendar, Target, Flame } from "lucide-react";
+import { Award, Calendar, Target, Flame, Info } from "lucide-react";
 import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { countCompletedWorkoutSessionsInMonth } from "@/lib/student-monthly-workout-completion";
 import { useUser, useFirestore } from "@/firebase";
@@ -229,58 +229,82 @@ export function StudentProgressPanel() {
     <div className="space-y-6">
       <header>
         <h1 className="text-3xl font-bold font-headline">{t("myProgress")}</h1>
-        <p className="text-muted-foreground">{t("visualizeJourney")}</p>
       </header>
 
       <div className="grid md:grid-cols-2 gap-6">
         <Card className="bg-primary text-primary-foreground">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Flame className="h-4 w-4" />
+              <Flame className="h-4 w-4" aria-hidden />
               {t("sessionAttendanceStreakTitle")}
+              <button
+                type="button"
+                className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md opacity-80 hover:opacity-100"
+                title={t("sessionAttendanceStreakHint")}
+                aria-label={t("sessionAttendanceStreakHint")}
+              >
+                <Info className="h-3.5 w-3.5" aria-hidden />
+              </button>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
+            <div
+              className="text-3xl font-bold"
+              aria-label={`${currentStreak} ${t("sessionsStreakCompact")}`}
+            >
               {currentStreak} {t("sessionsStreakCompact")}
             </div>
-            <p className="text-xs opacity-80 mt-1">{t("sessionAttendanceStreakHint")}</p>
           </CardContent>
         </Card>
 
         <Card className="bg-accent text-accent-foreground">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Target className="h-4 w-4" />
+              <Target className="h-4 w-4" aria-hidden />
               {t("goalCompletion")}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{monthlyDoneCount}</div>
-            <p className="text-xs opacity-80 mt-1">{t("workoutsCompletedThisMonth")}</p>
+            <div
+              className="text-3xl font-bold"
+              title={t("workoutsCompletedThisMonth")}
+              aria-label={`${monthlyDoneCount} ${t("workoutsCompletedThisMonth")}`}
+            >
+              {monthlyDoneCount}
+            </div>
           </CardContent>
         </Card>
       </div>
 
       {metricsContext && user?.uid && (
-        <BodyMetricsPanel
-          trainerId={metricsContext.trainerId}
-          rosterStudentId={metricsContext.rosterStudentId}
-          globalStudentId={user.uid}
-          canWriteSession
-          source="student"
-          initialProfile={metricsContext.profile}
-          existingWeightHistory={metricsContext.weightHistory}
-        />
+        <div className="min-w-0">
+          <BodyMetricsPanel
+            trainerId={metricsContext.trainerId}
+            rosterStudentId={metricsContext.rosterStudentId}
+            globalStudentId={user.uid}
+            canWriteSession
+            source="student"
+            initialProfile={metricsContext.profile}
+            existingWeightHistory={metricsContext.weightHistory}
+          />
+        </div>
       )}
 
       <div className="grid lg:grid-cols-1 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>{t("strengthProgressionTitle")}</CardTitle>
-            <CardDescription>{t("strengthProgressionChartDesc")}</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              {t("strengthProgressionTitle")}
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                title={t("strengthProgressionChartDesc")}
+                aria-label={t("strengthProgressionChartDesc")}
+              >
+                <Info className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </CardTitle>
             <div className="pt-2 space-y-2">
-              <p className="text-xs text-muted-foreground">Seleciona ate 3 exercicios para comparar.</p>
               <div className="flex flex-wrap gap-2">
                 {strengthExerciseOptions.map((exercise) => {
                   const active = selectedStrengthExercises.includes(exercise);
@@ -298,6 +322,8 @@ export function StudentProgressPanel() {
                       )}
                       onClick={() => toggleStrengthExercise(exercise)}
                       disabled={disabled}
+                      aria-pressed={active}
+                      aria-label={exercise}
                     >
                       {exercise}
                     </Button>
@@ -350,8 +376,10 @@ export function StudentProgressPanel() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("personalBests")}</CardTitle>
-          <CardDescription>{t("personalBestsDesc")}</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <Award className="h-5 w-5 text-primary shrink-0" aria-hidden />
+            {t("personalBests")}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {personalBests.length > 0 ? (

@@ -34,7 +34,7 @@ import {
 } from "@/lib/shop-billing";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import { repairShopLinesForPaidPayments, resolveRosterStudentIdClient } from "@/lib/shop-billing-payments";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -560,21 +560,25 @@ export default function CoachShopPage() {
       <div className="space-y-6 w-full min-w-0 max-w-5xl mx-auto">
         <header className="space-y-1">
           <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
-            <Store className="h-8 w-8 text-primary shrink-0" />
+            <Store className="h-8 w-8 text-primary shrink-0" aria-hidden />
             {t("shop")}
           </h1>
-          <p className="text-muted-foreground">{t("shopCoachDescription")}</p>
         </header>
 
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <CardTitle>{t("shopCatalogTitle")}</CardTitle>
-              <CardDescription>{t("shopCatalogHint")}</CardDescription>
             </div>
-            <Button type="button" size="sm" className="gap-1 shrink-0" onClick={openNewItem}>
-              <Plus className="h-4 w-4" />
-              {t("shopAddItem")}
+            <Button
+              type="button"
+              size="icon"
+              className="shrink-0"
+              onClick={openNewItem}
+              aria-label={t("shopAddItem")}
+              title={t("shopAddItem")}
+            >
+              <Plus className="h-4 w-4" aria-hidden />
             </Button>
           </CardHeader>
           <CardContent>
@@ -639,7 +643,6 @@ export default function CoachShopPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle>{t("shopCoachRegisterTitle")}</CardTitle>
-            <CardDescription>{t("shopCoachRegisterHint")}</CardDescription>
           </CardHeader>
 
           <Collapsible open={coachRegisterOpen} onOpenChange={setCoachRegisterOpen}>
@@ -824,7 +827,6 @@ export default function CoachShopPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t("shopCoachTableTitle")}</CardTitle>
-            <CardDescription>{t("shopCoachTableHint")}</CardDescription>
           </CardHeader>
           <CardContent>
             {registrationsLoading ? (

@@ -893,9 +893,6 @@ export default function StudentWorkoutsPage() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            {isOpenAccess ? t("trainingAccessModeOpen") : "Agenda de sessões com o teu treinador"}
-          </p>
         </div>
         {!isOpenAccess && sessionsPerWeek != null && (
           <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-2.5 shadow-sm shrink-0">
@@ -925,13 +922,7 @@ export default function StudentWorkoutsPage() {
         )}
       </div>
 
-      {isOpenAccess ? (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">{t("studentOpenAccessWorkoutsIntro")}</p>
-          </CardContent>
-        </Card>
-      ) : (
+      {isOpenAccess ? null : (
         <div className="grid lg:grid-cols-5 gap-5 items-start">
 
           {/* ── Left column: Calendar ───────────────────────────────────── */}
@@ -939,9 +930,8 @@ export default function StudentWorkoutsPage() {
             <Card className="overflow-hidden">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <CalendarDays className="h-4 w-4 text-primary" /> Horário do Treinador
+                  <CalendarDays className="h-4 w-4 text-primary" aria-hidden /> Horário do Treinador
                 </CardTitle>
-                <CardDescription className="text-xs">Seleciona um dia para ver os blocos disponíveis</CardDescription>
               </CardHeader>
               <CardContent className="pt-0 space-y-3">
                 <Calendar
@@ -1232,26 +1222,28 @@ export default function StudentWorkoutsPage() {
                             </Badge>
                           ) : (
                             <Button
-                              size="sm"
+                              size="icon"
                               variant="outline"
-                              className="shrink-0 h-8 gap-1.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                              className="shrink-0 h-8 w-8 border-destructive/40 text-destructive hover:bg-destructive/10"
                               onClick={() => handleToggleSlot(time)}
                               disabled={!!isLoading_}
+                              aria-label={t("sessionBookingLeave")}
+                              title={t("sessionBookingLeave")}
                             >
                               {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserMinus className="h-3.5 w-3.5" />}
-                              {t("sessionBookingLeave")}
                             </Button>
                           )
                         ) : isContinuation ? null
                           : !isFull && !isBookingCutoffPassed ? (
                           <Button
-                            size="sm"
-                            className="shrink-0 h-8 gap-1.5 text-xs"
+                            size="icon"
+                            className="shrink-0 h-8 w-8"
                             onClick={() => handleToggleSlot(time)}
                             disabled={!!isLoading_ || !canBookMore || isBookingBlockedAtTime(time)}
+                            aria-label={t("sessionBookingJoin")}
+                            title={t("sessionBookingJoin")}
                           >
-                            {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                            Inscrever
+                            {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <UserPlus className="h-3.5 w-3.5" aria-hidden />}
                           </Button>
                         ) : (
                           <Badge variant="secondary" className="shrink-0 text-xs gap-1">
@@ -1325,9 +1317,9 @@ export default function StudentWorkoutsPage() {
                           >
                             {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                           </button>
-                          <Button size="sm" className="shrink-0 h-8 gap-1.5 text-xs bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-                            <Link href={`/student/workouts/${w.id}/session`}>
-                              <Play className="h-3.5 w-3.5" /> Iniciar
+                          <Button size="icon" className="shrink-0 h-8 w-8 bg-accent text-accent-foreground hover:bg-accent/90" asChild title={t("startWorkout")}>
+                            <Link href={`/student/workouts/${w.id}/session`} aria-label={t("startWorkout")}>
+                              <Play className="h-3.5 w-3.5" aria-hidden />
                             </Link>
                           </Button>
                         </div>
@@ -1407,13 +1399,14 @@ export default function StudentWorkoutsPage() {
                         </p>
                         <Button
                           type="button"
-                          size="sm"
+                          size="icon"
                           variant="secondary"
-                          className="shrink-0 h-8 gap-1.5 text-xs"
+                          className="shrink-0 h-8 w-8"
                           disabled
                           title={t("studentTrainingRequiresPresentDescription")}
+                          aria-label={t("startWorkout")}
                         >
-                          <Play className="h-3.5 w-3.5" /> Iniciar
+                          <Play className="h-3.5 w-3.5" aria-hidden />
                         </Button>
                       </div>
                     )}

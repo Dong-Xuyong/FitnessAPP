@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -256,9 +255,13 @@ export function MilestonesTab({
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold">{t("milestones")}</h3>
           <DialogTrigger asChild>
-            <Button className="gap-2" onClick={() => resetForm()}>
-              <Plus className="h-4 w-4" />
-              {t("addMilestone")}
+            <Button
+              size="icon"
+              onClick={() => resetForm()}
+              aria-label={t("addMilestone")}
+              title={t("addMilestone")}
+            >
+              <Plus className="h-4 w-4" aria-hidden />
             </Button>
           </DialogTrigger>
         </div>
@@ -266,13 +269,6 @@ export function MilestonesTab({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{editingMilestone ? t("editMilestone") : t("createNewMilestone")}</DialogTitle>
-            <DialogDescription>
-              {editingMilestone
-                ? t("updateMilestoneDetails")
-                : studentView
-                  ? t("setNewGoalStudent")
-                  : t("setNewGoal")}
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
