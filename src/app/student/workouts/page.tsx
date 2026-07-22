@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Progress } from "@/components/ui/progress";
 import {
-  Dumbbell, Clock, Play, CirclePlay, ExternalLink, Loader2, AlertTriangle,
+  Dumbbell, Clock, Play, ExternalLink, Loader2, AlertTriangle,
   CalendarDays, Users, UserPlus, UserMinus, ChevronDown, ChevronUp, StickyNote,
   CheckCircle2, Lock, CalendarCheck, TrendingUp, Zap,
 } from "lucide-react";
@@ -41,6 +41,11 @@ import {
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
 import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
+import type { LibraryExerciseVideo } from "@/lib/find-library-exercises-in-text";
+import {
+  ExactExerciseDemoButton,
+  MentionedExerciseDemoChips,
+} from "@/components/ExerciseTextDemoButtons";
 import {
   dayHasOpenBlocks,
   getEffectiveSessionDurationMin,
@@ -256,7 +261,7 @@ export default function StudentWorkoutsPage() {
   const [lastPerfByExercise, setLastPerfByExercise] = useState<Record<string, LastSessionPerf>>(
     {}
   );
-  const [exerciseVideoUrlByName, setExerciseVideoUrlByName] = useState<Record<string, string>>({});
+  const [exerciseLibraryVideos, setExerciseLibraryVideos] = useState<LibraryExerciseVideo[]>([]);
   const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
     title: string;
     url: string;
@@ -418,14 +423,14 @@ export default function StudentWorkoutsPage() {
 
         if (!cancelled) { setWorkouts(activePlans); }
         if (!cancelled) {
-          const videoUrls: Record<string, string> = {};
+          const videos: LibraryExerciseVideo[] = [];
           for (const exerciseDoc of exercisesSnap.docs) {
             const exercise = exerciseDoc.data();
             const name = String(exercise.name || "").trim();
             const videoUrl = String(exercise.videoUrl || "").trim();
-            if (name && videoUrl) videoUrls[normalizeExerciseKey(name)] = videoUrl;
+            if (name && videoUrl) videos.push({ name, videoUrl });
           }
-          setExerciseVideoUrlByName(videoUrls);
+          setExerciseLibraryVideos(videos);
         }
       } catch (e) { console.error(e); }
       finally { if (!cancelled) setIsLoading(false); }
@@ -1330,8 +1335,9 @@ export default function StudentWorkoutsPage() {
                               <p className="text-sm text-muted-foreground text-center py-6">Sem exercícios definidos.</p>
                             ) : (w.exercises || []).map((ex: any, idx: number) => {
                               const prescribed = ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : null;
-                              const exKey = normalizeExerciseKey(String(ex.exerciseName || ""));
-                              const videoUrl = exerciseVideoUrlByName[exKey];
+                              const exerciseName = String(ex.exerciseName || "");
+                              const exKey = normalizeExerciseKey(exerciseName);
+                              const notes = String(ex.notes || "").trim();
                               const lastPerf = lastPerfByPlanId[w.id]?.[exKey] ?? lastPerfByExercise[exKey];
                               const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
                                 weighted: (weight, reps) =>
@@ -1346,25 +1352,13 @@ export default function StudentWorkoutsPage() {
                                   </div>
                                   <div className="space-y-0.5 min-w-0 flex-1">
                                     <div className="flex items-start justify-between gap-2">
-                                      <p className="text-sm font-semibold">{ex.exerciseName}</p>
-                                      {videoUrl ? (
-                                        <Button
-                                          type="button"
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-7 w-7 -mt-1 shrink-0 text-primary hover:text-primary"
-                                          onClick={() =>
-                                            setSelectedExerciseVideo({
-                                              title: String(ex.exerciseName || ""),
-                                              url: videoUrl,
-                                            })
-                                          }
-                                          title={t("watchDemo")}
-                                          aria-label={`${t("watchDemo")}: ${ex.exerciseName}`}
-                                        >
-                                          <CirclePlay className="h-4 w-4" />
-                                        </Button>
-                                      ) : null}
+                                      <p className="text-sm font-semibold whitespace-pre-wrap break-words">{exerciseName}</p>
+                                      <ExactExerciseDemoButton
+                                        title={exerciseName}
+                                        libraryVideos={exerciseLibraryVideos}
+                                        onSelect={setSelectedExerciseVideo}
+                                        watchDemoLabel={t("watchDemo")}
+                                      />
                                     </div>
                                     {prescribed && (
                                       <p className="text-xs text-muted-foreground">
@@ -1374,14 +1368,22 @@ export default function StudentWorkoutsPage() {
                                     {lastHint && (
                                       <p className="text-xs font-medium text-primary/90">{lastHint}</p>
                                     )}
-                                    {ex.notes ? (
+                                    {notes ? (
                                       <div className="flex items-start gap-1.5 mt-1">
                                         <StickyNote className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                                        <p className="text-xs text-muted-foreground whitespace-pre-line">{ex.notes}</p>
+                                        <p className="text-xs text-muted-foreground whitespace-pre-line">{notes}</p>
                                       </div>
                                     ) : !prescribed && !lastHint ? (
                                       <p className="text-xs text-muted-foreground italic">Sem notas do treinador.</p>
                                     ) : null}
+                                    <MentionedExerciseDemoChips
+                                      title={exerciseName}
+                                      extraText={notes}
+                                      libraryVideos={exerciseLibraryVideos}
+                                      onSelect={setSelectedExerciseVideo}
+                                      watchDemoLabel={t("watchDemo")}
+                                      matchedDemosLabel={t("matchedExerciseDemos")}
+                                    />
                                   </div>
                                 </div>
                               );
@@ -1441,6 +1443,7 @@ export default function StudentWorkoutsPage() {
                   src={embeddedExerciseVideoUrl}
                   title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
                   allowFullScreen
                 />
               </div>

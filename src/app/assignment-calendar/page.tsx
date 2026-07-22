@@ -36,7 +36,7 @@ import { collection, getDocs, deleteDoc, setDoc, getDoc, doc, Timestamp } from "
 import {
   CalendarDays, CalendarPlus, Clock, Settings2, Loader2, CheckCircle2, AlertTriangle,
   Trash2, Dumbbell, UserPlus, UserMinus, X, Users, ChevronDown, ChevronUp, ListOrdered,
-  CirclePlay, ExternalLink, ClipboardList, History, Pencil, RotateCcw,
+  ExternalLink, ClipboardList, History, Pencil, RotateCcw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -79,6 +79,11 @@ import {
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
 import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
+import type { LibraryExerciseVideo } from "@/lib/find-library-exercises-in-text";
+import {
+  ExactExerciseDemoButton,
+  MentionedExerciseDemoChips,
+} from "@/components/ExerciseTextDemoButtons";
 import {
   coachDayShowsSchedule,
   dayHasOpenBlocks,
@@ -312,7 +317,7 @@ function RosterPlanExercisePerformanceList({
   items,
   emptyLabel,
   noPerfLabel,
-  exerciseVideoUrlByName,
+  exerciseLibraryVideos,
   t,
 }: {
   items: Array<{
@@ -327,7 +332,7 @@ function RosterPlanExercisePerformanceList({
   }>;
   emptyLabel: string;
   noPerfLabel: string;
-  exerciseVideoUrlByName: Record<string, string>;
+  exerciseLibraryVideos: LibraryExerciseVideo[];
   t: (key: TranslationKey) => string;
 }) {
   const [selectedVideo, setSelectedVideo] = useState<{ title: string; url: string } | null>(null);
@@ -355,30 +360,34 @@ function RosterPlanExercisePerformanceList({
                 .replace("{reps}", reps || "—")
                 .replace("{seconds}", String(restSeconds > 0 ? restSeconds : "—"))
             : String(item.plan?.notes || "").trim();
-          const videoUrl = exerciseVideoUrlByName[normalizeExerciseKey(item.name)];
+
           return (
             <li
               key={`${item.name}-${index}`}
               className="rounded-md border bg-background p-2 text-sm"
             >
               <div className="flex items-start justify-between gap-2">
-                <p className="font-medium">{item.name}</p>
-                {videoUrl ? (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 -mt-1 -mr-1 shrink-0 text-primary hover:text-primary"
-                    onClick={() => setSelectedVideo({ title: item.name, url: videoUrl })}
-                    title={t("watchDemo")}
-                    aria-label={`${t("watchDemo")}: ${item.name}`}
-                  >
-                    <CirclePlay className="h-4 w-4" />
-                  </Button>
-                ) : null}
+                <p className="font-medium whitespace-pre-wrap break-words">{item.name}</p>
+                <ExactExerciseDemoButton
+                  title={item.name}
+                  libraryVideos={exerciseLibraryVideos}
+                  onSelect={setSelectedVideo}
+                  watchDemoLabel={t("watchDemo")}
+                />
               </div>
               {prescribedPlan ? (
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{prescribedPlan}</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed whitespace-pre-wrap">
+                  {prescribedPlan}
+                </p>
               ) : null}
+              <MentionedExerciseDemoChips
+                title={item.name}
+                extraText={prescribedPlan}
+                libraryVideos={exerciseLibraryVideos}
+                onSelect={setSelectedVideo}
+                watchDemoLabel={t("watchDemo")}
+                matchedDemosLabel={t("matchedExerciseDemos")}
+              />
               <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
                 {lastHint ?? noPerfLabel}
               </p>
@@ -401,6 +410,7 @@ function RosterPlanExercisePerformanceList({
                   src={embeddedVideoUrl}
                   title={`${t("watchDemo")}: ${selectedVideo.title}`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
                   allowFullScreen
                 />
               </div>
@@ -468,7 +478,7 @@ type CalendarDayRosterRowProps = {
   setExpandedRosterPlanKey: Dispatch<SetStateAction<string | null>>;
   rosterPlanDetailByKey: Record<string, RosterPlanDetailEntry>;
   rosterSessionLogByKey: Record<string, RosterSessionLogEntry>;
-  exerciseVideoUrlByName: Record<string, string>;
+  exerciseLibraryVideos: LibraryExerciseVideo[];
   onRequestEditRosterSession?: (payload: {
     storageFid: string;
     session: EditWorkoutSessionDialogSession;
@@ -490,7 +500,7 @@ function CalendarDayRosterRow({
   setExpandedRosterPlanKey,
   rosterPlanDetailByKey,
   rosterSessionLogByKey,
-  exerciseVideoUrlByName,
+  exerciseLibraryVideos,
   onRequestEditRosterSession,
   t,
 }: CalendarDayRosterRowProps) {
@@ -936,7 +946,7 @@ function CalendarDayRosterRow({
                     items={rosterDetail.exercisePerformance}
                     emptyLabel={t("calendarRosterPlanDetailEmpty")}
                     noPerfLabel={t("calendarRosterNoLastPerformance")}
-                    exerciseVideoUrlByName={exerciseVideoUrlByName}
+                    exerciseLibraryVideos={exerciseLibraryVideos}
                     t={t}
                   />
                 )}
@@ -1310,14 +1320,14 @@ export default function AssignmentCalendarPage() {
     return collection(db, "exercises");
   }, [db, user]);
   const { data: exerciseLibrary } = useCollection(exercisesQuery);
-  const exerciseVideoUrlByName = useMemo(() => {
-    const urls: Record<string, string> = {};
+  const exerciseLibraryVideos = useMemo(() => {
+    const list: LibraryExerciseVideo[] = [];
     for (const exercise of (exerciseLibrary || []) as Array<Record<string, unknown>>) {
       const name = String(exercise.name || "").trim();
       const videoUrl = String(exercise.videoUrl || "").trim();
-      if (name && videoUrl) urls[normalizeExerciseKey(name)] = videoUrl;
+      if (name && videoUrl) list.push({ name, videoUrl });
     }
-    return urls;
+    return list;
   }, [exerciseLibrary]);
 
   const portalStudentsQuery = useMemoFirebase(() => {
@@ -4568,7 +4578,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
-                          exerciseVideoUrlByName={exerciseVideoUrlByName}
+                          exerciseLibraryVideos={exerciseLibraryVideos}
                           t={t}
                         />
                       ))}
@@ -4597,7 +4607,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
-                          exerciseVideoUrlByName={exerciseVideoUrlByName}
+                          exerciseLibraryVideos={exerciseLibraryVideos}
                           onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />
@@ -4627,7 +4637,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
-                          exerciseVideoUrlByName={exerciseVideoUrlByName}
+                          exerciseLibraryVideos={exerciseLibraryVideos}
                           onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />

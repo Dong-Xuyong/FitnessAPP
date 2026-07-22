@@ -18,7 +18,6 @@ import {
   StickyNote,
   ChevronDown,
   ChevronUp,
-  CirclePlay,
   ExternalLink,
   Info,
 } from "lucide-react";
@@ -48,6 +47,11 @@ import {
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
 import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
+import type { LibraryExerciseVideo } from "@/lib/find-library-exercises-in-text";
+import {
+  ExactExerciseDemoButton,
+  MentionedExerciseDemoChips,
+} from "@/components/ExerciseTextDemoButtons";
 
 const SESSION_QUERY_LIMIT = 40;
 const NOTE_MAX_LENGTH = 500;
@@ -125,7 +129,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [isSaving, setIsSaving] = useState(false);
   const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
   const [lastPerfLookup, setLastPerfLookup] = useState<Record<string, LastSessionPerf>>({});
-  const [exerciseVideoUrlByName, setExerciseVideoUrlByName] = useState<Record<string, string>>({});
+  const [exerciseLibraryVideos, setExerciseLibraryVideos] = useState<LibraryExerciseVideo[]>([]);
   const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
     title: string;
     url: string;
@@ -189,14 +193,14 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
           setWorkout(workoutData);
         }
         if (!cancelled) {
-          const videoUrls: Record<string, string> = {};
+          const videos: LibraryExerciseVideo[] = [];
           for (const exerciseDoc of exercisesSnap.docs) {
             const exercise = exerciseDoc.data();
             const name = String(exercise.name || "").trim();
             const videoUrl = String(exercise.videoUrl || "").trim();
-            if (name && videoUrl) videoUrls[normalizeExerciseKey(name)] = videoUrl;
+            if (name && videoUrl) videos.push({ name, videoUrl });
           }
-          setExerciseVideoUrlByName(videoUrls);
+          setExerciseLibraryVideos(videos);
         }
       } catch (e) {
         console.error("Error fetching workout:", e);
@@ -729,7 +733,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
             const log = logs[index] ?? { weight: "", reps: "" };
             const logged = exerciseHasLoggedSet(log);
             const exerciseKey = normalizeExerciseKey(exercise.exerciseName);
-            const videoUrl = exerciseVideoUrlByName[exerciseKey];
+            const notes = String(exercise.notes || "").trim();
             const prevPerf = lastPerfLookup[exerciseKey];
             const lastHint = formatLastSessionPerformanceLabel(prevPerf, {
               weighted: (weight, reps) =>
@@ -744,40 +748,40 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
               <Card key={index}>
                 <CardHeader>
                   <div className="flex justify-between items-start gap-4">
-                    <div className="space-y-1">
+                    <div className="space-y-1 min-w-0 flex-1">
                       <Badge variant="outline" className="text-xs mb-1">
                         {t("exercises")} {index + 1}/{totalExercises}
                       </Badge>
                       <div className="flex items-start gap-2">
-                        <CardTitle className="text-2xl flex-1">{exercise.exerciseName}</CardTitle>
-                        {videoUrl ? (
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 -mt-1 shrink-0 text-primary hover:text-primary"
-                            onClick={() =>
-                              setSelectedExerciseVideo({
-                                title: exercise.exerciseName,
-                                url: videoUrl,
-                              })
-                            }
-                            title={t("watchDemo")}
-                            aria-label={`${t("watchDemo")}: ${exercise.exerciseName}`}
-                          >
-                            <CirclePlay className="h-5 w-5" />
-                          </Button>
-                        ) : null}
+                        <CardTitle className="text-2xl flex-1 whitespace-pre-wrap break-words">
+                          {exercise.exerciseName}
+                        </CardTitle>
+                        <ExactExerciseDemoButton
+                          title={exercise.exerciseName}
+                          libraryVideos={exerciseLibraryVideos}
+                          onSelect={setSelectedExerciseVideo}
+                          watchDemoLabel={t("watchDemo")}
+                          className="h-8 w-8 -mt-1 shrink-0 text-primary hover:text-primary"
+                          iconClassName="h-5 w-5"
+                        />
                       </div>
                     </div>
                   </div>
 
-                  {exercise.notes && (
+                  {notes ? (
                     <div className="flex items-start gap-2 mt-3 p-3 rounded-lg bg-muted/40 border border-muted text-sm text-muted-foreground">
                       <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-primary/70" />
-                      <p className="leading-relaxed">{exercise.notes}</p>
+                      <p className="leading-relaxed whitespace-pre-wrap">{notes}</p>
                     </div>
-                  )}
+                  ) : null}
+                  <MentionedExerciseDemoChips
+                    title={exercise.exerciseName}
+                    extraText={notes}
+                    libraryVideos={exerciseLibraryVideos}
+                    onSelect={setSelectedExerciseVideo}
+                    watchDemoLabel={t("watchDemo")}
+                    matchedDemosLabel={t("matchedExerciseDemos")}
+                  />
                 </CardHeader>
 
                 <CardContent className="space-y-4">
@@ -852,6 +856,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                   src={embeddedExerciseVideoUrl}
                   title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
                   allowFullScreen
                 />
               </div>

@@ -933,6 +933,11 @@ const translations = {
     coachBirthdayBadge: "Birthday",
     coachBirthdayCta: "Open profile",
     coachBirthdayCtaList: "View students",
+    coachBirthdaysNavTitle: "Birthdays",
+    coachBirthdaysNavEmpty: "No birthdays in the next 14 days",
+    coachBirthdayWhenToday: "Today",
+    coachBirthdayWhenTomorrow: "Tomorrow",
+    coachBirthdayWhenInDays: "In {days} days",
     sex: "Sex",
     heightCm: "Height (cm)",
     currentWeightKgLabel: "Current Weight (kg)",
@@ -1009,7 +1014,6 @@ const translations = {
     exerciseLibraryShared: "Exercise library shared by your coach.",
     unnamedExercise: "Unnamed Exercise",
     watchDemo: "Watch demo",
-
     // Student Exercise History
     searchExerciseHistory: "Search your exercises and review weight and reps done.",
     searchExercisesTitle: "Search Exercises",
@@ -2061,6 +2065,11 @@ const translations = {
     coachBirthdayBadge: "Aniversário",
     coachBirthdayCta: "Abrir perfil",
     coachBirthdayCtaList: "Ver alunos",
+    coachBirthdaysNavTitle: "Aniversários",
+    coachBirthdaysNavEmpty: "Sem aniversários nos próximos 14 dias",
+    coachBirthdayWhenToday: "Hoje",
+    coachBirthdayWhenTomorrow: "Amanhã",
+    coachBirthdayWhenInDays: "Em {days} dias",
     sex: "Sexo",
     heightCm: "Altura (cm)",
     currentWeightKgLabel: "Peso Atual (kg)",
@@ -2137,7 +2146,6 @@ const translations = {
     exerciseLibraryShared: "Biblioteca de exercícios partilhada pelo seu treinador.",
     unnamedExercise: "Exercício Sem Nome",
     watchDemo: "Ver demonstração",
-
     // Student Exercise History
     searchExerciseHistory: "Pesquise os seus exercícios e reveja peso e repetições realizadas.",
     searchExercisesTitle: "Pesquisar Exercícios",

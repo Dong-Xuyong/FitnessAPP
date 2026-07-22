@@ -15,6 +15,7 @@ import {
   Globe,
   ShieldBan,
   AlertCircle,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -47,6 +48,7 @@ import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
 const navItems = [
   { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
   { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
+  { key: "exercises" as const, href: "/student/exercises", icon: Search },
   { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
   { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
   { key: "billing" as const, href: "/student/billing", icon: CreditCard },
