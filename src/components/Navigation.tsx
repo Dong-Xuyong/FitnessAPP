@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import {
   LayoutDashboard,
   Users,
@@ -22,11 +22,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCoachBirthdayReminders } from "@/hooks/use-coach-birthday-reminders";
+import type { UpcomingBirthdayStudent } from "@/lib/coach-birthday-reminders";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -66,18 +69,13 @@ type TrainerNavProfile = {
   photoUrl?: string;
 } | null;
 
-type SidebarTranslate = (
-  key:
-    | "dashboard"
-    | "students"
-    | "programs"
-    | "exercises"
-    | "assignmentCalendar"
-    | "coachProgressNav"
-    | "myProfile"
-    | "shop"
-    | "logout"
-) => string;
+type SidebarTranslate = (key: TranslationKey) => string;
+
+function formatBirthdayWhenLabel(daysUntil: number, t: SidebarTranslate): string {
+  if (daysUntil <= 0) return t("coachBirthdayWhenToday");
+  if (daysUntil === 1) return t("coachBirthdayWhenTomorrow");
+  return t("coachBirthdayWhenInDays").replace("{days}", String(daysUntil));
+}
 
 function trainerDisplayName(trainer: TrainerNavProfile): string {
   if (!trainer) return "Trainer";
@@ -240,6 +238,85 @@ function TrainerSidebarUtilityControls({
   );
 }
 
+function CoachBirthdaysSidebarSection({
+  upcomingBirthdays,
+  collapsed,
+  t,
+  onNavigate,
+}: {
+  upcomingBirthdays: UpcomingBirthdayStudent[];
+  collapsed: boolean;
+  t: SidebarTranslate;
+  onNavigate: () => void;
+}) {
+  if (collapsed) {
+    const first = upcomingBirthdays[0];
+    const tooltip =
+      upcomingBirthdays.length === 0
+        ? t("coachBirthdaysNavEmpty")
+        : upcomingBirthdays
+            .slice(0, 5)
+            .map((b) => `${b.name} · ${formatBirthdayWhenLabel(b.daysUntil, t)}`)
+            .join("\n");
+
+    return (
+      <SidebarGroup className="mt-auto">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              tooltip={tooltip}
+              size="lg"
+              className={cn(upcomingBirthdays.some((b) => b.daysUntil === 0) && "text-rose-600")}
+            >
+              <Link href={first ? `/students/${first.id}` : "/students"} onClick={onNavigate}>
+                <Cake className="h-5 w-5" />
+                <span>{t("coachBirthdaysNavTitle")}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+    );
+  }
+
+  return (
+    <SidebarGroup className="mt-auto">
+      <SidebarGroupLabel className="gap-1.5">
+        <Cake className="h-3.5 w-3.5" />
+        {t("coachBirthdaysNavTitle")}
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        {upcomingBirthdays.length === 0 ? (
+          <p className="px-2 py-1.5 text-xs text-sidebar-foreground/60 leading-snug">
+            {t("coachBirthdaysNavEmpty")}
+          </p>
+        ) : (
+          <SidebarMenu>
+            {upcomingBirthdays.map((b) => (
+              <SidebarMenuItem key={b.id}>
+                <SidebarMenuButton asChild size="sm" tooltip={b.name}>
+                  <Link href={`/students/${b.id}`} onClick={onNavigate}>
+                    <span className="truncate font-medium">{b.name}</span>
+                    <span
+                      className={cn(
+                        "ml-auto shrink-0 text-[10px] font-medium tabular-nums",
+                        b.daysUntil === 0 ? "text-rose-600" : "text-sidebar-foreground/60"
+                      )}
+                    >
+                      {formatBirthdayWhenLabel(b.daysUntil, t)}
+                    </span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        )}
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+}
+
 function AppSidebar({
   pathname,
   trainer,
@@ -248,6 +325,7 @@ function AppSidebar({
   t,
   locale,
   setLocale,
+  upcomingBirthdays,
 }: {
   pathname: string;
   trainer: TrainerNavProfile;
@@ -256,6 +334,7 @@ function AppSidebar({
   t: SidebarTranslate;
   locale: string;
   setLocale: (locale: "en" | "pt") => void;
+  upcomingBirthdays: UpcomingBirthdayStudent[];
 }) {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
@@ -301,6 +380,13 @@ function AppSidebar({
             ))}
           </SidebarMenu>
         </SidebarGroup>
+
+        <CoachBirthdaysSidebarSection
+          upcomingBirthdays={upcomingBirthdays}
+          collapsed={collapsed}
+          t={t}
+          onNavigate={handleNavClick}
+        />
       </SidebarContent>
 
       <SidebarFooter
@@ -339,7 +425,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
   const db = useFirestore();
   const { user } = useUser();
   const { t, locale, setLocale } = useI18n();
-  const { birthdays } = useCoachBirthdayReminders(db, user?.uid, t("unnamed"));
+  const { birthdays, upcomingBirthdays } = useCoachBirthdayReminders(db, user?.uid, t("unnamed"));
 
   const trainerRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -385,6 +471,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         t={t}
         locale={locale}
         setLocale={setLocale}
+        upcomingBirthdays={upcomingBirthdays}
       />
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:hidden sticky top-0 z-50 bg-background/95 backdrop-blur">

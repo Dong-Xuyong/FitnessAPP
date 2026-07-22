@@ -5,8 +5,36 @@ import type { Firestore } from "firebase/firestore";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import {
   getRosterBirthdaysToday,
+  getRosterUpcomingBirthdays,
   type BirthdayStudent,
+  type UpcomingBirthdayStudent,
 } from "@/lib/coach-birthday-reminders";
+
+async function loadCoachStudentRows(
+  fs: Firestore,
+  uid: string
+): Promise<Array<Record<string, unknown> & { id: string }>> {
+  const [rosterSnap, globalSnap] = await Promise.all([
+    getDocs(collection(fs, "personalTrainers", uid, "students")),
+    getDocs(query(collection(fs, "students"), where("trainerId", "==", uid))),
+  ]);
+
+  const globalById = new Map<string, Record<string, unknown>>();
+  for (const d of globalSnap.docs) {
+    globalById.set(d.id, d.data() as Record<string, unknown>);
+  }
+
+  return rosterSnap.docs.map((d) => {
+    const roster = d.data() as Record<string, unknown>;
+    const linkedUid = typeof roster.userId === "string" ? roster.userId : d.id;
+    const global = globalById.get(d.id) ?? globalById.get(linkedUid);
+    return {
+      id: d.id,
+      ...roster,
+      birthDate: roster.birthDate ?? global?.birthDate ?? null,
+    };
+  });
+}
 
 export function useCoachBirthdayReminders(
   db: Firestore | null | undefined,
@@ -14,11 +42,13 @@ export function useCoachBirthdayReminders(
   unnamedFallback = "Student"
 ) {
   const [birthdays, setBirthdays] = useState<BirthdayStudent[]>([]);
+  const [upcomingBirthdays, setUpcomingBirthdays] = useState<UpcomingBirthdayStudent[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (db == null || !trainerUid) {
       setBirthdays([]);
+      setUpcomingBirthdays([]);
       setLoading(false);
       return;
     }
@@ -30,31 +60,16 @@ export function useCoachBirthdayReminders(
     async function run() {
       setLoading(true);
       try {
-        const [rosterSnap, globalSnap] = await Promise.all([
-          getDocs(collection(fs, "personalTrainers", uid, "students")),
-          getDocs(query(collection(fs, "students"), where("trainerId", "==", uid))),
-        ]);
+        const rows = await loadCoachStudentRows(fs, uid);
         if (cancelled) return;
-
-        const globalById = new Map<string, Record<string, unknown>>();
-        for (const d of globalSnap.docs) {
-          globalById.set(d.id, d.data() as Record<string, unknown>);
-        }
-
-        const rows = rosterSnap.docs.map((d) => {
-          const roster = d.data() as Record<string, unknown>;
-          const linkedUid = typeof roster.userId === "string" ? roster.userId : d.id;
-          const global = globalById.get(d.id) ?? globalById.get(linkedUid);
-          return {
-            id: d.id,
-            ...roster,
-            birthDate: roster.birthDate ?? global?.birthDate ?? null,
-          };
-        });
-
-        setBirthdays(getRosterBirthdaysToday(rows, new Date(), unnamedFallback));
+        const now = new Date();
+        setBirthdays(getRosterBirthdaysToday(rows, now, unnamedFallback));
+        setUpcomingBirthdays(getRosterUpcomingBirthdays(rows, now, unnamedFallback));
       } catch {
-        if (!cancelled) setBirthdays([]);
+        if (!cancelled) {
+          setBirthdays([]);
+          setUpcomingBirthdays([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -77,5 +92,5 @@ export function useCoachBirthdayReminders(
     };
   }, [db, trainerUid, unnamedFallback]);
 
-  return { loading, birthdays };
+  return { loading, birthdays, upcomingBirthdays };
 }
