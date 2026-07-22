@@ -42,6 +42,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { isOpenTrainingAccess, normalizeTrainingAccessMode } from "@/lib/student-training-access";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { StudentBirthdayPrompt } from "@/components/StudentBirthdayPrompt";
 import { useStudentPaymentReminder } from "@/hooks/use-student-payment-reminder";
 import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
 
@@ -436,6 +437,8 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
         <header className="flex shrink-0 items-center gap-2 border-b p-3 md:hidden">
           <SidebarTrigger className="shadow-sm" />
         </header>
+
+        <StudentBirthdayPrompt />
 
         <div className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 min-w-0">
           {reminder.show && !isBlocked ? (
