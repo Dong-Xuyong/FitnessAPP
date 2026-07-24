@@ -1240,11 +1240,23 @@ function BillingTab({
   );
 }
 
+function splitStudentName(rawName: string): { firstName: string; lastName: string } {
+  const parts = rawName.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
+  if (parts.length === 0) return { firstName: "", lastName: "" };
+  return { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") };
+}
+
+function studentDisplayNameFromRecord(data: Record<string, unknown>): string {
+  const single = typeof data.name === "string" ? data.name.trim() : "";
+  if (single) return single;
+  const fn = typeof data.firstName === "string" ? data.firstName.trim() : "";
+  const ln = typeof data.lastName === "string" ? data.lastName.trim() : "";
+  return [fn, ln].filter(Boolean).join(" ").trim();
+}
+
 function normalizePortalStudent(global: Record<string, unknown>, studentId: string) {
   const name = String(global.name || "");
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0] || "";
-  const last = parts.slice(1).join(" ") || "";
+  const { firstName: first, lastName: last } = splitStudentName(name);
   return {
     ...global,
     id: studentId,
@@ -1526,6 +1538,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [confirmDeletePlanId, setConfirmDeletePlanId] = useState<string | null>(null);
   const [coachingNotes, setCoachingNotes] = useState("");
   const [editStats, setEditStats] = useState({
+    name: "",
     birthDate: "",
     goalWeightKg: "",
     goalBodyFatPercent: "",
@@ -1550,6 +1563,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
   const [coachingNotesOpen, setCoachingNotesOpen] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
+  const [editingHeaderProfile, setEditingHeaderProfile] = useState(false);
+  const [isSavingHeaderProfile, setIsSavingHeaderProfile] = useState(false);
 
   const studentRef = useMemoFirebase(() => {
     if (!db || !user || !id) return null;
@@ -2083,28 +2098,39 @@ export default function StudentDetailPage({ id }: { id: string }) {
       const roster = effectiveRoster as Record<string, unknown>;
       const global = (globalStudent as Record<string, unknown> | null) || null;
       setCoachingNotes(effectiveRoster.coachingNotes || "");
-      setEditStats({
-        birthDate: normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
+      setEditStats((prev) => ({
+        name: editingHeaderProfile
+          ? prev.name
+          : studentDisplayNameFromRecord(roster) ||
+            studentDisplayNameFromRecord((global as Record<string, unknown>) || {}),
+        birthDate: editingHeaderProfile
+          ? prev.birthDate
+          : normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
         goalWeightKg: effectiveRoster.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
             ? String((effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent)
             : "",
         goalType: effectiveRoster.goalType || "",
-      });
+      }));
     } else if (globalStudent) {
       setCoachingNotes("");
-      setEditStats({
-        birthDate: normalizeBirthDateInput((globalStudent as Record<string, unknown>).birthDate),
+      setEditStats((prev) => ({
+        name: editingHeaderProfile
+          ? prev.name
+          : studentDisplayNameFromRecord(globalStudent as Record<string, unknown>),
+        birthDate: editingHeaderProfile
+          ? prev.birthDate
+          : normalizeBirthDateInput((globalStudent as Record<string, unknown>).birthDate),
         goalWeightKg: globalStudent.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
             ? String((globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent)
             : "",
         goalType: (globalStudent.goalType as string) || "",
-      });
+      }));
     }
-  }, [effectiveRoster, globalStudent]);
+  }, [effectiveRoster, globalStudent, editingHeaderProfile]);
 
   const coachingNotesSummary = useMemo(() => {
     const text = coachingNotes.trim();
@@ -2115,9 +2141,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const goalsSummary = useMemo(() => {
     const parts: string[] = [];
-    if (editStats.birthDate.trim()) {
-      parts.push(editStats.birthDate);
-    }
     if (editStats.goalWeightKg.trim()) {
       parts.push(`${editStats.goalWeightKg} kg`);
     }
@@ -2129,6 +2152,29 @@ export default function StudentDetailPage({ id }: { id: string }) {
     }
     return parts.length > 0 ? parts.join(" · ") : "—";
   }, [editStats]);
+
+  const syncHeaderProfileFields = useCallback(() => {
+    if (effectiveRoster) {
+      const roster = effectiveRoster as Record<string, unknown>;
+      const global = (globalStudent as Record<string, unknown> | null) || null;
+      setEditStats((prev) => ({
+        ...prev,
+        name:
+          studentDisplayNameFromRecord(roster) ||
+          studentDisplayNameFromRecord(global || {}),
+        birthDate: normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
+      }));
+      return;
+    }
+    if (globalStudent) {
+      const global = globalStudent as Record<string, unknown>;
+      setEditStats((prev) => ({
+        ...prev,
+        name: studentDisplayNameFromRecord(global),
+        birthDate: normalizeBirthDateInput(global.birthDate),
+      }));
+    }
+  }, [effectiveRoster, globalStudent]);
 
   const handleAddToRoster = () => {
     if (!db || !user || !globalStudent || !id) return;
@@ -2189,32 +2235,75 @@ export default function StudentDetailPage({ id }: { id: string }) {
     }
   };
 
-  const handleUpdateStudent = async () => {
+  const handleUpdateStudentIdentity = async () => {
     if (portalOnly || !studentRef || !user || !db) return;
-    setIsSaving(true);
+    const trimmedName = editStats.name.trim().replace(/\s+/g, " ");
+    if (!trimmedName) {
+      toast({
+        variant: "destructive",
+        title: t("error"),
+        description: t("fullName"),
+      });
+      return;
+    }
+
+    setIsSavingHeaderProfile(true);
     try {
+      const { firstName, lastName } = splitStudentName(trimmedName);
       const birthDate = normalizeBirthDateInput(editStats.birthDate);
       const derivedAge = birthDate ? ageFromBirthDate(birthDate) : null;
       const patch: Record<string, unknown> = {
         trainerId: user.uid,
-        coachingNotes,
+        name: trimmedName,
+        firstName,
+        lastName,
         birthDate: birthDate || null,
-        goalWeightKg: Number(editStats.goalWeightKg) || 0,
-        goalBodyFatPercent: Number(editStats.goalBodyFatPercent) || 0,
-        goalType: editStats.goalType,
       };
       if (derivedAge != null) patch.age = derivedAge;
 
-      // Ensure trainerId is preserved to satisfy security rules
       updateDocumentNonBlocking(studentRef, patch);
 
       const globalUid = coachBodyMetricGlobalStudentId;
       if (globalUid) {
         updateDocumentNonBlocking(doc(db, "students", globalUid), {
+          name: trimmedName,
+          firstName,
+          lastName,
           birthDate: birthDate || null,
           ...(derivedAge != null ? { age: derivedAge } : {}),
         });
       }
+
+      setEditingHeaderProfile(false);
+      toast({
+        title: t("profileUpdated"),
+        description: t("coachingDataSaved"),
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update coaching info.",
+      });
+    } finally {
+      setIsSavingHeaderProfile(false);
+    }
+  };
+
+  const handleUpdateStudent = async () => {
+    if (portalOnly || !studentRef || !user || !db) return;
+    setIsSaving(true);
+    try {
+      const patch: Record<string, unknown> = {
+        trainerId: user.uid,
+        coachingNotes,
+        goalWeightKg: Number(editStats.goalWeightKg) || 0,
+        goalBodyFatPercent: Number(editStats.goalBodyFatPercent) || 0,
+        goalType: editStats.goalType,
+      };
+
+      // Ensure trainerId is preserved to satisfy security rules
+      updateDocumentNonBlocking(studentRef, patch);
 
       toast({
         title: t("profileUpdated"),
@@ -2323,46 +2412,144 @@ export default function StudentDetailPage({ id }: { id: string }) {
     <Navigation>
       <div className="space-y-8">
         <header className="flex flex-col md:flex-row gap-4 md:gap-6 items-start justify-between bg-card p-4 md:p-6 rounded-xl border shadow-sm">
-          <div className="flex gap-4 md:gap-6 items-center">
-            <Avatar className="h-16 w-16 md:h-24 md:w-24 ring-4 ring-primary/10">
+          <div className="flex gap-4 md:gap-6 items-start md:items-center min-w-0 flex-1">
+            <Avatar className="h-16 w-16 md:h-24 md:w-24 ring-4 ring-primary/10 shrink-0">
               <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/200/200`} />
               <AvatarFallback className="text-2xl">{student.firstName?.[0]}{student.lastName?.[0]}</AvatarFallback>
             </Avatar>
-            <div className="space-y-1">
-              <div className="flex items-center gap-3">
-                <h1 className="text-xl md:text-3xl font-bold font-headline">
-                  {student.firstName || student.name}{" "}
-                  {student.lastName ? String(student.lastName) : ""}
-                </h1>
-                <Badge className="bg-accent text-accent-foreground capitalize">
-                  {portalOnly ? "Portal" : student.activityStatus}
-                </Badge>
-                {student && isOpenTrainingAccess((student as { trainingAccessMode?: string }).trainingAccessMode) ? (
-                  <Badge className="bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">
-                    {t("trainingAccessOpenBadge")}
-                  </Badge>
-                ) : null}
-                {isStudentBlocked && (
-                  <Badge variant="destructive" className="gap-1">
-                    <Ban className="h-3 w-3" /> Blocked
-                  </Badge>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground flex items-center gap-2">
-                <Mail className="h-4 w-4" /> {student.email}
-              </p>
-              <p className="text-xs text-muted-foreground flex items-center gap-2">
-                <Calendar className="h-3 w-3" /> {t("memberSince")} {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
-              </p>
-              {editStats.birthDate ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("birthDate")}:{" "}
-                  {new Date(`${editStats.birthDate}T00:00:00`).toLocaleDateString()}
-                  {ageFromBirthDate(editStats.birthDate) != null
-                    ? ` · ${t("age")} ${ageFromBirthDate(editStats.birthDate)}`
-                    : ""}
-                </p>
-              ) : null}
+            <div className="space-y-1 min-w-0 flex-1">
+              {!portalOnly && editingHeaderProfile ? (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      id="coach-student-header-name"
+                      value={editStats.name}
+                      onChange={(e) => setEditStats({ ...editStats, name: e.target.value })}
+                      placeholder={t("fullName")}
+                      autoComplete="name"
+                      className="max-w-md text-xl md:text-2xl font-bold font-headline h-11"
+                      disabled={isSavingHeaderProfile}
+                    />
+                    <Badge className="bg-accent text-accent-foreground capitalize">
+                      {student.activityStatus}
+                    </Badge>
+                    {student && isOpenTrainingAccess((student as { trainingAccessMode?: string }).trainingAccessMode) ? (
+                      <Badge className="bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">
+                        {t("trainingAccessOpenBadge")}
+                      </Badge>
+                    ) : null}
+                    {isStudentBlocked && (
+                      <Badge variant="destructive" className="gap-1">
+                        <Ban className="h-3 w-3" /> Blocked
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Mail className="h-4 w-4" /> {student.email}
+                  </p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-2">
+                    <Calendar className="h-3 w-3" /> {t("memberSince")}{" "}
+                    {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
+                  </p>
+                  <div className="flex flex-wrap items-end gap-2 pt-1">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="coach-student-header-birthDate">{t("birthDate")}</Label>
+                      <Input
+                        id="coach-student-header-birthDate"
+                        type="date"
+                        value={editStats.birthDate}
+                        onChange={(e) =>
+                          setEditStats({ ...editStats, birthDate: e.target.value })
+                        }
+                        disabled={isSavingHeaderProfile}
+                        className="w-[11.5rem]"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void handleUpdateStudentIdentity()}
+                      disabled={isSavingHeaderProfile}
+                    >
+                      {isSavingHeaderProfile ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                      {t("save")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        syncHeaderProfileFields();
+                        setEditingHeaderProfile(false);
+                      }}
+                      disabled={isSavingHeaderProfile}
+                    >
+                      {t("cancel")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+                    <h1 className="text-xl md:text-3xl font-bold font-headline">
+                      {editStats.name ||
+                        `${student.firstName || student.name || ""} ${
+                          student.lastName ? String(student.lastName) : ""
+                        }`.trim()}
+                    </h1>
+                    <Badge className="bg-accent text-accent-foreground capitalize">
+                      {portalOnly ? "Portal" : student.activityStatus}
+                    </Badge>
+                    {student && isOpenTrainingAccess((student as { trainingAccessMode?: string }).trainingAccessMode) ? (
+                      <Badge className="bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">
+                        {t("trainingAccessOpenBadge")}
+                      </Badge>
+                    ) : null}
+                    {isStudentBlocked && (
+                      <Badge variant="destructive" className="gap-1">
+                        <Ban className="h-3 w-3" /> Blocked
+                      </Badge>
+                    )}
+                    {!portalOnly && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => {
+                          syncHeaderProfileFields();
+                          setEditingHeaderProfile(true);
+                        }}
+                        aria-label={t("edit")}
+                        title={t("edit")}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Mail className="h-4 w-4" /> {student.email}
+                  </p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-2">
+                    <Calendar className="h-3 w-3" /> {t("memberSince")}{" "}
+                    {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
+                  </p>
+                  {editStats.birthDate ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("birthDate")}:{" "}
+                      {new Date(`${editStats.birthDate}T00:00:00`).toLocaleDateString()}
+                      {ageFromBirthDate(editStats.birthDate) != null
+                        ? ` · ${t("age")} ${ageFromBirthDate(editStats.birthDate)}`
+                        : ""}
+                    </p>
+                  ) : !portalOnly ? (
+                    <p className="text-xs text-muted-foreground">{t("birthDate")}: —</p>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -3087,18 +3274,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
                     </CardHeader>
                     <CollapsibleContent>
                       <CardContent className="space-y-4 pt-0">
-                        <div className="space-y-2">
-                          <Label htmlFor="coach-student-birthDate">{t("birthDate")}</Label>
-                          <Input
-                            id="coach-student-birthDate"
-                            type="date"
-                            value={editStats.birthDate}
-                            onChange={(e) =>
-                              setEditStats({ ...editStats, birthDate: e.target.value })
-                            }
-                            disabled={portalOnly}
-                          />
-                        </div>
                         <div className="space-y-2">
                           <Label>{t("goalWeight")}</Label>
                           <Input
