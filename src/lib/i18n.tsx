@@ -244,6 +244,8 @@ const translations = {
     sessionCompleted: "session completed",
     completed: "Completed",
     noWorkoutSessions: "No workout sessions recorded yet.",
+    workoutHistoryLegendHasSession: "Has training",
+    workoutHistoryNoSessionsOnDay: "No training recorded on this day.",
     currentStreak: "Current Streak",
     sessionAttendanceStreakTitle: "Attendance streak",
     sessionAttendanceStreakHint:
@@ -1387,6 +1389,8 @@ const translations = {
     sessionCompleted: "sessão concluída",
     completed: "Concluído",
     noWorkoutSessions: "Ainda não há sessões de treino registadas.",
+    workoutHistoryLegendHasSession: "Com treino",
+    workoutHistoryNoSessionsOnDay: "Nenhum treino registado neste dia.",
     currentStreak: "Sequência Atual",
     sessionAttendanceStreakTitle: "Sequência de presenças",
     sessionAttendanceStreakHint:

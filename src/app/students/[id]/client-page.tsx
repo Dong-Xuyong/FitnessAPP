@@ -15,7 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { 
   Mail, 
-  Calendar, 
+  Calendar as CalendarIcon, 
+  CalendarDays,
   Dumbbell, 
   History, 
   Award, 
@@ -38,6 +39,7 @@ import {
   GripVertical,
   Info,
 } from "lucide-react";
+import { Calendar as MonthCalendar } from "@/components/ui/calendar";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
@@ -114,7 +116,10 @@ import {
   SequenceTemplatePicker,
 } from "@/components/SequenceTemplatePicker";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
-import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import {
+  maxAttendanceStreakForCandidates,
+  studentLocalCalendarDateKeyMs,
+} from "@/lib/session-attendance-streak";
 import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { ageFromBirthDate, normalizeBirthDateInput } from "@/lib/body-metric-input";
@@ -1834,9 +1839,42 @@ export default function StudentDetailPage({ id }: { id: string }) {
     return maxAttendanceStreakForCandidates(slots, candidateIds, Date.now(), slotDm);
   }, [trainerSessionSlots, trainerSettings, effectiveRoster, id]);
 
-  const sortedSessions = (workoutSessions || []).sort(
-    (a: any, b: any) => (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
+  const sortedSessions = useMemo(
+    () =>
+      [...(workoutSessions || [])].sort((a: any, b: any) =>
+        (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
+      ),
+    [workoutSessions]
   );
+
+  const sessionsByLocalDate = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const session of sortedSessions) {
+      const raw = session.completedAt || session.startedAt || session.date;
+      const ms = typeof raw === "number" ? raw : Date.parse(String(raw || ""));
+      if (!Number.isFinite(ms)) continue;
+      const key = studentLocalCalendarDateKeyMs(ms);
+      const list = map.get(key);
+      if (list) list.push(session);
+      else map.set(key, [session]);
+    }
+    return map;
+  }, [sortedSessions]);
+
+  const historySessionDates = useMemo(
+    () => [...sessionsByLocalDate.keys()].map((key) => new Date(`${key}T12:00:00`)),
+    [sessionsByLocalDate]
+  );
+
+  const mostRecentHistoryDate = useMemo(() => {
+    for (const session of sortedSessions) {
+      const raw = session.completedAt || session.startedAt || session.date;
+      const ms = typeof raw === "number" ? raw : Date.parse(String(raw || ""));
+      if (!Number.isFinite(ms)) continue;
+      return new Date(`${studentLocalCalendarDateKeyMs(ms)}T12:00:00`);
+    }
+    return undefined;
+  }, [sortedSessions]);
 
 
   const strengthByExercise = useMemo(() => {
@@ -1926,6 +1964,13 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const [editSession, setEditSession] = useState<any>(null);
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [historySelectedDate, setHistorySelectedDate] = useState<Date | undefined>(undefined);
+  const [historyMonth, setHistoryMonth] = useState<Date | undefined>(undefined);
+
+  const effectiveHistoryDate = historySelectedDate ?? mostRecentHistoryDate ?? new Date();
+  const historyCalendarMonth = historyMonth ?? effectiveHistoryDate;
+  const selectedHistoryDateKey = studentLocalCalendarDateKeyMs(effectiveHistoryDate.getTime());
+  const sessionsForSelectedHistoryDay = sessionsByLocalDate.get(selectedHistoryDateKey) || [];
 
   const milestonesRef = useMemoFirebase(() => {
     if (!db || !user || !id) return null;
@@ -2448,7 +2493,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                     <Mail className="h-4 w-4" /> {student.email}
                   </p>
                   <p className="text-xs text-muted-foreground flex items-center gap-2">
-                    <Calendar className="h-3 w-3" /> {t("memberSince")}{" "}
+                    <CalendarIcon className="h-3 w-3" /> {t("memberSince")}{" "}
                     {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
                   </p>
                   <div className="flex flex-wrap items-end gap-2 pt-1">
@@ -2534,7 +2579,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                     <Mail className="h-4 w-4" /> {student.email}
                   </p>
                   <p className="text-xs text-muted-foreground flex items-center gap-2">
-                    <Calendar className="h-3 w-3" /> {t("memberSince")}{" "}
+                    <CalendarIcon className="h-3 w-3" /> {t("memberSince")}{" "}
                     {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
                   </p>
                   {editStats.birthDate ? (
@@ -2882,128 +2927,187 @@ export default function StudentDetailPage({ id }: { id: string }) {
               </CardHeader>
               <CardContent>
                 {sortedSessions.length > 0 ? (
-                  <div className="space-y-3">
-                    {sortedSessions.map((session: any) => (
-                      <div key={session.id} className="border rounded-lg p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-semibold">
-                              {isCoachBodyMetricSession(session)
-                                ? t("coachBodyMetricSessionTitle")
-                                : session.workoutTitle || "Untitled Workout"}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {session.completedAt
-                                ? new Date(session.completedAt).toLocaleDateString(undefined, {
-                                    weekday: "short",
-                                    year: "numeric",
-                                    month: "short",
-                                    day: "numeric",
-                                  })
-                                : session.startedAt
-                                  ? new Date(session.startedAt).toLocaleDateString()
-                                  : "—"}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7"
-                              onClick={() => openEditSession(session)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-destructive"
-                              onClick={() => setConfirmDeleteSessionId(session.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Badge variant="outline" className="bg-green-100 text-green-800">
-                              {session.status === "completed" ? t("completed") : session.status || "Done"}
-                            </Badge>
-                          </div>
-                        </div>
-                        {(session.sessionDifficultyRating != null ||
-                          session.sessionMoodRating != null ||
-                          session.difficultyNotes ||
-                          session.moodNotes) && (
-                          <div className="text-xs rounded-md bg-muted/40 border border-border/60 p-3 space-y-2">
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 items-center font-medium">
-                              {(() => {
-                                const dr = Number(session.sessionDifficultyRating);
-                                const faces = ["😌", "🙂", "😐", "😰", "😵"];
-                                if (!Number.isFinite(dr) || dr < 1 || dr > 5) return null;
-                                return (
-                                  <span className="text-muted-foreground">
-                                    {t("sessionDifficultyCoach")}: <span aria-hidden>{faces[dr - 1]}</span> ({dr}/5)
-                                  </span>
-                                );
-                              })()}
-                              {(() => {
-                                const mr = Number(session.sessionMoodRating);
-                                const faces = ["😢", "😕", "😐", "😊", "🤩"];
-                                if (!Number.isFinite(mr) || mr < 1 || mr > 5) return null;
-                                return (
-                                  <span className="text-muted-foreground">
-                                    {t("sessionMoodCoach")}: <span aria-hidden>{faces[mr - 1]}</span> ({mr}/5)
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                            {(session.difficultyNotes || session.moodNotes) && (
-                              <div className="space-y-1 text-muted-foreground">
-                                {session.difficultyNotes ? (
-                                  <p>
-                                    <span className="font-semibold text-foreground/80">
-                                      {t("sessionDifficultyCoach")}:{" "}
-                                    </span>
-                                    {session.difficultyNotes}
-                                  </p>
-                                ) : null}
-                                {session.moodNotes ? (
-                                  <p>
-                                    <span className="font-semibold text-foreground/80">
-                                      {t("sessionMoodCoach")}:{" "}
-                                    </span>
-                                    {session.moodNotes}
-                                  </p>
-                                ) : null}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {session.exercises && session.exercises.length > 0 && (
-                          <div className="space-y-2">
-                            {session.exercises.map((ex: any, idx: number) => (
-                              <div key={idx} className="bg-muted/50 rounded p-2">
-                                <p className="text-sm font-medium">{ex.exerciseName || ex.name}</p>
-                                {ex.sets && Array.isArray(ex.sets) ? (
-                                  <div className="flex flex-wrap gap-2 mt-1">
-                                    {ex.sets.map((s: any, si: number) => (
-                                      <span
-                                        key={si}
-                                        className="text-xs bg-background border rounded px-2 py-0.5"
-                                      >
-                                        Set {si + 1}: {s.weight ?? "—"}kg × {s.reps ?? "—"}
-                                      </span>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-xs text-muted-foreground">
-                                    {ex.sets || "—"} sets · {ex.reps || "—"} reps
-                                    {ex.weight ? ` · ${ex.weight}kg` : ""}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                  <div className="grid lg:grid-cols-5 gap-6 items-start">
+                    <div className="lg:col-span-2 space-y-3">
+                      <MonthCalendar
+                        mode="single"
+                        selected={effectiveHistoryDate}
+                        onSelect={(d) => {
+                          if (d) {
+                            setHistorySelectedDate(d);
+                            setHistoryMonth(d);
+                          }
+                        }}
+                        month={historyCalendarMonth}
+                        onMonthChange={setHistoryMonth}
+                        modifiers={{ hasSession: historySessionDates }}
+                        modifiersClassNames={{
+                          hasSession:
+                            "bg-primary/15 text-primary font-semibold rounded-full",
+                        }}
+                        className="rounded-md border max-w-full"
+                      />
+                      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground px-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-3 h-3 rounded-full bg-primary/25 border border-primary/40 inline-block" />
+                          {t("workoutHistoryLegendHasSession")}
+                        </span>
                       </div>
-                    ))}
+                    </div>
+
+                    <div className="lg:col-span-3 space-y-3">
+                      <div>
+                        <h3 className="text-lg font-semibold capitalize leading-tight">
+                          {effectiveHistoryDate.toLocaleDateString(undefined, {
+                            weekday: "long",
+                            day: "numeric",
+                            month: "long",
+                            year: "numeric",
+                          })}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          {sessionsForSelectedHistoryDay.length > 0
+                            ? `${sessionsForSelectedHistoryDay.length} ${
+                                sessionsForSelectedHistoryDay.length !== 1
+                                  ? t("sessionsCompleted")
+                                  : t("sessionCompleted")
+                              }`
+                            : t("workoutHistoryNoSessionsOnDay")}
+                        </p>
+                      </div>
+
+                      {sessionsForSelectedHistoryDay.length > 0 ? (
+                        <div className="space-y-3">
+                          {sessionsForSelectedHistoryDay.map((session: any) => (
+                            <div key={session.id} className="border rounded-lg p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-semibold">
+                                    {isCoachBodyMetricSession(session)
+                                      ? t("coachBodyMetricSessionTitle")
+                                      : session.workoutTitle || "Untitled Workout"}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {session.completedAt
+                                      ? new Date(session.completedAt).toLocaleTimeString(undefined, {
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                        })
+                                      : session.startedAt
+                                        ? new Date(session.startedAt).toLocaleTimeString(undefined, {
+                                            hour: "2-digit",
+                                            minute: "2-digit",
+                                          })
+                                        : "—"}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7"
+                                    onClick={() => openEditSession(session)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 text-destructive"
+                                    onClick={() => setConfirmDeleteSessionId(session.id)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Badge variant="outline" className="bg-green-100 text-green-800">
+                                    {session.status === "completed" ? t("completed") : session.status || "Done"}
+                                  </Badge>
+                                </div>
+                              </div>
+                              {(session.sessionDifficultyRating != null ||
+                                session.sessionMoodRating != null ||
+                                session.difficultyNotes ||
+                                session.moodNotes) && (
+                                <div className="text-xs rounded-md bg-muted/40 border border-border/60 p-3 space-y-2">
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1 items-center font-medium">
+                                    {(() => {
+                                      const dr = Number(session.sessionDifficultyRating);
+                                      const faces = ["😌", "🙂", "😐", "😰", "😵"];
+                                      if (!Number.isFinite(dr) || dr < 1 || dr > 5) return null;
+                                      return (
+                                        <span className="text-muted-foreground">
+                                          {t("sessionDifficultyCoach")}: <span aria-hidden>{faces[dr - 1]}</span> ({dr}/5)
+                                        </span>
+                                      );
+                                    })()}
+                                    {(() => {
+                                      const mr = Number(session.sessionMoodRating);
+                                      const faces = ["😢", "😕", "😐", "😊", "🤩"];
+                                      if (!Number.isFinite(mr) || mr < 1 || mr > 5) return null;
+                                      return (
+                                        <span className="text-muted-foreground">
+                                          {t("sessionMoodCoach")}: <span aria-hidden>{faces[mr - 1]}</span> ({mr}/5)
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
+                                  {(session.difficultyNotes || session.moodNotes) && (
+                                    <div className="space-y-1 text-muted-foreground">
+                                      {session.difficultyNotes ? (
+                                        <p>
+                                          <span className="font-semibold text-foreground/80">
+                                            {t("sessionDifficultyCoach")}:{" "}
+                                          </span>
+                                          {session.difficultyNotes}
+                                        </p>
+                                      ) : null}
+                                      {session.moodNotes ? (
+                                        <p>
+                                          <span className="font-semibold text-foreground/80">
+                                            {t("sessionMoodCoach")}:{" "}
+                                          </span>
+                                          {session.moodNotes}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {session.exercises && session.exercises.length > 0 && (
+                                <div className="space-y-2">
+                                  {session.exercises.map((ex: any, idx: number) => (
+                                    <div key={idx} className="bg-muted/50 rounded p-2">
+                                      <p className="text-sm font-medium">{ex.exerciseName || ex.name}</p>
+                                      {ex.sets && Array.isArray(ex.sets) ? (
+                                        <div className="flex flex-wrap gap-2 mt-1">
+                                          {ex.sets.map((s: any, si: number) => (
+                                            <span
+                                              key={si}
+                                              className="text-xs bg-background border rounded px-2 py-0.5"
+                                            >
+                                              Set {si + 1}: {s.weight ?? "—"}kg × {s.reps ?? "—"}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-xs text-muted-foreground">
+                                          {ex.sets || "—"} sets · {ex.reps || "—"} reps
+                                          {ex.weight ? ` · ${ex.weight}kg` : ""}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-10 text-muted-foreground border rounded-lg border-dashed">
+                          <CalendarDays className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                          <p className="text-sm">{t("workoutHistoryNoSessionsOnDay")}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
