@@ -35,6 +35,7 @@ import {
   studentLocalCalendarDateKeyMs,
   type SessionSlotAttendance,
 } from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { cn } from "@/lib/utils";
 import {
   isOpenTrainingAccess,
@@ -260,11 +261,13 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
       rosterSnap.exists() && typeof (rosterSnap.data() as { sessionDurationMin?: number }).sessionDurationMin === "number"
         ? Number((rosterSnap.data() as { sessionDurationMin: number }).sessionDurationMin)
         : 60;
-    const slotsSnap = await getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots"));
+    const [slotsSnap, sessionsSnap, trainerSnap] = await Promise.all([
+      getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots")),
+      getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")),
+      getDoc(doc(db, "personalTrainers", trainerId)),
+    ]);
     const slots = slotsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as SessionSlotAttendance[];
-    const sessionsSnap = await getDocs(
-      collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")
-    );
+    const vacationPeriods = normalizeVacationPeriods(trainerSnap.data()?.vacationPeriods);
     const todayK = studentLocalCalendarDateKeyMs(Date.now());
     let completedSessionToday = false;
     for (const docSn of sessionsSnap.docs) {
@@ -288,7 +291,8 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
       resolvedStudentId,
       workoutId,
       Date.now(),
-      fallbackDur
+      fallbackDur,
+      vacationPeriods
     );
     return present && !completedSessionToday;
   }, [db, user?.uid, workoutId]);

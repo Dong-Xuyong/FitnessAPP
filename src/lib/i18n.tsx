@@ -328,6 +328,11 @@ const translations = {
     coachAttendanceTooEarlyDescription:
       "You can mark attendance from 15 minutes before the session start time.",
     coachAttendanceNotYetWindowHint: "from 15 min before start",
+    coachVacationAssignBanner:
+      "Vacation day — you can still assign students to the usual blocks. Attendance is not required.",
+    coachVacationAttendanceNotRequired: "Attendance is not required on vacation days.",
+    coachVacationEmptyDayHint:
+      "This weekday has no weekly hours. Add hours in availability, or assign on a day that already has blocks.",
     coachCancelSlotSession: "Cancel session",
     coachCancelSlotSessionTitle: "Cancel this session?",
     coachCancelSlotSessionDescription:
@@ -1474,6 +1479,11 @@ const translations = {
     coachAttendanceTooEarlyDescription:
       "Só podes registar presença, falta ou pendente a partir de 15 minutos antes do horário de início da sessão.",
     coachAttendanceNotYetWindowHint: "a partir de 15 min antes do início",
+    coachVacationAssignBanner:
+      "Dia de férias — podes atribuir alunos aos blocos habituais. Não é necessário marcar presença.",
+    coachVacationAttendanceNotRequired: "Não é necessário marcar presença nos dias de férias.",
+    coachVacationEmptyDayHint:
+      "Este dia da semana não tem horário. Define horas na disponibilidade, ou atribui noutro dia que já tenha blocos.",
     coachCancelSlotSession: "Cancelar sessão",
     coachCancelSlotSessionTitle: "Cancelar esta sessão?",
     coachCancelSlotSessionDescription:

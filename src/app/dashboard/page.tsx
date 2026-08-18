@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
 import { fetchRosterPaymentStatusMap, nextBillingPeriod } from "@/lib/roster-payment-status";
 import { normalizedPaymentPaid } from "@/lib/student-payment-due";
@@ -313,7 +314,13 @@ function DashboardContent() {
           });
         });
 
-        const streak = maxAttendanceStreakForCandidates(sessionSlotsList, candidateIds, Date.now(), slotDm);
+        const streak = maxAttendanceStreakForCandidates(
+          sessionSlotsList,
+          candidateIds,
+          Date.now(),
+          slotDm,
+          normalizeVacationPeriods((trainer as Record<string, unknown> | undefined)?.vacationPeriods)
+        );
 
         streakMap[rosterStudentId] = streak;
       } catch {}

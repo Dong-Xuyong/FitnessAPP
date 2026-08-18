@@ -13,6 +13,7 @@ import { useUser, useFirestore } from "@/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 
 function computeEpleyOneRm(weight: number, reps: number): number {
   if (!Number.isFinite(weight) || !Number.isFinite(reps) || weight <= 0 || reps <= 0) return 0;
@@ -90,7 +91,13 @@ export function StudentProgressPanel() {
         });
         const candidateIds = Array.from(new Set([resolvedStudentId, uid].filter(Boolean)));
         setCurrentStreak(
-          maxAttendanceStreakForCandidates(sessionSlotsList, candidateIds, Date.now(), slotDm)
+          maxAttendanceStreakForCandidates(
+            sessionSlotsList,
+            candidateIds,
+            Date.now(),
+            slotDm,
+            normalizeVacationPeriods(trainerSnap.data()?.vacationPeriods)
+          )
         );
 
         const oneRmByExercise = new Map<string, Array<{ timestamp: number; oneRm: number }>>();

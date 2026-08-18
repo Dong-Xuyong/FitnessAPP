@@ -28,7 +28,6 @@ import {
   normalizeVacationPeriods,
   normalizeOpenAvailabilityBlocks,
   resolveDaySlotTimes,
-  isNewBookingBlocked,
   weekdayKeyFromDate,
   type Availability,
 } from "@/lib/trainer-availability";
@@ -276,10 +275,6 @@ export function StudentWeeklySchedulingTab({
       const date = new Date(dateStr + "T12:00:00");
       const dayKey = weekdayKeyFromDate(date);
       const weeklySched = availability[dayKey];
-      const onVacation = isNewBookingBlocked({ dateStr, time: "00:00", vacationPeriods, openBlocks })
-        // rough check: if any time is blocked that day
-        && !openBlocks.some((b) => b.date === dateStr);
-
       const slotTimes = resolveDaySlotTimes({
         dateStr,
         weeklySched,

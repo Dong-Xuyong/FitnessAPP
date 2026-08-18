@@ -25,6 +25,7 @@ import {
   monthlySessionAllowance,
   type SessionSlotAttendance,
 } from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
@@ -162,20 +163,23 @@ function ProgressPageContent() {
   useEffect(() => {
     if (!db || !user || isUserLoading) return;
 
+    const trainerUid = user.uid;
     let cancelled = false;
 
     async function loadPresenceLeaderboard() {
       setIsLoading(true);
       setPresenceLoadFailed(false);
       try {
-        const rosterRef = collection(db, "personalTrainers", user.uid, "students");
-        const [rosterSnap, sessionSlotsSnap] = await Promise.all([
+        const rosterRef = collection(db, "personalTrainers", trainerUid, "students");
+        const [rosterSnap, sessionSlotsSnap, trainerSnap] = await Promise.all([
           getDocs(rosterRef),
-          getDocs(collection(db, "personalTrainers", user.uid, "sessionSlots")),
+          getDocs(collection(db, "personalTrainers", trainerUid, "sessionSlots")),
+          getDoc(doc(db, "personalTrainers", trainerUid)),
         ]);
 
         if (cancelled) return;
 
+        const vacationPeriods = normalizeVacationPeriods(trainerSnap.data()?.vacationPeriods);
         const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
           const data = d.data() as SessionSlotAttendance;
           return {
@@ -202,7 +206,8 @@ function ProgressPageContent() {
           const { booked, present, absent } = countMonthlySessionAttendanceStats(
             sessionSlotsList,
             candidateIds,
-            now
+            now,
+            vacationPeriods
           );
           return {
             studentId,

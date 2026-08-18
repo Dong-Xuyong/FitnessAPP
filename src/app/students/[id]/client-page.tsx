@@ -120,6 +120,7 @@ import {
   maxAttendanceStreakForCandidates,
   studentLocalCalendarDateKeyMs,
 } from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { ageFromBirthDate, normalizeBirthDateInput } from "@/lib/body-metric-input";
@@ -1836,7 +1837,13 @@ export default function StudentDetailPage({ id }: { id: string }) {
     const slots = (trainerSessionSlots || []) as SessionSlotAttendance[];
     const rosterUid = String((effectiveRoster as any)?.userId || "").trim();
     const candidateIds = Array.from(new Set([String(id || ""), rosterUid].filter(Boolean))) as string[];
-    return maxAttendanceStreakForCandidates(slots, candidateIds, Date.now(), slotDm);
+    return maxAttendanceStreakForCandidates(
+      slots,
+      candidateIds,
+      Date.now(),
+      slotDm,
+      normalizeVacationPeriods((trainerSettings as Record<string, unknown> | undefined)?.vacationPeriods)
+    );
   }, [trainerSessionSlots, trainerSettings, effectiveRoster, id]);
 
   const sortedSessions = useMemo(

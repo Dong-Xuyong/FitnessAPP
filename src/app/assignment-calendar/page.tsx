@@ -93,7 +93,6 @@ import {
   generateSlotTimes,
   getEffectiveSessionDurationMin,
   isDateInVacation,
-  isNewBookingBlocked,
   normalizeOpenAvailabilityBlocks,
   normalizeVacationPeriods,
   openBlocksForDate,
@@ -1559,17 +1558,6 @@ export default function AssignmentCalendarPage() {
     hasResolvableSlots: timeSlots.length > 0,
   });
 
-  const isBookingBlockedAtTime = useCallback(
-    (time: string) =>
-      isNewBookingBlocked({
-        dateStr: selectedDateStr,
-        time,
-        vacationPeriods,
-        openBlocks: openAvailabilityBlocks,
-      }),
-    [selectedDateStr, vacationPeriods, openAvailabilityBlocks]
-  );
-
   const slotsByTime = useMemo(() => {
     const map = new Map<string, SessionSlot>();
     sessionSlots.filter((s) => s.date === selectedDateStr).forEach((s) => map.set(s.startTime, s));
@@ -1594,8 +1582,9 @@ export default function AssignmentCalendarPage() {
     () =>
       datesWithActionablePendingAttendance(sessionSlots, Date.now(), {
         filterStudentId: isFilterActive ? filterStudentId : undefined,
+        vacationPeriods,
       }).map((d) => new Date(d + "T12:00:00")),
-    [sessionSlots, isFilterActive, filterStudentId]
+    [sessionSlots, isFilterActive, filterStudentId, vacationPeriods]
   );
 
   const studentsBookedOnSelectedDay = useMemo((): DayBookedStudent[] => {
@@ -2553,14 +2542,6 @@ export default function AssignmentCalendarPage() {
 
   const openManageSlot = (time: string) => {
     const existing = slotsByTime.get(time) ?? null;
-    if (
-      isBookingBlockedAtTime(time) &&
-      !(existing?.students?.length) &&
-      !isSessionSlotCancelled(existing)
-    ) {
-      toast({ title: "Dia de férias — não é possível criar novos blocos", variant: "destructive" });
-      return;
-    }
     setManagingSlot({ date: selectedDateStr, startTime: time, slot: existing });
     setAddStudentId("");
     setSelectedPlanId("");
@@ -2605,17 +2586,6 @@ export default function AssignmentCalendarPage() {
     if (!managingSlot || !addStudentId || !db || !user) return;
     if (isSessionSlotCancelled(managingSlot.slot)) {
       toast({ title: t("coachSlotCancelledLabel"), description: t("coachReactivateSlotSessionDescription"), variant: "destructive" });
-      return;
-    }
-    if (
-      isNewBookingBlocked({
-        dateStr: managingSlot.date,
-        time: managingSlot.startTime,
-        vacationPeriods,
-        openBlocks: openAvailabilityBlocks,
-      })
-    ) {
-      toast({ title: "Dia de férias — não é possível inscrever novos alunos", variant: "destructive" });
       return;
     }
     setIsAddingStudent(true);
@@ -2850,10 +2820,6 @@ export default function AssignmentCalendarPage() {
       });
       return;
     }
-    if (!isEnrolled && isBookingBlockedAtTime(time)) {
-      toast({ title: "Dia de férias — não é possível inscrever", variant: "destructive" });
-      return;
-    }
     const startIdx = timeSlots.indexOf(time);
     if (startIdx === -1) return;
 
@@ -2980,6 +2946,13 @@ export default function AssignmentCalendarPage() {
     const durationMin = st.sessionDurationMin ?? slotDurationMin;
     const key = `${date}-${sessionStartResolved}-${st.studentId}`;
     const nowMs = Date.now();
+    if (isDateInVacation(date, vacationPeriods)) {
+      toast({
+        title: t("coachVacationAttendanceNotRequired"),
+        variant: "destructive",
+      });
+      return;
+    }
     if (!canCoachMarkSessionAttendanceAt(nowMs, date, sessionStartResolved)) {
       toast({
         title: t("coachAttendanceTooEarlyTitle"),
@@ -3512,13 +3485,7 @@ export default function AssignmentCalendarPage() {
                 Math.min(20, Math.max(1, slotMaxOverride || defaultMaxStudents)) !== persistedMax;
               const canAdd =
                 !isCancelled &&
-                slotStudents.length < maxS &&
-                !isNewBookingBlocked({
-                  dateStr: managingSlot.date,
-                  time: managingSlot.startTime,
-                  vacationPeriods,
-                  openBlocks: openAvailabilityBlocks,
-                });
+                slotStudents.length < maxS;
               return (
                 <>
                   <DialogHeader>
@@ -3582,7 +3549,6 @@ export default function AssignmentCalendarPage() {
                           const weekCount = getWeeklyCount(st.studentId, new Date(managingSlot.date + "T12:00:00"));
                           const overLimit = sessionsPerWeek != null && weekCount > sessionsPerWeek;
                           const sessionSr = st.sessionStart ?? managingSlot.startTime;
-                          const durMin = st.sessionDurationMin ?? slotDurationMin;
                           const tooEarlyForAttendance = !canCoachMarkSessionAttendanceAt(
                             Date.now(),
                             managingSlot.date,
@@ -3591,6 +3557,7 @@ export default function AssignmentCalendarPage() {
                           const attKey = `${managingSlot.date}-${sessionSr}-${st.studentId}`;
                           const savingAtt = isSavingAttendance === attKey;
                           const att = normalizeAttendance(st.sessionAttendance);
+                          const vacationDay = isDateInVacation(managingSlot.date, vacationPeriods);
                           return (
                             <div
                               key={`${st.studentId}-${sessionSr}`}
@@ -3616,6 +3583,12 @@ export default function AssignmentCalendarPage() {
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
+                              {vacationDay ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  {t("coachVacationAttendanceNotRequired")}
+                                </p>
+                              ) : (
+                                <>
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="text-[10px] text-muted-foreground uppercase tracking-wide shrink-0">
                                   Presença
@@ -3664,6 +3637,8 @@ export default function AssignmentCalendarPage() {
                                 </Button>
                                 {savingAtt && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                               </div>
+                                </>
+                              )}
                             </div>
                           );
                         })}
@@ -4215,11 +4190,11 @@ export default function AssignmentCalendarPage() {
                   <Clock className="h-12 w-12 opacity-20" />
                   <div>
                     <p className="font-medium">
-                      {selectedDayOnVacation ? "Dia de férias" : "Dia sem disponibilidade"}
+                      {selectedDayOnVacation ? t("weeklySchedulingDayVacation") : "Dia sem disponibilidade"}
                     </p>
                     <p className="text-sm">
                       {selectedDayOnVacation
-                        ? "Marcaste este dia como indisponível. As marcações já existentes continuam visíveis noutros dias do intervalo."
+                        ? t("coachVacationEmptyDayHint")
                         : "Define o horário para este dia nas definições de disponibilidade."}
                     </p>
                   </div>
@@ -4227,7 +4202,14 @@ export default function AssignmentCalendarPage() {
                     <Settings2 className="h-3.5 w-3.5" /> Editar disponibilidade
                   </Button>
                 </div>
-              ) : isFilterActive ? (
+              ) : (
+                <div className="space-y-3">
+                  {selectedDayOnVacation && (
+                    <p className="text-sm rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-muted-foreground">
+                      {t("coachVacationAssignBanner")}
+                    </p>
+                  )}
+              {isFilterActive ? (
                 /* ── Student-centric view (when a student is selected) ── */
                 <div className="space-y-1.5 max-h-[620px] overflow-y-auto pr-1">
                   {timeSlots.map((time) => {
@@ -4358,7 +4340,7 @@ export default function AssignmentCalendarPage() {
                             size="icon"
                             className="shrink-0 h-8 w-8 bg-primary/90"
                             onClick={() => handleCoachToggleStudent(time)}
-                            disabled={busy || isBookingBlockedAtTime(time)}
+                            disabled={busy}
                             aria-label={t("sessionBookingJoin")}
                             title={t("sessionBookingJoin")}
                           >
@@ -4447,6 +4429,8 @@ export default function AssignmentCalendarPage() {
                       </button>
                     );
                   })}
+                </div>
+              )}
                 </div>
               )}
             </CardContent>

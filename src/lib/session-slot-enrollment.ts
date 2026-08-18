@@ -10,7 +10,6 @@ import {
   VacationPeriod,
   OpenAvailabilityBlock,
   consecutiveSlotBlocksFrom,
-  isNewBookingBlocked,
   resolveDaySlotTimes,
   weekdayKeyFromDate,
 } from "@/lib/trainer-availability";
@@ -184,13 +183,7 @@ export async function bulkEnrollWeeklyCycle(params: {
     for (const { weekday, startTime } of pattern) {
       const dateStr = dateForWeekdayInCycle(cycleStartMonday, w, weekday);
 
-      // 1. Vacation check
-      if (isNewBookingBlocked({ dateStr, time: startTime, vacationPeriods, openBlocks })) {
-        result.skippedVacation++;
-        continue;
-      }
-
-      // 2. Already booked this day check
+      // 1. Already booked this day check
       const alreadyBookedToday = [...slotMap.values()].some(
         (s) => s.date === dateStr && s.students.some((st) => st.studentId === studentId)
       );

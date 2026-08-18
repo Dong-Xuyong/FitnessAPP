@@ -525,6 +525,14 @@ export default function StudentWorkoutsPage() {
   );
 
   const timeSlots = useMemo(() => {
+    const bookedTimes = selectedDayOnVacation
+      ? sessionSlots
+          .filter((s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId))
+          .map((s) => s.startTime)
+      : sessionSlots.filter((s) => s.date === selectedDateStr).map((s) => s.startTime);
+    if (selectedDayOnVacation) {
+      return [...new Set(bookedTimes)].sort();
+    }
     const resolved = resolveDaySlotTimes({
       dateStr: selectedDateStr,
       weeklySched: selectedDaySched,
@@ -532,9 +540,6 @@ export default function StudentWorkoutsPage() {
       slotDurationMin,
       vacationPeriods,
     });
-    const bookedTimes = sessionSlots
-      .filter((s) => s.date === selectedDateStr)
-      .map((s) => s.startTime);
     return [...new Set([...resolved, ...bookedTimes])].sort();
   }, [
     selectedDateStr,
@@ -543,6 +548,8 @@ export default function StudentWorkoutsPage() {
     slotDurationMin,
     vacationPeriods,
     sessionSlots,
+    selectedDayOnVacation,
+    myId,
   ]);
 
   const showStudentDaySchedule =
@@ -695,7 +702,8 @@ export default function StudentWorkoutsPage() {
       candidates,
       now,
       sessionDurationMin,
-      hasCompletedWorkoutSessionToday
+      hasCompletedWorkoutSessionToday,
+      vacationPeriods
     );
     for (const w of weekPlansOrdered) {
       map.set(w.id, resolved.get(w.id) === true);
@@ -711,6 +719,7 @@ export default function StudentWorkoutsPage() {
     sessionDurationMin,
     presentAccessTick,
     hasCompletedWorkoutSessionToday,
+    vacationPeriods,
   ]);
 
   const workoutsPlansSectionTitle = useMemo(() => {

@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Milestone } from "@/lib/types";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { countCompletedWorkoutSessionsInMonth } from "@/lib/student-monthly-workout-completion";
 import { useStudentBillingData } from "@/hooks/use-student-billing-data";
 import { StudentPendingPaymentCard } from "@/components/student-billing/StudentPendingPaymentCard";
@@ -156,7 +157,13 @@ export default function StudentDashboardPage() {
             });
             const candidateIds = Array.from(new Set([effectiveStudentId, user!.uid].filter(Boolean)));
             setCurrentStreak(
-              maxAttendanceStreakForCandidates(sessionSlotsList, candidateIds, Date.now(), slotDm)
+              maxAttendanceStreakForCandidates(
+                sessionSlotsList,
+                candidateIds,
+                Date.now(),
+                slotDm,
+                normalizeVacationPeriods(trainerSnap.data()?.vacationPeriods)
+              )
             );
 
             const latestSessionTimestamp = sessionsSnap.docs.reduce((latest, sessionDoc) => {
