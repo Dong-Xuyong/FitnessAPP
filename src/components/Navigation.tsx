@@ -14,6 +14,7 @@ import {
   Search,
   User,
   Store,
+  Banknote,
   Globe,
   Cake,
 } from "lucide-react";
@@ -60,6 +61,7 @@ const navItemKeys = [
   { key: "students" as const, href: "/students", icon: Users },
   { key: "exercises" as const, href: "/exercises", icon: Search },
   { key: "shop" as const, href: "/shop", icon: Store },
+  { key: "revenue" as const, href: "/revenue", icon: Banknote },
   { key: "myProfile" as const, href: "/profile", icon: User },
 ];
 
