@@ -11,7 +11,7 @@ import {
   type SessionSlot,
   type WeeklySlotPattern,
 } from "./session-slot-enrollment";
-import { isNewBookingBlocked } from "./trainer-availability";
+import { isNewBookingBlocked, consecutiveSlotBlocksFrom, resolveDaySlotTimes } from "./trainer-availability";
 
 // ── nextMondayFrom ─────────────────────────────────────────────────────────
 
@@ -249,7 +249,7 @@ describe("countStudentLogicalSessions", () => {
 });
 
 describe("vacation skip logic", () => {
-  it("detects that a date in a vacation period is blocked", () => {
+  it("detects that a date in a vacation period is blocked for student self-booking", () => {
     const vacationPeriods = [{ id: "v1", startDate: "2026-06-01", endDate: "2026-06-07" }];
     const blocked = isNewBookingBlocked({
       dateStr: "2026-06-03",
@@ -269,5 +269,19 @@ describe("vacation skip logic", () => {
       openBlocks: [],
     });
     assert.equal(blocked, false);
+  });
+
+  it("coach bulk cycle can book a vacation weekday that has weekly hours", () => {
+    const vacationPeriods = [{ id: "v1", startDate: "2026-06-01", endDate: "2026-06-07" }];
+    const dateStr = "2026-06-01"; // Monday
+    const daySlotTimes = resolveDaySlotTimes({
+      dateStr,
+      weeklySched: { enabled: true, ranges: [{ startTime: "09:00", endTime: "11:00" }] },
+      openBlocks: [],
+      slotDurationMin: 30,
+      vacationPeriods,
+    });
+    const blocks = consecutiveSlotBlocksFrom(daySlotTimes, "09:00", 2, 30);
+    assert.deepEqual(blocks, ["09:00", "09:30"]);
   });
 });

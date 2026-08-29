@@ -3,20 +3,29 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ProfilePhotoCropDialog } from "@/components/ProfilePhotoCropDialog";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useUser, useFirestore, updateDocumentNonBlocking, useFirebaseApp } from "@/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, UserCircle, Camera } from "lucide-react";
+import { Loader2, Save, UserCircle, Camera, ChevronDown, ChevronUp, Info, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
 import { uploadStudentProfilePhoto } from "@/lib/upload-student-profile-photo";
+import {
+  ageFromBirthDate,
+  normalizeBirthDateInput,
+  parseOptionalBmi,
+  parseOptionalBodyWeightKg,
+  parseOptionalMassPercent,
+  parseOptionalVisceralFatScore,
+} from "@/lib/body-metric-input";
 
 const ALLOWED_GOALS = new Set(["muscle_gain", "weight_loss", "endurance", "general"]);
 const ALLOWED_SEX = new Set(["male", "female", "other"]);
@@ -36,15 +45,22 @@ export default function StudentProfilePage() {
   const [trainerId, setTrainerId] = useState<string | null>(null);
   const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
+  const [compositionOpen, setCompositionOpen] = useState(true);
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  const [sectionDefaultsApplied, setSectionDefaultsApplied] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
     photoUrl: "",
+    birthDate: "",
     age: "",
     sex: "male",
     weightKg: "",
     heightCm: "",
-    bodyFatPercent: "",
+    leanMassPercent: "",
+    fatMassPercent: "",
+    visceralFatScore: "",
+    bmi: "",
     goalType: "muscle_gain",
     goalWeightKg: "",
     goalBodyFatPercent: "",
@@ -87,14 +103,28 @@ export default function StudentProfilePage() {
               ? data.goalType
               : "muscle_gain";
           setTrainerId(data.trainerId || null);
+          const fatMass =
+            data.fatMassPercent != null && Number(data.fatMassPercent) > 0
+              ? data.fatMassPercent
+              : data.bodyFatPercent;
           setFormData({
             name: data.name || authUser.displayName || "",
             photoUrl: data.photoUrl || authUser.photoURL || "",
+            birthDate: normalizeBirthDateInput(data.birthDate),
             age: data.age?.toString() || "",
             sex,
             weightKg: data.weightKg?.toString() || "",
             heightCm: data.heightCm?.toString() || "",
-            bodyFatPercent: data.bodyFatPercent?.toString() || "",
+            leanMassPercent:
+              data.leanMassPercent != null && Number(data.leanMassPercent) > 0
+                ? String(data.leanMassPercent)
+                : "",
+            fatMassPercent: fatMass != null && Number(fatMass) > 0 ? String(fatMass) : "",
+            visceralFatScore:
+              data.visceralFatScore != null && Number(data.visceralFatScore) > 0
+                ? String(data.visceralFatScore)
+                : "",
+            bmi: data.bmi != null && Number(data.bmi) > 0 ? String(data.bmi) : "",
             goalType,
             goalWeightKg: data.goalWeightKg?.toString() || "",
             goalBodyFatPercent: data.goalBodyFatPercent?.toString() || "",
@@ -119,6 +149,32 @@ export default function StudentProfilePage() {
       cancelled = true;
     };
   }, [db, user?.uid]);
+
+  useEffect(() => {
+    if (isLoadingProfile || sectionDefaultsApplied) return;
+    const hasComposition =
+      Number(formData.weightKg) > 0 ||
+      Number(formData.fatMassPercent) > 0 ||
+      Number(formData.leanMassPercent) > 0 ||
+      Number(formData.visceralFatScore) > 0 ||
+      Number(formData.bmi) > 0;
+    const hasGoals =
+      Number(formData.goalWeightKg) > 0 ||
+      Number(formData.goalBodyFatPercent) > 0;
+    setCompositionOpen(!hasComposition);
+    setGoalsOpen(!hasGoals);
+    setSectionDefaultsApplied(true);
+  }, [
+    isLoadingProfile,
+    sectionDefaultsApplied,
+    formData.weightKg,
+    formData.fatMassPercent,
+    formData.leanMassPercent,
+    formData.visceralFatScore,
+    formData.bmi,
+    formData.goalWeightKg,
+    formData.goalBodyFatPercent,
+  ]);
 
   const clearCropObjectUrl = useCallback(() => {
     if (cropObjectUrlRef.current) {
@@ -226,19 +282,31 @@ export default function StudentProfilePage() {
     setIsSaving(true);
 
     const { firstName, lastName } = splitName(formData.name);
+    const birthDate = normalizeBirthDateInput(formData.birthDate);
+    const derivedAge = birthDate ? ageFromBirthDate(birthDate) : null;
+    const weightKg = parseOptionalBodyWeightKg(formData.weightKg);
+    const leanMassPercent = parseOptionalMassPercent(formData.leanMassPercent);
+    const fatMassPercent = parseOptionalMassPercent(formData.fatMassPercent);
+    const visceralFatScore = parseOptionalVisceralFatScore(formData.visceralFatScore);
+    const bmi = parseOptionalBmi(formData.bmi);
 
-    const updateData = {
+    const updateData: Record<string, unknown> = {
       userId: user.uid,
       trainerId: trainerId,
       name: formData.name,
       firstName,
       lastName,
       photoUrl: formData.photoUrl,
-      age: Number(formData.age) || 0,
+      birthDate: birthDate || null,
+      age: derivedAge ?? (Number(formData.age) || 0),
       sex: formData.sex,
-      weightKg: Number(formData.weightKg) || 0,
+      weightKg: weightKg ?? 0,
       heightCm: Number(formData.heightCm) || 0,
-      bodyFatPercent: Number(formData.bodyFatPercent) || 0,
+      leanMassPercent: leanMassPercent ?? 0,
+      fatMassPercent: fatMassPercent ?? 0,
+      bodyFatPercent: fatMassPercent ?? 0,
+      visceralFatScore: visceralFatScore ?? 0,
+      bmi: bmi ?? 0,
       goalType: formData.goalType,
       goalWeightKg: Number(formData.goalWeightKg) || 0,
       goalBodyFatPercent: Number(formData.goalBodyFatPercent) || 0,
@@ -295,7 +363,6 @@ export default function StudentProfilePage() {
       <div className="max-w-2xl mx-auto space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("myProfile")}</h1>
-          <p className="text-muted-foreground">{t("keepStatsUpToDate")}</p>
         </header>
 
         <form onSubmit={handleSave}>
@@ -307,7 +374,6 @@ export default function StudentProfilePage() {
                 </div>
                 <div>
                   <CardTitle>{t("personalInformation")}</CardTitle>
-                  <CardDescription>{t("personalInfoDesc")}</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -362,14 +428,22 @@ export default function StudentProfilePage() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="age">{t("age")}</Label>
-                  <Input 
-                    id="age" 
-                    type="number" 
-                    value={formData.age} 
-                    onChange={(e) => setFormData({...formData, age: e.target.value})} 
+                  <Label htmlFor="birthDate">{t("birthDate")}</Label>
+                  <Input
+                    id="birthDate"
+                    type="date"
+                    value={formData.birthDate}
+                    onChange={(e) => {
+                      const birthDate = e.target.value;
+                      const derived = ageFromBirthDate(birthDate);
+                      setFormData({
+                        ...formData,
+                        birthDate,
+                        age: derived != null ? String(derived) : formData.age,
+                      });
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -396,81 +470,212 @@ export default function StudentProfilePage() {
                 </div>
               </div>
 
-              <div className="grid sm:grid-cols-2 gap-6 pt-4 border-t">
-                <div className="space-y-2">
-                  <Label htmlFor="weightKg">{t("currentWeightKgLabel")}</Label>
-                  <Input 
-                    id="weightKg" 
-                    type="number" 
-                    step="0.1"
-                    value={formData.weightKg} 
-                    onChange={(e) => setFormData({...formData, weightKg: e.target.value})} 
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="goalWeightKg">{t("goalWeightKg")}</Label>
-                  <Input 
-                    id="goalWeightKg" 
-                    type="number" 
-                    step="0.1"
-                    value={formData.goalWeightKg} 
-                    onChange={(e) => setFormData({...formData, goalWeightKg: e.target.value})} 
-                  />
-                </div>
-              </div>
+              <div className="space-y-3 pt-4 border-t min-w-0">
+                <Collapsible open={compositionOpen} onOpenChange={setCompositionOpen}>
+                  <div className="rounded-lg border border-border/60 min-w-0">
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2.5 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{t("bodyMetricsProfileComposition")}</p>
+                          {!compositionOpen && (
+                            <p className="text-xs text-muted-foreground truncate">
+                              {[
+                                formData.weightKg ? `${formData.weightKg} kg` : null,
+                                formData.fatMassPercent ? `${formData.fatMassPercent}%` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ") || t("bodyMetricsLogAnyHint")}
+                            </p>
+                          )}
+                        </div>
+                        {compositionOpen ? (
+                          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-4 px-3 pb-3 min-w-0">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="weightKg">{t("metricWeightKg")}</Label>
+                            <Input
+                              id="weightKg"
+                              type="number"
+                              step="0.1"
+                              inputMode="decimal"
+                              value={formData.weightKg}
+                              onChange={(e) => setFormData({ ...formData, weightKg: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="fatMassPercent">{t("metricFatMassPercent")}</Label>
+                            <Input
+                              id="fatMassPercent"
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="100"
+                              inputMode="decimal"
+                              value={formData.fatMassPercent}
+                              onChange={(e) => setFormData({ ...formData, fatMassPercent: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="leanMassPercent">{t("metricLeanMassPercent")}</Label>
+                            <Input
+                              id="leanMassPercent"
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="100"
+                              inputMode="decimal"
+                              value={formData.leanMassPercent}
+                              onChange={(e) => setFormData({ ...formData, leanMassPercent: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="visceralFatScore">{t("metricVisceralFatScore")}</Label>
+                            <Input
+                              id="visceralFatScore"
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              inputMode="decimal"
+                              value={formData.visceralFatScore}
+                              onChange={(e) => setFormData({ ...formData, visceralFatScore: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="bmi">{t("metricBmi")}</Label>
+                            <Input
+                              id="bmi"
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              inputMode="decimal"
+                              value={formData.bmi}
+                              onChange={(e) => setFormData({ ...formData, bmi: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                            title={t("bodyMetricsManualCompositionHint")}
+                            aria-label={t("bodyMetricsManualCompositionHint")}
+                          >
+                            <Info className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                          <Link
+                            href="/student/progress"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-primary hover:bg-muted/40"
+                            title={t("myProgress")}
+                            aria-label={t("myProgress")}
+                          >
+                            <TrendingUp className="h-3.5 w-3.5" aria-hidden />
+                          </Link>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </Collapsible>
 
-              <div className="grid sm:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="bodyFatPercent">{t("bodyFatPercent")}</Label>
-                  <Input 
-                    id="bodyFatPercent" 
-                    type="number" 
-                    step="0.1"
-                    min="0"
-                    max="100"
-                    value={formData.bodyFatPercent} 
-                    onChange={(e) => setFormData({...formData, bodyFatPercent: e.target.value})} 
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="goalBodyFatPercent">{t("goalBodyFatPercent")}</Label>
-                  <Input 
-                    id="goalBodyFatPercent" 
-                    type="number" 
-                    step="0.1"
-                    min="0"
-                    max="100"
-                    value={formData.goalBodyFatPercent} 
-                    onChange={(e) => setFormData({...formData, goalBodyFatPercent: e.target.value})} 
-                  />
-                </div>
-              </div>
-
-              <p className="text-sm text-muted-foreground pt-2">
-                {t("bodyMetricsProfileHint")}{" "}
-                <Link href="/student/progress" className="text-primary underline-offset-4 hover:underline">
-                  {t("myProgress")}
-                </Link>
-              </p>
-
-              <div className="space-y-2">
-                <Select value={formData.goalType} onValueChange={(v) => setFormData({...formData, goalType: v})}>
-                  <SelectTrigger id="goalType">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="muscle_gain">{t("muscleGain")}</SelectItem>
-                    <SelectItem value="weight_loss">{t("weightLoss")}</SelectItem>
-                    <SelectItem value="endurance">{t("endurance")}</SelectItem>
-                    <SelectItem value="general">{t("generalFitness")}</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Collapsible open={goalsOpen} onOpenChange={setGoalsOpen}>
+                  <div className="rounded-lg border border-border/60 min-w-0">
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2.5 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{t("bodyMetricsProfileGoals")}</p>
+                          {!goalsOpen && (
+                            <p className="text-xs text-muted-foreground truncate">
+                              {[
+                                formData.goalWeightKg ? `${formData.goalWeightKg} kg` : null,
+                                formData.goalBodyFatPercent ? `${formData.goalBodyFatPercent}%` : null,
+                                formData.goalType?.replace("_", " "),
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          )}
+                        </div>
+                        {goalsOpen ? (
+                          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-4 px-3 pb-3 min-w-0">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="goalWeightKg">{t("goalWeightKg")}</Label>
+                            <Input
+                              id="goalWeightKg"
+                              type="number"
+                              step="0.1"
+                              inputMode="decimal"
+                              value={formData.goalWeightKg}
+                              onChange={(e) => setFormData({ ...formData, goalWeightKg: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="goalBodyFatPercent">{t("goalBodyFatPercent")}</Label>
+                            <Input
+                              id="goalBodyFatPercent"
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="100"
+                              inputMode="decimal"
+                              value={formData.goalBodyFatPercent}
+                              onChange={(e) =>
+                                setFormData({ ...formData, goalBodyFatPercent: e.target.value })
+                              }
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="goalType">{t("goalType")}</Label>
+                          <Select
+                            value={formData.goalType}
+                            onValueChange={(v) => setFormData({ ...formData, goalType: v })}
+                          >
+                            <SelectTrigger id="goalType">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="muscle_gain">{t("muscleGain")}</SelectItem>
+                              <SelectItem value="weight_loss">{t("weightLoss")}</SelectItem>
+                              <SelectItem value="endurance">{t("endurance")}</SelectItem>
+                              <SelectItem value="general">{t("generalFitness")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </Collapsible>
               </div>
             </CardContent>
             <CardFooter className="bg-muted/10 border-t py-4">
-              <Button type="submit" className="w-full gap-2" disabled={isSaving}>
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {t("saveChanges")}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isSaving}
+                aria-label={t("saveChanges")}
+                title={t("saveChanges")}
+              >
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
               </Button>
             </CardFooter>
           </Card>

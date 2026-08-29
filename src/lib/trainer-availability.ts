@@ -221,7 +221,7 @@ function timeWithinAnyOpenBlock(
 }
 
 /** Weekly slots outside open-block windows, plus slots from each open block on the date.
- *  On vacation days with open blocks, only the open-block windows are returned. */
+ *  Vacation days still use weekly hours so the coach can assign students. */
 export function resolveDaySlotTimes(args: {
   dateStr: string;
   weeklySched: DaySchedule | undefined;
@@ -229,14 +229,8 @@ export function resolveDaySlotTimes(args: {
   slotDurationMin: number;
   vacationPeriods?: VacationPeriod[];
 }): string[] {
-  const { dateStr, weeklySched, openBlocks, slotDurationMin, vacationPeriods = [] } = args;
+  const { dateStr, weeklySched, openBlocks, slotDurationMin } = args;
   const onDate = openBlocksForDate(dateStr, openBlocks);
-  const onVacation = isDateInVacation(dateStr, vacationPeriods);
-
-  if (onVacation) {
-    if (onDate.length === 0) return [];
-    return [...new Set(onDate.flatMap((b) => generateSlotTimes(b.startTime, b.endTime, slotDurationMin)))].sort();
-  }
 
   const weeklySlots = generateSlotsForDay(weeklySched, slotDurationMin).filter(
     (t) => !timeWithinAnyOpenBlock(t, onDate)
@@ -260,14 +254,14 @@ export function getEffectiveSessionDurationMin(args: {
   return Math.max(1, args.slotDurationMin);
 }
 
+/** Student self-booking is blocked on every vacation date (coach assignment is not). */
 export function isNewBookingBlocked(args: {
   dateStr: string;
   time: string;
   vacationPeriods: VacationPeriod[];
   openBlocks: OpenAvailabilityBlock[];
 }): boolean {
-  if (!isDateInVacation(args.dateStr, args.vacationPeriods)) return false;
-  return !openBlockAtTime(args.dateStr, args.time, args.openBlocks);
+  return isDateInVacation(args.dateStr, args.vacationPeriods);
 }
 
 export function coachDayShowsSchedule(args: {
@@ -288,8 +282,9 @@ export function studentDayBookable(args: {
   onVacation: boolean;
   hasResolvableSlots?: boolean;
 }): boolean {
+  if (args.onVacation) return false;
   if (args.hasResolvableSlots) return true;
-  return args.weeklyAvailable && !args.onVacation;
+  return args.weeklyAvailable;
 }
 
 /** Upcoming open blocks on or after today, sorted by date then start time. */

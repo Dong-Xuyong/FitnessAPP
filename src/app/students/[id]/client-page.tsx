@@ -15,7 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { 
   Mail, 
-  Calendar, 
+  Calendar as CalendarIcon, 
+  CalendarDays,
   Dumbbell, 
   History, 
   Award, 
@@ -36,7 +37,9 @@ import {
   ChevronUp,
   ListOrdered,
   GripVertical,
+  Info,
 } from "lucide-react";
+import { Calendar as MonthCalendar } from "@/components/ui/calendar";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
@@ -113,10 +116,19 @@ import {
   SequenceTemplatePicker,
 } from "@/components/SequenceTemplatePicker";
 import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
-import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
+import {
+  maxAttendanceStreakForCandidates,
+  studentLocalCalendarDateKeyMs,
+} from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
-import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
+import { ageFromBirthDate, normalizeBirthDateInput } from "@/lib/body-metric-input";
+import {
+  buildSuggestedRecordPayment,
+  normalizedPaymentPaid,
+  normalizedPaymentPending,
+} from "@/lib/student-payment-due";
 import {
   buildPaymentAmounts,
   buildShopBillingPeriodContextFromPayments,
@@ -140,7 +152,6 @@ import {
   markShopRegistrationsPaidForPayment,
   repairShopLinesForPaidPayments,
 } from "@/lib/shop-billing-payments";
-import { currentBillingPeriod } from "@/lib/roster-payment-status";
 import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import {
@@ -150,6 +161,13 @@ import {
 } from "@/lib/student-training-access";
 import { deleteSequencePlanWithChainRepair } from "@/lib/workout-plan-sequence-delete";
 import { clearStudentAssignedPlans } from "@/lib/firestore/clear-trainer-assignments";
+import {
+  buildLatestPerfByExerciseName,
+  buildLatestPerfByPlanId,
+  formatLastSessionPerformanceLabel,
+  normalizeExerciseKey,
+  type LastSessionPerf,
+} from "@/lib/last-session-performance";
 
 function getAssignedWorkoutTimestamp(plan: any): number {
   const rawDate = plan?.assignedAt || plan?.createdAt;
@@ -328,38 +346,22 @@ function BillingTab({
   }, [unpaidShopSummary, sortedPayments, shopRegs, shopCatalogMap, paymentPeriodLikes]);
 
   const suggestedRecordPayment = useMemo(() => {
-    const pendingRow = (sortedPayments || []).find((p: { status?: string }) =>
-      normalizedPaymentPending(String(p.status ?? "pending"))
-    ) as { period?: string; amount?: number; baseAmount?: number; shopAmount?: number } | undefined;
-
     const unpaidTargetPeriods = collectTargetPaymentPeriodsFromRegistrations(
       shopRegs,
       shopPaymentTargetResolver
     ).sort();
-
-    const period = pendingRow
-      ? String(pendingRow.period ?? currentBillingPeriod())
-      : unpaidTargetPeriods[0] ?? currentBillingPeriod();
-
-    const base = Number(monthlyRate) || calculatedMonthlyRate || 0;
-    const shopFromRegs = computeUnpaidShopForPaymentPeriod(
-      shopRegs,
-      shopCatalogMap,
-      period,
-      shopPaymentTargetResolver
-    );
-    const shop =
-      pendingRow && Number(pendingRow.shopAmount ?? 0) > 0
-        ? Number(pendingRow.shopAmount)
-        : shopFromRegs;
-    const amounts = buildPaymentAmounts(base, shop);
-
-    return {
-      period,
-      amount: pendingRow ? Number(pendingRow.amount) || amounts.amount : amounts.amount,
-      baseAmount: amounts.baseAmount,
-      shopAmount: amounts.shopAmount,
-    };
+    return buildSuggestedRecordPayment({
+      payments: sortedPayments || [],
+      monthlyRate: Number(monthlyRate) || calculatedMonthlyRate || 0,
+      unpaidTargetPeriods,
+      unpaidShopForPeriod: (period) =>
+        computeUnpaidShopForPaymentPeriod(
+          shopRegs,
+          shopCatalogMap,
+          period,
+          shopPaymentTargetResolver
+        ),
+    });
   }, [
     sortedPayments,
     monthlyRate,
@@ -710,9 +712,7 @@ function BillingTab({
                   <Banknote className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1 space-y-1">
                     <CardTitle className="text-base">{t("billingSettings")}</CardTitle>
-                    {billingConfigOpen ? (
-                      <CardDescription>{t("billingCalcDesc")}</CardDescription>
-                    ) : (
+                    {!billingConfigOpen && (
                       <p className="text-sm text-muted-foreground truncate">{billingConfigSummary}</p>
                     )}
                   </div>
@@ -820,8 +820,13 @@ function BillingTab({
               rows={3}
             />
           </div>
-          <Button onClick={handleSaveBillingConfig} className="gap-2">
-            <Save className="h-4 w-4" /> {t("saveSettings")}
+          <Button
+            onClick={handleSaveBillingConfig}
+            size="icon"
+            aria-label={t("saveSettings")}
+            title={t("saveSettings")}
+          >
+            <Save className="h-4 w-4" aria-hidden />
           </Button>
         </CardContent>
           </CollapsibleContent>
@@ -834,7 +839,6 @@ function BillingTab({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-2 flex-1">
               <CardTitle>{t("paymentHistory")}</CardTitle>
-              <CardDescription>{t("recordPayments")}</CardDescription>
               <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {t("shopBillingUnpaidTitle")}
@@ -882,7 +886,12 @@ function BillingTab({
                   {t("shopBillingTotal")}: €{suggestedRecordPayment.amount.toFixed(2)}
                 </p>
               ) : null}
-              <Button size="sm" className="gap-1 shrink-0 w-full sm:w-auto" onClick={() => {
+              <Button
+                size="icon"
+                className="shrink-0"
+                aria-label={t("recordPayment")}
+                title={t("recordPayment")}
+                onClick={() => {
                 if (!showAddPayment) {
                   setNewPayment({
                     period: suggestedRecordPayment.period,
@@ -896,7 +905,7 @@ function BillingTab({
                 }
                 setShowAddPayment(!showAddPayment);
               }}>
-                <Plus className="h-4 w-4" /> {t("recordPayment")}
+                <Plus className="h-4 w-4" aria-hidden />
               </Button>
             </div>
           </div>
@@ -1040,11 +1049,24 @@ function BillingTab({
                         </div>
                       </div>
                       <div className="flex gap-2 justify-end">
-                        <Button size="sm" variant="outline" onClick={() => setEditingPaymentId(null)}>
-                          {t("cancel")}
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          onClick={() => setEditingPaymentId(null)}
+                          aria-label={t("cancel")}
+                          title={t("cancel")}
+                        >
+                          <X className="h-4 w-4" aria-hidden />
                         </Button>
-                        <Button size="sm" onClick={() => handleUpdatePayment(p.id)}>
-                          {t("save")}
+                        <Button
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleUpdatePayment(p.id)}
+                          aria-label={t("save")}
+                          title={t("save")}
+                        >
+                          <Save className="h-4 w-4" aria-hidden />
                         </Button>
                       </div>
                     </div>
@@ -1150,11 +1172,25 @@ function BillingTab({
                               ? t("pending")
                               : String(p.status ?? "—")}
                         </Badge>
-                        <Button size="sm" variant="outline" onClick={() => startEditPayment(p)}>
-                          {t("edit")}
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          onClick={() => startEditPayment(p)}
+                          aria-label={t("edit")}
+                          title={t("edit")}
+                        >
+                          <Pencil className="h-4 w-4" aria-hidden />
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => setConfirmDeletePaymentId(p.id)}>
-                          {t("delete")}
+                        <Button
+                          size="icon"
+                          variant="destructive"
+                          className="h-8 w-8"
+                          onClick={() => setConfirmDeletePaymentId(p.id)}
+                          aria-label={t("delete")}
+                          title={t("delete")}
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden />
                         </Button>
                       </div>
                     </>
@@ -1197,11 +1233,23 @@ function BillingTab({
   );
 }
 
+function splitStudentName(rawName: string): { firstName: string; lastName: string } {
+  const parts = rawName.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
+  if (parts.length === 0) return { firstName: "", lastName: "" };
+  return { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") };
+}
+
+function studentDisplayNameFromRecord(data: Record<string, unknown>): string {
+  const single = typeof data.name === "string" ? data.name.trim() : "";
+  if (single) return single;
+  const fn = typeof data.firstName === "string" ? data.firstName.trim() : "";
+  const ln = typeof data.lastName === "string" ? data.lastName.trim() : "";
+  return [fn, ln].filter(Boolean).join(" ").trim();
+}
+
 function normalizePortalStudent(global: Record<string, unknown>, studentId: string) {
   const name = String(global.name || "");
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0] || "";
-  const last = parts.slice(1).join(" ") || "";
+  const { firstName: first, lastName: last } = splitStudentName(name);
   return {
     ...global,
     id: studentId,
@@ -1243,6 +1291,8 @@ interface SortableWorkoutPlanItemProps {
   setEditingAssignedExerciseNote: (note: string) => void;
   isSavingAssignedExerciseNote: boolean;
   handleSaveAssignedExerciseNote: (plan: any, index: number, note: string) => void;
+  lastPerfByPlanId: Record<string, Record<string, LastSessionPerf>>;
+  lastPerfByExercise: Record<string, LastSessionPerf>;
   t: (key: string) => string;
 }
 
@@ -1260,6 +1310,8 @@ function SortableWorkoutPlanItem({
   setEditingAssignedExerciseNote,
   isSavingAssignedExerciseNote,
   handleSaveAssignedExerciseNote,
+  lastPerfByPlanId,
+  lastPerfByExercise,
   t,
 }: SortableWorkoutPlanItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: plan.id });
@@ -1336,11 +1388,25 @@ function SortableWorkoutPlanItem({
         <div className="px-3 pb-3 border-t bg-muted/10">
           <div className="pt-3 space-y-2">
             {(plan.exercises || []).length > 0 ? (
-              (plan.exercises || []).map((exercise: any, index: number) => (
+              (plan.exercises || []).map((exercise: any, index: number) => {
+                const exerciseName =
+                  exercise.exerciseName || exercise.name || `Exercise ${index + 1}`;
+                const exKey = normalizeExerciseKey(String(exerciseName));
+                const lastPerf =
+                  lastPerfByPlanId[plan.id]?.[exKey] ?? lastPerfByExercise[exKey];
+                const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
+                  weighted: (weight, reps) =>
+                    t("lastSessionPerformance")
+                      .replace("{weight}", String(weight))
+                      .replace("{reps}", String(reps)),
+                  bodyweight: (reps) =>
+                    t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+                });
+                return (
                 <div key={index} className="rounded-md border bg-background p-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium">
-                      {exercise.exerciseName || exercise.name || `Exercise ${index + 1}`}
+                      {exerciseName}
                     </p>
                     <Button
                       size="icon"
@@ -1366,19 +1432,20 @@ function SortableWorkoutPlanItem({
                       />
                       <div className="flex gap-2">
                         <Button
-                          size="sm"
-                          className="h-7 text-xs gap-1.5"
+                          size="icon"
+                          className="h-7 w-7"
                           onClick={() =>
                             handleSaveAssignedExerciseNote(plan, index, editingAssignedExerciseNote)
                           }
                           disabled={isSavingAssignedExerciseNote}
+                          aria-label={t("save")}
+                          title={t("save")}
                         >
                           {isSavingAssignedExerciseNote ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
                           ) : (
-                            <Save className="h-3 w-3" />
+                            <Save className="h-3 w-3" aria-hidden />
                           )}
-                          {t("save")}
                         </Button>
                         <Button
                           size="sm"
@@ -1394,14 +1461,22 @@ function SortableWorkoutPlanItem({
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
-                      {exercise.notes || (
-                        <span className="italic">No notes yet. Click pencil to edit.</span>
-                      )}
-                    </p>
+                    <>
+                      <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
+                        {exercise.notes || (
+                          <span className="italic">No notes yet. Click pencil to edit.</span>
+                        )}
+                      </p>
+                      {lastHint ? (
+                        <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
+                          {lastHint}
+                        </p>
+                      ) : null}
+                    </>
                   )}
                 </div>
-              ))
+                );
+              })
             ) : (
               <p className="text-sm text-muted-foreground">{t("noExercisesDefined")}</p>
             )}
@@ -1456,6 +1531,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [confirmDeletePlanId, setConfirmDeletePlanId] = useState<string | null>(null);
   const [coachingNotes, setCoachingNotes] = useState("");
   const [editStats, setEditStats] = useState({
+    name: "",
+    birthDate: "",
     goalWeightKg: "",
     goalBodyFatPercent: "",
     goalType: "",
@@ -1479,6 +1556,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [selectedStrengthExercise, setSelectedStrengthExercise] = useState("");
   const [coachingNotesOpen, setCoachingNotesOpen] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
+  const [editingHeaderProfile, setEditingHeaderProfile] = useState(false);
+  const [isSavingHeaderProfile, setIsSavingHeaderProfile] = useState(false);
 
   const studentRef = useMemoFirebase(() => {
     if (!db || !user || !id) return null;
@@ -1668,6 +1747,32 @@ export default function StudentDetailPage({ id }: { id: string }) {
     return s;
   }, [workoutSessions, workoutPlans]);
 
+  const { lastPerfByPlanId, lastPerfByExercise } = useMemo(() => {
+    const parseCompletedAtMs = (ca: unknown): number => {
+      if (ca == null) return 0;
+      if (
+        typeof ca === "object" &&
+        ca !== null &&
+        "toDate" in (ca as object) &&
+        typeof (ca as { toDate?: () => Date }).toDate === "function"
+      ) {
+        return (ca as { toDate: () => Date }).toDate().getTime();
+      }
+      if (typeof ca === "string" && ca.trim()) {
+        const p = Date.parse(ca);
+        return Number.isFinite(p) ? p : 0;
+      }
+      return 0;
+    };
+    const sessionRows = [...(workoutSessions || [])].sort(
+      (a: any, b: any) => parseCompletedAtMs(b.completedAt) - parseCompletedAtMs(a.completedAt)
+    );
+    return {
+      lastPerfByPlanId: buildLatestPerfByPlanId(sessionRows),
+      lastPerfByExercise: buildLatestPerfByExerciseName(sessionRows),
+    };
+  }, [workoutSessions]);
+
   const sessionSlotsRef = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collection(db, "personalTrainers", user.uid, "sessionSlots");
@@ -1719,12 +1824,51 @@ export default function StudentDetailPage({ id }: { id: string }) {
     const slots = (trainerSessionSlots || []) as SessionSlotAttendance[];
     const rosterUid = String((effectiveRoster as any)?.userId || "").trim();
     const candidateIds = Array.from(new Set([String(id || ""), rosterUid].filter(Boolean))) as string[];
-    return maxAttendanceStreakForCandidates(slots, candidateIds, Date.now(), slotDm);
+    return maxAttendanceStreakForCandidates(
+      slots,
+      candidateIds,
+      Date.now(),
+      slotDm,
+      normalizeVacationPeriods((trainerSettings as Record<string, unknown> | undefined)?.vacationPeriods)
+    );
   }, [trainerSessionSlots, trainerSettings, effectiveRoster, id]);
 
-  const sortedSessions = (workoutSessions || []).sort(
-    (a: any, b: any) => (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
+  const sortedSessions = useMemo(
+    () =>
+      [...(workoutSessions || [])].sort((a: any, b: any) =>
+        (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
+      ),
+    [workoutSessions]
   );
+
+  const sessionsByLocalDate = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const session of sortedSessions) {
+      const raw = session.completedAt || session.startedAt || session.date;
+      const ms = typeof raw === "number" ? raw : Date.parse(String(raw || ""));
+      if (!Number.isFinite(ms)) continue;
+      const key = studentLocalCalendarDateKeyMs(ms);
+      const list = map.get(key);
+      if (list) list.push(session);
+      else map.set(key, [session]);
+    }
+    return map;
+  }, [sortedSessions]);
+
+  const historySessionDates = useMemo(
+    () => [...sessionsByLocalDate.keys()].map((key) => new Date(`${key}T12:00:00`)),
+    [sessionsByLocalDate]
+  );
+
+  const mostRecentHistoryDate = useMemo(() => {
+    for (const session of sortedSessions) {
+      const raw = session.completedAt || session.startedAt || session.date;
+      const ms = typeof raw === "number" ? raw : Date.parse(String(raw || ""));
+      if (!Number.isFinite(ms)) continue;
+      return new Date(`${studentLocalCalendarDateKeyMs(ms)}T12:00:00`);
+    }
+    return undefined;
+  }, [sortedSessions]);
 
 
   const strengthByExercise = useMemo(() => {
@@ -1814,6 +1958,13 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const [editSession, setEditSession] = useState<any>(null);
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [historySelectedDate, setHistorySelectedDate] = useState<Date | undefined>(undefined);
+  const [historyMonth, setHistoryMonth] = useState<Date | undefined>(undefined);
+
+  const effectiveHistoryDate = historySelectedDate ?? mostRecentHistoryDate ?? new Date();
+  const historyCalendarMonth = historyMonth ?? effectiveHistoryDate;
+  const selectedHistoryDateKey = studentLocalCalendarDateKeyMs(effectiveHistoryDate.getTime());
+  const sessionsForSelectedHistoryDay = sessionsByLocalDate.get(selectedHistoryDateKey) || [];
 
   const milestonesRef = useMemoFirebase(() => {
     if (!db || !user || !id) return null;
@@ -1983,27 +2134,42 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   useEffect(() => {
     if (effectiveRoster) {
+      const roster = effectiveRoster as Record<string, unknown>;
+      const global = (globalStudent as Record<string, unknown> | null) || null;
       setCoachingNotes(effectiveRoster.coachingNotes || "");
-      setEditStats({
+      setEditStats((prev) => ({
+        name: editingHeaderProfile
+          ? prev.name
+          : studentDisplayNameFromRecord(roster) ||
+            studentDisplayNameFromRecord((global as Record<string, unknown>) || {}),
+        birthDate: editingHeaderProfile
+          ? prev.birthDate
+          : normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
         goalWeightKg: effectiveRoster.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
             ? String((effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent)
             : "",
         goalType: effectiveRoster.goalType || "",
-      });
+      }));
     } else if (globalStudent) {
       setCoachingNotes("");
-      setEditStats({
+      setEditStats((prev) => ({
+        name: editingHeaderProfile
+          ? prev.name
+          : studentDisplayNameFromRecord(globalStudent as Record<string, unknown>),
+        birthDate: editingHeaderProfile
+          ? prev.birthDate
+          : normalizeBirthDateInput((globalStudent as Record<string, unknown>).birthDate),
         goalWeightKg: globalStudent.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
             ? String((globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent)
             : "",
         goalType: (globalStudent.goalType as string) || "",
-      });
+      }));
     }
-  }, [effectiveRoster, globalStudent]);
+  }, [effectiveRoster, globalStudent, editingHeaderProfile]);
 
   const coachingNotesSummary = useMemo(() => {
     const text = coachingNotes.trim();
@@ -2026,6 +2192,29 @@ export default function StudentDetailPage({ id }: { id: string }) {
     return parts.length > 0 ? parts.join(" · ") : "—";
   }, [editStats]);
 
+  const syncHeaderProfileFields = useCallback(() => {
+    if (effectiveRoster) {
+      const roster = effectiveRoster as Record<string, unknown>;
+      const global = (globalStudent as Record<string, unknown> | null) || null;
+      setEditStats((prev) => ({
+        ...prev,
+        name:
+          studentDisplayNameFromRecord(roster) ||
+          studentDisplayNameFromRecord(global || {}),
+        birthDate: normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
+      }));
+      return;
+    }
+    if (globalStudent) {
+      const global = globalStudent as Record<string, unknown>;
+      setEditStats((prev) => ({
+        ...prev,
+        name: studentDisplayNameFromRecord(global),
+        birthDate: normalizeBirthDateInput(global.birthDate),
+      }));
+    }
+  }, [effectiveRoster, globalStudent]);
+
   const handleAddToRoster = () => {
     if (!db || !user || !globalStudent || !id) return;
     setIsAddingToRoster(true);
@@ -2045,10 +2234,16 @@ export default function StudentDetailPage({ id }: { id: string }) {
           firstName: normalized.firstName,
           lastName: normalized.lastName,
           email: (g.email as string) || "",
-          age: Number(g.age) || 0,
+          birthDate: normalizeBirthDateInput(g.birthDate) || null,
+          age: Number(g.age) || ageFromBirthDate(normalizeBirthDateInput(g.birthDate)) || 0,
           sex: (g.sex as string) || "other",
           weightKg: Number(g.weightKg) || 0,
           heightCm: Number(g.heightCm) || 0,
+          leanMassPercent: Number(g.leanMassPercent) || 0,
+          fatMassPercent: Number(g.fatMassPercent ?? g.bodyFatPercent) || 0,
+          bodyFatPercent: Number(g.fatMassPercent ?? g.bodyFatPercent) || 0,
+          visceralFatScore: Number(g.visceralFatScore) || 0,
+          bmi: Number(g.bmi) || 0,
           goalType: (g.goalType as string) || "general",
           goalWeightKg: Number(g.goalWeightKg) || 0,
           goalBodyFatPercent: Number(g.goalBodyFatPercent) || 0,
@@ -2079,18 +2274,76 @@ export default function StudentDetailPage({ id }: { id: string }) {
     }
   };
 
+  const handleUpdateStudentIdentity = async () => {
+    if (portalOnly || !studentRef || !user || !db) return;
+    const trimmedName = editStats.name.trim().replace(/\s+/g, " ");
+    if (!trimmedName) {
+      toast({
+        variant: "destructive",
+        title: t("error"),
+        description: t("fullName"),
+      });
+      return;
+    }
+
+    setIsSavingHeaderProfile(true);
+    try {
+      const { firstName, lastName } = splitStudentName(trimmedName);
+      const birthDate = normalizeBirthDateInput(editStats.birthDate);
+      const derivedAge = birthDate ? ageFromBirthDate(birthDate) : null;
+      const patch: Record<string, unknown> = {
+        trainerId: user.uid,
+        name: trimmedName,
+        firstName,
+        lastName,
+        birthDate: birthDate || null,
+      };
+      if (derivedAge != null) patch.age = derivedAge;
+
+      updateDocumentNonBlocking(studentRef, patch);
+
+      const globalUid = coachBodyMetricGlobalStudentId;
+      if (globalUid) {
+        updateDocumentNonBlocking(doc(db, "students", globalUid), {
+          name: trimmedName,
+          firstName,
+          lastName,
+          birthDate: birthDate || null,
+          ...(derivedAge != null ? { age: derivedAge } : {}),
+        });
+      }
+
+      setEditingHeaderProfile(false);
+      toast({
+        title: t("profileUpdated"),
+        description: t("coachingDataSaved"),
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update coaching info.",
+      });
+    } finally {
+      setIsSavingHeaderProfile(false);
+    }
+  };
+
   const handleUpdateStudent = async () => {
-    if (portalOnly || !studentRef || !user) return;
+    if (portalOnly || !studentRef || !user || !db) return;
     setIsSaving(true);
     try {
-      // Ensure trainerId is preserved to satisfy security rules
-      updateDocumentNonBlocking(studentRef, {
+      const patch: Record<string, unknown> = {
         trainerId: user.uid,
         coachingNotes,
         goalWeightKg: Number(editStats.goalWeightKg) || 0,
         goalBodyFatPercent: Number(editStats.goalBodyFatPercent) || 0,
         goalType: editStats.goalType,
-      });
+      };
+
+      // Ensure trainerId is preserved to satisfy security rules
+      updateDocumentNonBlocking(studentRef, patch);
+
       toast({
         title: t("profileUpdated"),
         description: t("coachingDataSaved"),
@@ -2198,37 +2451,144 @@ export default function StudentDetailPage({ id }: { id: string }) {
     <Navigation>
       <div className="space-y-8">
         <header className="flex flex-col md:flex-row gap-4 md:gap-6 items-start justify-between bg-card p-4 md:p-6 rounded-xl border shadow-sm">
-          <div className="flex gap-4 md:gap-6 items-center">
-            <Avatar className="h-16 w-16 md:h-24 md:w-24 ring-4 ring-primary/10">
+          <div className="flex gap-4 md:gap-6 items-start md:items-center min-w-0 flex-1">
+            <Avatar className="h-16 w-16 md:h-24 md:w-24 ring-4 ring-primary/10 shrink-0">
               <AvatarImage src={student.photoUrl || `https://picsum.photos/seed/${student.id}/200/200`} />
               <AvatarFallback className="text-2xl">{student.firstName?.[0]}{student.lastName?.[0]}</AvatarFallback>
             </Avatar>
-            <div className="space-y-1">
-              <div className="flex items-center gap-3">
-                <h1 className="text-xl md:text-3xl font-bold font-headline">
-                  {student.firstName || student.name}{" "}
-                  {student.lastName ? String(student.lastName) : ""}
-                </h1>
-                <Badge className="bg-accent text-accent-foreground capitalize">
-                  {portalOnly ? "Portal" : student.activityStatus}
-                </Badge>
-                {student && isOpenTrainingAccess((student as { trainingAccessMode?: string }).trainingAccessMode) ? (
-                  <Badge className="bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">
-                    {t("trainingAccessOpenBadge")}
-                  </Badge>
-                ) : null}
-                {isStudentBlocked && (
-                  <Badge variant="destructive" className="gap-1">
-                    <Ban className="h-3 w-3" /> Blocked
-                  </Badge>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground flex items-center gap-2">
-                <Mail className="h-4 w-4" /> {student.email}
-              </p>
-              <p className="text-xs text-muted-foreground flex items-center gap-2">
-                <Calendar className="h-3 w-3" /> {t("memberSince")} {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
-              </p>
+            <div className="space-y-1 min-w-0 flex-1">
+              {!portalOnly && editingHeaderProfile ? (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      id="coach-student-header-name"
+                      value={editStats.name}
+                      onChange={(e) => setEditStats({ ...editStats, name: e.target.value })}
+                      placeholder={t("fullName")}
+                      autoComplete="name"
+                      className="max-w-md text-xl md:text-2xl font-bold font-headline h-11"
+                      disabled={isSavingHeaderProfile}
+                    />
+                    <Badge className="bg-accent text-accent-foreground capitalize">
+                      {student.activityStatus}
+                    </Badge>
+                    {student && isOpenTrainingAccess((student as { trainingAccessMode?: string }).trainingAccessMode) ? (
+                      <Badge className="bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">
+                        {t("trainingAccessOpenBadge")}
+                      </Badge>
+                    ) : null}
+                    {isStudentBlocked && (
+                      <Badge variant="destructive" className="gap-1">
+                        <Ban className="h-3 w-3" /> Blocked
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Mail className="h-4 w-4" /> {student.email}
+                  </p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-2">
+                    <CalendarIcon className="h-3 w-3" /> {t("memberSince")}{" "}
+                    {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
+                  </p>
+                  <div className="flex flex-wrap items-end gap-2 pt-1">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="coach-student-header-birthDate">{t("birthDate")}</Label>
+                      <Input
+                        id="coach-student-header-birthDate"
+                        type="date"
+                        value={editStats.birthDate}
+                        onChange={(e) =>
+                          setEditStats({ ...editStats, birthDate: e.target.value })
+                        }
+                        disabled={isSavingHeaderProfile}
+                        className="w-[11.5rem]"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void handleUpdateStudentIdentity()}
+                      disabled={isSavingHeaderProfile}
+                    >
+                      {isSavingHeaderProfile ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                      {t("save")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        syncHeaderProfileFields();
+                        setEditingHeaderProfile(false);
+                      }}
+                      disabled={isSavingHeaderProfile}
+                    >
+                      {t("cancel")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+                    <h1 className="text-xl md:text-3xl font-bold font-headline">
+                      {editStats.name ||
+                        `${student.firstName || student.name || ""} ${
+                          student.lastName ? String(student.lastName) : ""
+                        }`.trim()}
+                    </h1>
+                    <Badge className="bg-accent text-accent-foreground capitalize">
+                      {portalOnly ? "Portal" : student.activityStatus}
+                    </Badge>
+                    {student && isOpenTrainingAccess((student as { trainingAccessMode?: string }).trainingAccessMode) ? (
+                      <Badge className="bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">
+                        {t("trainingAccessOpenBadge")}
+                      </Badge>
+                    ) : null}
+                    {isStudentBlocked && (
+                      <Badge variant="destructive" className="gap-1">
+                        <Ban className="h-3 w-3" /> Blocked
+                      </Badge>
+                    )}
+                    {!portalOnly && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => {
+                          syncHeaderProfileFields();
+                          setEditingHeaderProfile(true);
+                        }}
+                        aria-label={t("edit")}
+                        title={t("edit")}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Mail className="h-4 w-4" /> {student.email}
+                  </p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-2">
+                    <CalendarIcon className="h-3 w-3" /> {t("memberSince")}{" "}
+                    {student.joinedAt ? new Date(student.joinedAt).toLocaleDateString() : "N/A"}
+                  </p>
+                  {editStats.birthDate ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("birthDate")}:{" "}
+                      {new Date(`${editStats.birthDate}T00:00:00`).toLocaleDateString()}
+                      {ageFromBirthDate(editStats.birthDate) != null
+                        ? ` · ${t("age")} ${ageFromBirthDate(editStats.birthDate)}`
+                        : ""}
+                    </p>
+                  ) : !portalOnly ? (
+                    <p className="text-xs text-muted-foreground">{t("birthDate")}: —</p>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -2436,27 +2796,28 @@ export default function StudentDetailPage({ id }: { id: string }) {
           </TabsList>
 
           <TabsContent value="progress" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">
               {user && (
-                <BodyMetricsPanel
-                  trainerId={user.uid}
-                  rosterStudentId={id}
-                  globalStudentId={coachBodyMetricGlobalStudentId}
-                  canWriteSession={!portalOnly}
-                  source="coach"
-                  initialProfile={(globalStudent as Record<string, unknown> | null) ?? (student as Record<string, unknown> | null)}
-                  existingWeightHistory={(globalStudent as { weightHistory?: unknown } | null)?.weightHistory}
-                  goalWeightKg={student?.goalWeightKg}
-                  goalBodyFatPercent={Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent) || null}
-                  goalType={student?.goalType}
-                  showGoals
-                />
+                <div className="min-w-0">
+                  <BodyMetricsPanel
+                    trainerId={user.uid}
+                    rosterStudentId={id}
+                    globalStudentId={coachBodyMetricGlobalStudentId}
+                    canWriteSession={!portalOnly}
+                    source="coach"
+                    initialProfile={(globalStudent as Record<string, unknown> | null) ?? (student as Record<string, unknown> | null)}
+                    existingWeightHistory={(globalStudent as { weightHistory?: unknown } | null)?.weightHistory}
+                    goalWeightKg={student?.goalWeightKg}
+                    goalBodyFatPercent={Number((student as { goalBodyFatPercent?: number }).goalBodyFatPercent) || null}
+                    goalType={student?.goalType}
+                    showGoals
+                  />
+                </div>
               )}
 
               <Card>
                 <CardHeader>
                   <CardTitle>{t("strengthProgression")}</CardTitle>
-                  <CardDescription>{t("strengthProgressionDesc")}</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px]">
                   {strengthExerciseOptions.length > 0 ? (
@@ -2507,31 +2868,40 @@ export default function StudentDetailPage({ id }: { id: string }) {
               <Card className="bg-accent/5">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Zap className="h-4 w-4 text-accent" />
+                    <Zap className="h-4 w-4 text-accent" aria-hidden />
                     {t("sessionAttendanceStreakTitle")}
+                    <button
+                      type="button"
+                      className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                      title={t("sessionAttendanceStreakHint")}
+                      aria-label={t("sessionAttendanceStreakHint")}
+                    >
+                      <Info className="h-3.5 w-3.5" aria-hidden />
+                    </button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold">
                     {sessionAttendanceStreak} {t("sessionsStreakCompact")}
                   </p>
-                  <p className="text-xs text-muted-foreground">{t("sessionAttendanceStreakHint")}</p>
                 </CardContent>
               </Card>
               <Card className="bg-secondary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <History className="h-4 w-4 text-primary" />
+                    <History className="h-4 w-4 text-primary" aria-hidden />
                     {t("progressCardSessionsTitle")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm font-medium">
+                  <p
+                    className="text-sm font-medium"
+                    title={t("progressCardSessionsHint")}
+                  >
                     {lastSessionAt
                       ? new Date(lastSessionAt).toLocaleDateString()
                       : t("noWorkoutSessions")}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">{t("progressCardSessionsHint")}</p>
                 </CardContent>
               </Card>
             </div>
@@ -2551,128 +2921,187 @@ export default function StudentDetailPage({ id }: { id: string }) {
               </CardHeader>
               <CardContent>
                 {sortedSessions.length > 0 ? (
-                  <div className="space-y-3">
-                    {sortedSessions.map((session: any) => (
-                      <div key={session.id} className="border rounded-lg p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-semibold">
-                              {isCoachBodyMetricSession(session)
-                                ? t("coachBodyMetricSessionTitle")
-                                : session.workoutTitle || "Untitled Workout"}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {session.completedAt
-                                ? new Date(session.completedAt).toLocaleDateString(undefined, {
-                                    weekday: "short",
-                                    year: "numeric",
-                                    month: "short",
-                                    day: "numeric",
-                                  })
-                                : session.startedAt
-                                  ? new Date(session.startedAt).toLocaleDateString()
-                                  : "—"}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7"
-                              onClick={() => openEditSession(session)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-destructive"
-                              onClick={() => setConfirmDeleteSessionId(session.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Badge variant="outline" className="bg-green-100 text-green-800">
-                              {session.status === "completed" ? t("completed") : session.status || "Done"}
-                            </Badge>
-                          </div>
-                        </div>
-                        {(session.sessionDifficultyRating != null ||
-                          session.sessionMoodRating != null ||
-                          session.difficultyNotes ||
-                          session.moodNotes) && (
-                          <div className="text-xs rounded-md bg-muted/40 border border-border/60 p-3 space-y-2">
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 items-center font-medium">
-                              {(() => {
-                                const dr = Number(session.sessionDifficultyRating);
-                                const faces = ["😌", "🙂", "😐", "😰", "😵"];
-                                if (!Number.isFinite(dr) || dr < 1 || dr > 5) return null;
-                                return (
-                                  <span className="text-muted-foreground">
-                                    {t("sessionDifficultyCoach")}: <span aria-hidden>{faces[dr - 1]}</span> ({dr}/5)
-                                  </span>
-                                );
-                              })()}
-                              {(() => {
-                                const mr = Number(session.sessionMoodRating);
-                                const faces = ["😢", "😕", "😐", "😊", "🤩"];
-                                if (!Number.isFinite(mr) || mr < 1 || mr > 5) return null;
-                                return (
-                                  <span className="text-muted-foreground">
-                                    {t("sessionMoodCoach")}: <span aria-hidden>{faces[mr - 1]}</span> ({mr}/5)
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                            {(session.difficultyNotes || session.moodNotes) && (
-                              <div className="space-y-1 text-muted-foreground">
-                                {session.difficultyNotes ? (
-                                  <p>
-                                    <span className="font-semibold text-foreground/80">
-                                      {t("sessionDifficultyCoach")}:{" "}
-                                    </span>
-                                    {session.difficultyNotes}
-                                  </p>
-                                ) : null}
-                                {session.moodNotes ? (
-                                  <p>
-                                    <span className="font-semibold text-foreground/80">
-                                      {t("sessionMoodCoach")}:{" "}
-                                    </span>
-                                    {session.moodNotes}
-                                  </p>
-                                ) : null}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {session.exercises && session.exercises.length > 0 && (
-                          <div className="space-y-2">
-                            {session.exercises.map((ex: any, idx: number) => (
-                              <div key={idx} className="bg-muted/50 rounded p-2">
-                                <p className="text-sm font-medium">{ex.exerciseName || ex.name}</p>
-                                {ex.sets && Array.isArray(ex.sets) ? (
-                                  <div className="flex flex-wrap gap-2 mt-1">
-                                    {ex.sets.map((s: any, si: number) => (
-                                      <span
-                                        key={si}
-                                        className="text-xs bg-background border rounded px-2 py-0.5"
-                                      >
-                                        Set {si + 1}: {s.weight ?? "—"}kg × {s.reps ?? "—"}
-                                      </span>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-xs text-muted-foreground">
-                                    {ex.sets || "—"} sets · {ex.reps || "—"} reps
-                                    {ex.weight ? ` · ${ex.weight}kg` : ""}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                  <div className="grid lg:grid-cols-5 gap-6 items-start">
+                    <div className="lg:col-span-2 space-y-3">
+                      <MonthCalendar
+                        mode="single"
+                        selected={effectiveHistoryDate}
+                        onSelect={(d) => {
+                          if (d) {
+                            setHistorySelectedDate(d);
+                            setHistoryMonth(d);
+                          }
+                        }}
+                        month={historyCalendarMonth}
+                        onMonthChange={setHistoryMonth}
+                        modifiers={{ hasSession: historySessionDates }}
+                        modifiersClassNames={{
+                          hasSession:
+                            "bg-primary/15 text-primary font-semibold rounded-full",
+                        }}
+                        className="rounded-md border max-w-full"
+                      />
+                      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground px-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-3 h-3 rounded-full bg-primary/25 border border-primary/40 inline-block" />
+                          {t("workoutHistoryLegendHasSession")}
+                        </span>
                       </div>
-                    ))}
+                    </div>
+
+                    <div className="lg:col-span-3 space-y-3">
+                      <div>
+                        <h3 className="text-lg font-semibold capitalize leading-tight">
+                          {effectiveHistoryDate.toLocaleDateString(undefined, {
+                            weekday: "long",
+                            day: "numeric",
+                            month: "long",
+                            year: "numeric",
+                          })}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          {sessionsForSelectedHistoryDay.length > 0
+                            ? `${sessionsForSelectedHistoryDay.length} ${
+                                sessionsForSelectedHistoryDay.length !== 1
+                                  ? t("sessionsCompleted")
+                                  : t("sessionCompleted")
+                              }`
+                            : t("workoutHistoryNoSessionsOnDay")}
+                        </p>
+                      </div>
+
+                      {sessionsForSelectedHistoryDay.length > 0 ? (
+                        <div className="space-y-3">
+                          {sessionsForSelectedHistoryDay.map((session: any) => (
+                            <div key={session.id} className="border rounded-lg p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-semibold">
+                                    {isCoachBodyMetricSession(session)
+                                      ? t("coachBodyMetricSessionTitle")
+                                      : session.workoutTitle || "Untitled Workout"}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {session.completedAt
+                                      ? new Date(session.completedAt).toLocaleTimeString(undefined, {
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                        })
+                                      : session.startedAt
+                                        ? new Date(session.startedAt).toLocaleTimeString(undefined, {
+                                            hour: "2-digit",
+                                            minute: "2-digit",
+                                          })
+                                        : "—"}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7"
+                                    onClick={() => openEditSession(session)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 text-destructive"
+                                    onClick={() => setConfirmDeleteSessionId(session.id)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Badge variant="outline" className="bg-green-100 text-green-800">
+                                    {session.status === "completed" ? t("completed") : session.status || "Done"}
+                                  </Badge>
+                                </div>
+                              </div>
+                              {(session.sessionDifficultyRating != null ||
+                                session.sessionMoodRating != null ||
+                                session.difficultyNotes ||
+                                session.moodNotes) && (
+                                <div className="text-xs rounded-md bg-muted/40 border border-border/60 p-3 space-y-2">
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1 items-center font-medium">
+                                    {(() => {
+                                      const dr = Number(session.sessionDifficultyRating);
+                                      const faces = ["😌", "🙂", "😐", "😰", "😵"];
+                                      if (!Number.isFinite(dr) || dr < 1 || dr > 5) return null;
+                                      return (
+                                        <span className="text-muted-foreground">
+                                          {t("sessionDifficultyCoach")}: <span aria-hidden>{faces[dr - 1]}</span> ({dr}/5)
+                                        </span>
+                                      );
+                                    })()}
+                                    {(() => {
+                                      const mr = Number(session.sessionMoodRating);
+                                      const faces = ["😢", "😕", "😐", "😊", "🤩"];
+                                      if (!Number.isFinite(mr) || mr < 1 || mr > 5) return null;
+                                      return (
+                                        <span className="text-muted-foreground">
+                                          {t("sessionMoodCoach")}: <span aria-hidden>{faces[mr - 1]}</span> ({mr}/5)
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
+                                  {(session.difficultyNotes || session.moodNotes) && (
+                                    <div className="space-y-1 text-muted-foreground">
+                                      {session.difficultyNotes ? (
+                                        <p>
+                                          <span className="font-semibold text-foreground/80">
+                                            {t("sessionDifficultyCoach")}:{" "}
+                                          </span>
+                                          {session.difficultyNotes}
+                                        </p>
+                                      ) : null}
+                                      {session.moodNotes ? (
+                                        <p>
+                                          <span className="font-semibold text-foreground/80">
+                                            {t("sessionMoodCoach")}:{" "}
+                                          </span>
+                                          {session.moodNotes}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {session.exercises && session.exercises.length > 0 && (
+                                <div className="space-y-2">
+                                  {session.exercises.map((ex: any, idx: number) => (
+                                    <div key={idx} className="bg-muted/50 rounded p-2">
+                                      <p className="text-sm font-medium">{ex.exerciseName || ex.name}</p>
+                                      {ex.sets && Array.isArray(ex.sets) ? (
+                                        <div className="flex flex-wrap gap-2 mt-1">
+                                          {ex.sets.map((s: any, si: number) => (
+                                            <span
+                                              key={si}
+                                              className="text-xs bg-background border rounded px-2 py-0.5"
+                                            >
+                                              Set {si + 1}: {s.weight ?? "—"}kg × {s.reps ?? "—"}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-xs text-muted-foreground">
+                                          {ex.sets || "—"} sets · {ex.reps || "—"} reps
+                                          {ex.weight ? ` · ${ex.weight}kg` : ""}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-10 text-muted-foreground border rounded-lg border-dashed">
+                          <CalendarDays className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                          <p className="text-sm">{t("workoutHistoryNoSessionsOnDay")}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
@@ -2712,9 +3141,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                           <TrendingDown className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                           <div className="min-w-0 flex-1 space-y-1">
                             <CardTitle className="text-base">{t("trainerNotes")}</CardTitle>
-                            {coachingNotesOpen ? (
-                              <CardDescription>{t("privateNotes")}</CardDescription>
-                            ) : (
+                            {!coachingNotesOpen && (
                               <p className="text-sm text-muted-foreground truncate">{coachingNotesSummary}</p>
                             )}
                           </div>
@@ -2738,12 +3165,14 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       </CardContent>
                       <CardFooter className="bg-muted/5 border-t">
                         <Button
-                          className="gap-2 ml-auto"
+                          size="icon"
+                          className="ml-auto"
                           onClick={handleUpdateStudent}
                           disabled={isSaving || portalOnly}
+                          aria-label={t("saveCoachingNotes")}
+                          title={t("saveCoachingNotes")}
                         >
-                          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                          {t("saveCoachingNotes")}
+                          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
                         </Button>
                       </CardFooter>
                     </CollapsibleContent>
@@ -2754,7 +3183,6 @@ export default function StudentDetailPage({ id }: { id: string }) {
                   <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
                     <div className="space-y-1.5">
                       <CardTitle className="text-sm">{t("assignedWorkouts")}</CardTitle>
-                      <CardDescription>{t("assignedWorkouts")}</CardDescription>
                     </div>
                     <div className="flex flex-wrap gap-2 shrink-0">
                       <AlertDialog
@@ -2905,6 +3333,8 @@ export default function StudentDetailPage({ id }: { id: string }) {
                               setEditingAssignedExerciseNote={setEditingAssignedExerciseNote}
                               isSavingAssignedExerciseNote={isSavingAssignedExerciseNote}
                               handleSaveAssignedExerciseNote={handleSaveAssignedExerciseNote}
+                              lastPerfByPlanId={lastPerfByPlanId}
+                              lastPerfByExercise={lastPerfByExercise}
                               t={t}
                             />
                           ))}
@@ -2928,9 +3358,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                         >
                           <div className="min-w-0 flex-1 space-y-1">
                             <CardTitle className="text-base">{t("adjustGoals")}</CardTitle>
-                            {goalsOpen ? (
-                              <CardDescription>{t("updateTargetMetrics")}</CardDescription>
-                            ) : (
+                            {!goalsOpen && (
                               <p className="text-sm text-muted-foreground truncate">{goalsSummary}</p>
                             )}
                           </div>

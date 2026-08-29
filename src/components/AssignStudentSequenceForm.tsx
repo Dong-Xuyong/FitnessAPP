@@ -331,12 +331,13 @@ export function AssignStudentSequenceForm({
               <Button
                 type="button"
                 variant="secondary"
+                size="icon"
                 onClick={addProgram}
                 disabled={!addPick || disabled || isAssigning || isSavingTemplate || isSavingDefault}
-                className="gap-1"
+                aria-label={t("sequenceAddProgram")}
+                title={t("sequenceAddProgram")}
               >
-                <Plus className="h-4 w-4" />
-                {t("sequenceAddProgram")}
+                <Plus className="h-4 w-4" aria-hidden />
               </Button>
             </>
           )}

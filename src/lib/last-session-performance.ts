@@ -1,7 +1,12 @@
 export type LastSessionPerf = { weight: number; reps: number };
 
 export function normalizeExerciseKey(name: string): string {
-  return name.trim().toLowerCase();
+  return name
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 /** Best set (first logged set) per exercise name from a completed session document. */
@@ -87,4 +92,25 @@ export function formatLastSessionPerformanceLabel(
   if (!perf || perf.reps <= 0) return null;
   if (perf.weight > 0) return messages.weighted(perf.weight, perf.reps);
   return messages.bodyweight(perf.reps);
+}
+
+/** Last logged weight/reps per exercise in plan order (plan session first, then any session). */
+export function buildPlanExerciseLastPerformance(
+  planExercises: Array<{ exerciseName?: string; name?: string }>,
+  planId: string,
+  sessions: Array<{ workoutPlanId?: string; completedAt?: unknown; exercises?: unknown[] }>
+): Array<{ name: string; perf?: LastSessionPerf }> {
+  const sorted = [...sessions].sort(
+    (a, b) => completedAtMs(b.completedAt) - completedAtMs(a.completedAt)
+  );
+  const byPlan = buildLatestPerfByPlanId(sorted);
+  const byName = buildLatestPerfByExerciseName(sorted);
+  const planPerf = byPlan[planId] ?? {};
+
+  return planExercises.map((ex, idx) => {
+    const name = String(ex.exerciseName || ex.name || "").trim() || `Exercise ${idx + 1}`;
+    const key = normalizeExerciseKey(name);
+    const perf = planPerf[key] ?? byName[key];
+    return { name, perf: perf && perf.reps > 0 ? perf : undefined };
+  });
 }

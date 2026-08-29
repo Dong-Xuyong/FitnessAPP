@@ -15,6 +15,7 @@ import {
   Globe,
   ShieldBan,
   AlertCircle,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -41,12 +42,14 @@ import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { isOpenTrainingAccess, normalizeTrainingAccessMode } from "@/lib/student-training-access";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { StudentBirthdayPrompt } from "@/components/StudentBirthdayPrompt";
 import { useStudentPaymentReminder } from "@/hooks/use-student-payment-reminder";
 import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
 
 const navItems = [
   { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
   { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
+  { key: "exercises" as const, href: "/student/exercises", icon: Search },
   { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
   { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
   { key: "billing" as const, href: "/student/billing", icon: CreditCard },
@@ -435,6 +438,8 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
           <SidebarTrigger className="shadow-sm" />
         </header>
 
+        <StudentBirthdayPrompt />
+
         <div className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 min-w-0">
           {reminder.show && !isBlocked ? (
             <Alert
@@ -464,8 +469,16 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
                       })
                     )}
                   </p>
-                  <Button size="sm" variant="secondary" className="shrink-0 w-fit" asChild>
-                    <Link href="/student/billing">{t("paymentReminderCta")}</Link>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="shrink-0"
+                    asChild
+                    title={t("paymentReminderCta")}
+                  >
+                    <Link href="/student/billing" aria-label={t("paymentReminderCta")}>
+                      <CreditCard className="h-4 w-4" aria-hidden />
+                    </Link>
                   </Button>
                 </AlertDescription>
               </div>

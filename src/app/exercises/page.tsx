@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Plus, Pencil, Trash2, Loader2, Zap, Copy } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Loader2, Zap, Copy, CirclePlay, ExternalLink } from "lucide-react";
 import { initializeDefaultExercises } from "@/lib/firestore/exercises";
 import {
   Dialog,
@@ -26,6 +26,7 @@ import { collection, doc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n, useCategoryLabel } from "@/lib/i18n";
 import { CoachLibraryExcelActions } from "@/components/CoachLibraryExcelActions";
+import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
 
 const categories = ["All", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body", "Cardio", "Other"];
 
@@ -43,6 +44,13 @@ export default function ExercisesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [editingExercise, setEditingExercise] = useState<any>(null);
+  const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
+    title: string;
+    url: string;
+  } | null>(null);
+  const embeddedExerciseVideoUrl = selectedExerciseVideo
+    ? getYouTubeEmbedUrl(selectedExerciseVideo.url)
+    : null;
   
   const [newExercise, setNewExercise] = useState({
     name: "",
@@ -221,17 +229,13 @@ export default function ExercisesPage() {
             <CoachLibraryExcelActions />
           <Dialog open={isAddingExercise} onOpenChange={setIsAddingExercise}>
             <DialogTrigger asChild>
-              <Button className="gap-2 shrink-0">
-                <Plus className="h-4 w-4" />
-                {t("addExerciseBtn")}
+              <Button size="icon" className="shrink-0" aria-label={t("addExerciseBtn")} title={t("addExerciseBtn")}>
+                <Plus className="h-4 w-4" aria-hidden />
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{t("addNewExercise")}</DialogTitle>
-                <DialogDescription>
-                  {t("addNewExerciseDesc")}
-                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -465,11 +469,33 @@ export default function ExercisesPage() {
                         <strong>{t("equipmentLabel")}</strong> {ex.equipment}
                       </p>
                     )}
-                    {ex.difficulty && (
-                      <Badge variant="outline" className="text-xs capitalize">
-                        {ex.difficulty}
-                      </Badge>
-                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      {ex.difficulty ? (
+                        <Badge variant="outline" className="text-xs capitalize">
+                          {ex.difficulty}
+                        </Badge>
+                      ) : (
+                        <span />
+                      )}
+                      {ex.videoUrl ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 shrink-0 text-primary hover:text-primary"
+                          onClick={() =>
+                            setSelectedExerciseVideo({
+                              title: String(ex.name || ""),
+                              url: String(ex.videoUrl),
+                            })
+                          }
+                          title={t("watchDemo")}
+                          aria-label={`${t("watchDemo")}: ${ex.name}`}
+                        >
+                          <CirclePlay className="h-5 w-5" />
+                        </Button>
+                      ) : null}
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -512,6 +538,43 @@ export default function ExercisesPage() {
             </div>
           )}
         </Tabs>
+
+        <Dialog
+          open={!!selectedExerciseVideo}
+          onOpenChange={(open) => !open && setSelectedExerciseVideo(null)}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>
+                {t("watchDemo")} — {selectedExerciseVideo?.title}
+              </DialogTitle>
+            </DialogHeader>
+            {selectedExerciseVideo ? (
+              embeddedExerciseVideoUrl ? (
+                <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                  <iframe
+                    className="h-full w-full"
+                    src={embeddedExerciseVideoUrl}
+                    title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    allowFullScreen
+                  />
+                </div>
+              ) : (
+                <a
+                  href={selectedExerciseVideo.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+                >
+                  {t("watchDemo")}
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )
+            ) : null}
+          </DialogContent>
+        </Dialog>
       </div>
     </Navigation>
   );

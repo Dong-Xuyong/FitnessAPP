@@ -102,19 +102,18 @@ export default function StudentExerciseHistoryPage() {
       <div className="space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("exerciseHistory")}</h1>
-          <p className="text-muted-foreground">{t("searchExerciseHistory")}</p>
         </header>
 
         <Card>
           <CardHeader>
             <CardTitle>{t("searchExercisesTitle")}</CardTitle>
-            <CardDescription>{t("typeExerciseName")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Input
               placeholder={t("searchExercisePlaceholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
+              aria-label={t("searchExercisePlaceholder")}
             />
           </CardContent>
         </Card>

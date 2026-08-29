@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Progress } from "@/components/ui/progress";
 import {
-  Dumbbell, Clock, Play, Loader2, AlertTriangle,
+  Dumbbell, Clock, Play, ExternalLink, Loader2, AlertTriangle,
   CalendarDays, Users, UserPlus, UserMinus, ChevronDown, ChevronUp, StickyNote,
   CheckCircle2, Lock, CalendarCheck, TrendingUp, Zap,
 } from "lucide-react";
@@ -32,6 +32,7 @@ import {
   type TrainingAccessMode,
 } from "@/lib/student-training-access";
 import { isSessionSlotCancelled } from "@/lib/session-slot-enrollment";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   buildLatestPerfByExerciseName,
   buildLatestPerfByPlanId,
@@ -39,6 +40,12 @@ import {
   normalizeExerciseKey,
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
+import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
+import type { LibraryExerciseVideo } from "@/lib/find-library-exercises-in-text";
+import {
+  ExactExerciseDemoButton,
+  MentionedExerciseDemoChips,
+} from "@/components/ExerciseTextDemoButtons";
 import {
   dayHasOpenBlocks,
   getEffectiveSessionDurationMin,
@@ -254,6 +261,14 @@ export default function StudentWorkoutsPage() {
   const [lastPerfByExercise, setLastPerfByExercise] = useState<Record<string, LastSessionPerf>>(
     {}
   );
+  const [exerciseLibraryVideos, setExerciseLibraryVideos] = useState<LibraryExerciseVideo[]>([]);
+  const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
+    title: string;
+    url: string;
+  } | null>(null);
+  const embeddedExerciseVideoUrl = selectedExerciseVideo
+    ? getYouTubeEmbedUrl(selectedExerciseVideo.url)
+    : null;
 
   /** Roster document id under the trainer (falls back to auth uid until first fetch). */
   const myId = rosterDocId || user?.uid || "";
@@ -279,12 +294,13 @@ export default function StudentWorkoutsPage() {
         setRosterDocId(rid);
         setTrainingAccessMode(globalAccessMode);
 
-        const [rosterDoc, trainerDoc, slotsSnap, plansSnap, sessionsSnap] = await Promise.all([
+        const [rosterDoc, trainerDoc, slotsSnap, plansSnap, sessionsSnap, exercisesSnap] = await Promise.all([
           getDoc(doc(db!, "personalTrainers", tid, "students", rid)),
           getDoc(doc(db!, "personalTrainers", tid)),
           getDocs(collection(db!, "personalTrainers", tid, "sessionSlots")),
           getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutPlans")),
           getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutSessions")),
+          getDocs(collection(db!, "exercises")),
         ]);
         if (cancelled) return;
 
@@ -406,6 +422,16 @@ export default function StudentWorkoutsPage() {
         activePlans.sort((a,b) => Date.parse(getPlanReferenceDate(a) || "") - Date.parse(getPlanReferenceDate(b) || ""));
 
         if (!cancelled) { setWorkouts(activePlans); }
+        if (!cancelled) {
+          const videos: LibraryExerciseVideo[] = [];
+          for (const exerciseDoc of exercisesSnap.docs) {
+            const exercise = exerciseDoc.data();
+            const name = String(exercise.name || "").trim();
+            const videoUrl = String(exercise.videoUrl || "").trim();
+            if (name && videoUrl) videos.push({ name, videoUrl });
+          }
+          setExerciseLibraryVideos(videos);
+        }
       } catch (e) { console.error(e); }
       finally { if (!cancelled) setIsLoading(false); }
     }
@@ -499,6 +525,14 @@ export default function StudentWorkoutsPage() {
   );
 
   const timeSlots = useMemo(() => {
+    const bookedTimes = selectedDayOnVacation
+      ? sessionSlots
+          .filter((s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId))
+          .map((s) => s.startTime)
+      : sessionSlots.filter((s) => s.date === selectedDateStr).map((s) => s.startTime);
+    if (selectedDayOnVacation) {
+      return [...new Set(bookedTimes)].sort();
+    }
     const resolved = resolveDaySlotTimes({
       dateStr: selectedDateStr,
       weeklySched: selectedDaySched,
@@ -506,9 +540,6 @@ export default function StudentWorkoutsPage() {
       slotDurationMin,
       vacationPeriods,
     });
-    const bookedTimes = sessionSlots
-      .filter((s) => s.date === selectedDateStr)
-      .map((s) => s.startTime);
     return [...new Set([...resolved, ...bookedTimes])].sort();
   }, [
     selectedDateStr,
@@ -517,6 +548,8 @@ export default function StudentWorkoutsPage() {
     slotDurationMin,
     vacationPeriods,
     sessionSlots,
+    selectedDayOnVacation,
+    myId,
   ]);
 
   const showStudentDaySchedule =
@@ -669,7 +702,8 @@ export default function StudentWorkoutsPage() {
       candidates,
       now,
       sessionDurationMin,
-      hasCompletedWorkoutSessionToday
+      hasCompletedWorkoutSessionToday,
+      vacationPeriods
     );
     for (const w of weekPlansOrdered) {
       map.set(w.id, resolved.get(w.id) === true);
@@ -685,6 +719,7 @@ export default function StudentWorkoutsPage() {
     sessionDurationMin,
     presentAccessTick,
     hasCompletedWorkoutSessionToday,
+    vacationPeriods,
   ]);
 
   const workoutsPlansSectionTitle = useMemo(() => {
@@ -872,9 +907,6 @@ export default function StudentWorkoutsPage() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            {isOpenAccess ? t("trainingAccessModeOpen") : "Agenda de sessões com o teu treinador"}
-          </p>
         </div>
         {!isOpenAccess && sessionsPerWeek != null && (
           <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-2.5 shadow-sm shrink-0">
@@ -904,13 +936,7 @@ export default function StudentWorkoutsPage() {
         )}
       </div>
 
-      {isOpenAccess ? (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">{t("studentOpenAccessWorkoutsIntro")}</p>
-          </CardContent>
-        </Card>
-      ) : (
+      {isOpenAccess ? null : (
         <div className="grid lg:grid-cols-5 gap-5 items-start">
 
           {/* ── Left column: Calendar ───────────────────────────────────── */}
@@ -918,9 +944,8 @@ export default function StudentWorkoutsPage() {
             <Card className="overflow-hidden">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <CalendarDays className="h-4 w-4 text-primary" /> Horário do Treinador
+                  <CalendarDays className="h-4 w-4 text-primary" aria-hidden /> Horário do Treinador
                 </CardTitle>
-                <CardDescription className="text-xs">Seleciona um dia para ver os blocos disponíveis</CardDescription>
               </CardHeader>
               <CardContent className="pt-0 space-y-3">
                 <Calendar
@@ -1211,26 +1236,28 @@ export default function StudentWorkoutsPage() {
                             </Badge>
                           ) : (
                             <Button
-                              size="sm"
+                              size="icon"
                               variant="outline"
-                              className="shrink-0 h-8 gap-1.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                              className="shrink-0 h-8 w-8 border-destructive/40 text-destructive hover:bg-destructive/10"
                               onClick={() => handleToggleSlot(time)}
                               disabled={!!isLoading_}
+                              aria-label={t("sessionBookingLeave")}
+                              title={t("sessionBookingLeave")}
                             >
                               {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserMinus className="h-3.5 w-3.5" />}
-                              {t("sessionBookingLeave")}
                             </Button>
                           )
                         ) : isContinuation ? null
                           : !isFull && !isBookingCutoffPassed ? (
                           <Button
-                            size="sm"
-                            className="shrink-0 h-8 gap-1.5 text-xs"
+                            size="icon"
+                            className="shrink-0 h-8 w-8"
                             onClick={() => handleToggleSlot(time)}
                             disabled={!!isLoading_ || !canBookMore || isBookingBlockedAtTime(time)}
+                            aria-label={t("sessionBookingJoin")}
+                            title={t("sessionBookingJoin")}
                           >
-                            {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                            Inscrever
+                            {isLoading_ ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <UserPlus className="h-3.5 w-3.5" aria-hidden />}
                           </Button>
                         ) : (
                           <Badge variant="secondary" className="shrink-0 text-xs gap-1">
@@ -1304,9 +1331,9 @@ export default function StudentWorkoutsPage() {
                           >
                             {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                           </button>
-                          <Button size="sm" className="shrink-0 h-8 gap-1.5 text-xs bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-                            <Link href={`/student/workouts/${w.id}/session`}>
-                              <Play className="h-3.5 w-3.5" /> Iniciar
+                          <Button size="icon" className="shrink-0 h-8 w-8 bg-accent text-accent-foreground hover:bg-accent/90" asChild title={t("startWorkout")}>
+                            <Link href={`/student/workouts/${w.id}/session`} aria-label={t("startWorkout")}>
+                              <Play className="h-3.5 w-3.5" aria-hidden />
                             </Link>
                           </Button>
                         </div>
@@ -1317,7 +1344,9 @@ export default function StudentWorkoutsPage() {
                               <p className="text-sm text-muted-foreground text-center py-6">Sem exercícios definidos.</p>
                             ) : (w.exercises || []).map((ex: any, idx: number) => {
                               const prescribed = ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : null;
-                              const exKey = normalizeExerciseKey(String(ex.exerciseName || ""));
+                              const exerciseName = String(ex.exerciseName || "");
+                              const exKey = normalizeExerciseKey(exerciseName);
+                              const notes = String(ex.notes || "").trim();
                               const lastPerf = lastPerfByPlanId[w.id]?.[exKey] ?? lastPerfByExercise[exKey];
                               const lastHint = formatLastSessionPerformanceLabel(lastPerf, {
                                 weighted: (weight, reps) =>
@@ -1331,7 +1360,15 @@ export default function StudentWorkoutsPage() {
                                     {idx + 1}
                                   </div>
                                   <div className="space-y-0.5 min-w-0 flex-1">
-                                    <p className="text-sm font-semibold">{ex.exerciseName}</p>
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p className="text-sm font-semibold whitespace-pre-wrap break-words">{exerciseName}</p>
+                                      <ExactExerciseDemoButton
+                                        title={exerciseName}
+                                        libraryVideos={exerciseLibraryVideos}
+                                        onSelect={setSelectedExerciseVideo}
+                                        watchDemoLabel={t("watchDemo")}
+                                      />
+                                    </div>
                                     {prescribed && (
                                       <p className="text-xs text-muted-foreground">
                                         {t("prescribedSetsReps")}: <span className="font-medium text-foreground">{prescribed}</span>
@@ -1340,14 +1377,22 @@ export default function StudentWorkoutsPage() {
                                     {lastHint && (
                                       <p className="text-xs font-medium text-primary/90">{lastHint}</p>
                                     )}
-                                    {ex.notes ? (
+                                    {notes ? (
                                       <div className="flex items-start gap-1.5 mt-1">
                                         <StickyNote className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                                        <p className="text-xs text-muted-foreground whitespace-pre-line">{ex.notes}</p>
+                                        <p className="text-xs text-muted-foreground whitespace-pre-line">{notes}</p>
                                       </div>
                                     ) : !prescribed && !lastHint ? (
                                       <p className="text-xs text-muted-foreground italic">Sem notas do treinador.</p>
                                     ) : null}
+                                    <MentionedExerciseDemoChips
+                                      title={exerciseName}
+                                      extraText={notes}
+                                      libraryVideos={exerciseLibraryVideos}
+                                      onSelect={setSelectedExerciseVideo}
+                                      watchDemoLabel={t("watchDemo")}
+                                      matchedDemosLabel={t("matchedExerciseDemos")}
+                                    />
                                   </div>
                                 </div>
                               );
@@ -1365,13 +1410,14 @@ export default function StudentWorkoutsPage() {
                         </p>
                         <Button
                           type="button"
-                          size="sm"
+                          size="icon"
                           variant="secondary"
-                          className="shrink-0 h-8 gap-1.5 text-xs"
+                          className="shrink-0 h-8 w-8"
                           disabled
                           title={t("studentTrainingRequiresPresentDescription")}
+                          aria-label={t("startWorkout")}
                         >
-                          <Play className="h-3.5 w-3.5" /> Iniciar
+                          <Play className="h-3.5 w-3.5" aria-hidden />
                         </Button>
                       </div>
                     )}
@@ -1387,6 +1433,43 @@ export default function StudentWorkoutsPage() {
           )}
         </div>
       ) : null}
+
+      <Dialog
+        open={!!selectedExerciseVideo}
+        onOpenChange={(open) => !open && setSelectedExerciseVideo(null)}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t("watchDemo")} — {selectedExerciseVideo?.title}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedExerciseVideo ? (
+            embeddedExerciseVideoUrl ? (
+              <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                <iframe
+                  className="h-full w-full"
+                  src={embeddedExerciseVideoUrl}
+                  title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <a
+                href={selectedExerciseVideo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+              >
+                {t("watchDemo")}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

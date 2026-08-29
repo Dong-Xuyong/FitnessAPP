@@ -73,6 +73,18 @@ import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import { cn } from "@/lib/utils";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import {
+  buildPlanExerciseLastPerformance,
+  formatLastSessionPerformanceLabel,
+  normalizeExerciseKey,
+  type LastSessionPerf,
+} from "@/lib/last-session-performance";
+import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
+import type { LibraryExerciseVideo } from "@/lib/find-library-exercises-in-text";
+import {
+  ExactExerciseDemoButton,
+  MentionedExerciseDemoChips,
+} from "@/components/ExerciseTextDemoButtons";
+import {
   coachDayShowsSchedule,
   dayHasOpenBlocks,
   dayIsWeeklyAvailable,
@@ -81,7 +93,6 @@ import {
   generateSlotTimes,
   getEffectiveSessionDurationMin,
   isDateInVacation,
-  isNewBookingBlocked,
   normalizeOpenAvailabilityBlocks,
   normalizeVacationPeriods,
   openBlocksForDate,
@@ -219,6 +230,13 @@ function attendanceRosterRowAccentClassName(att: SessionAttendanceStatus): strin
   }
 }
 
+type RosterPlanDetailLastSession = {
+  title: string;
+  exercises: RosterSessionLogExercise[];
+  sessionId: string;
+  rawExercises: unknown;
+};
+
 type RosterPlanDetailEntry =
   | { status: "loading" }
   | { status: "error" }
@@ -231,7 +249,21 @@ type RosterPlanDetailEntry =
         notes?: string;
         sets?: number;
         reps?: string;
+        restTimeSeconds?: number;
       }>;
+      /** Last logged weight/reps per plan exercise (newest session for plan, else any session). */
+      exercisePerformance: Array<{
+        name: string;
+        perf?: LastSessionPerf;
+        plan?: {
+          sets?: number;
+          reps?: string;
+          restTimeSeconds?: number;
+          notes?: string;
+        };
+      }>;
+      /** Newest completed session for this plan (any day), when the athlete has done it before. */
+      lastSession?: RosterPlanDetailLastSession | null;
     };
 
 type RosterSessionLogExercise = { name: string; setLines: string[] };
@@ -250,6 +282,154 @@ type RosterSessionLogEntry =
       /** Firestore `exercises` field for EditWorkoutSessionDialog. */
       rawExercises: unknown;
     };
+
+function RosterSessionExerciseList({
+  exercises,
+  emptyLabel,
+}: {
+  exercises: RosterSessionLogExercise[];
+  emptyLabel: string;
+}) {
+  if (exercises.length === 0) {
+    return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
+  }
+  return (
+    <ul className="space-y-2">
+      {exercises.map((exercise, index) => (
+        <li
+          key={`${exercise.name}-${index}`}
+          className="rounded-md border bg-background p-2 text-sm"
+        >
+          <p className="font-medium">{exercise.name}</p>
+          <div className="text-xs text-muted-foreground mt-1 space-y-0.5 tabular-nums leading-relaxed">
+            {exercise.setLines.map((line, li) => (
+              <p key={li}>{line}</p>
+            ))}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RosterPlanExercisePerformanceList({
+  items,
+  emptyLabel,
+  noPerfLabel,
+  exerciseLibraryVideos,
+  t,
+}: {
+  items: Array<{
+    name: string;
+    perf?: LastSessionPerf;
+    plan?: {
+      sets?: number;
+      reps?: string;
+      restTimeSeconds?: number;
+      notes?: string;
+    };
+  }>;
+  emptyLabel: string;
+  noPerfLabel: string;
+  exerciseLibraryVideos: LibraryExerciseVideo[];
+  t: (key: TranslationKey) => string;
+}) {
+  const [selectedVideo, setSelectedVideo] = useState<{ title: string; url: string } | null>(null);
+  const embeddedVideoUrl = selectedVideo ? getYouTubeEmbedUrl(selectedVideo.url) : null;
+
+  if (items.length === 0) {
+    return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
+  }
+  return (
+    <>
+      <ul className="space-y-2">
+        {items.map((item, index) => {
+          const lastHint = formatLastSessionPerformanceLabel(item.perf, {
+            weighted: (weight, reps) =>
+              t("lastSessionPerformance").replace("{weight}", String(weight)).replace("{reps}", String(reps)),
+            bodyweight: (reps) => t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+          });
+          const sets = Number(item.plan?.sets);
+          const reps = String(item.plan?.reps ?? "").trim();
+          const restSeconds = Number(item.plan?.restTimeSeconds);
+          const hasPrescribedPlan = Number.isFinite(sets) && sets > 0 && (reps || restSeconds > 0);
+          const prescribedPlan = hasPrescribedPlan
+            ? t("calendarRosterExercisePlan")
+                .replace("{sets}", String(sets))
+                .replace("{reps}", reps || "—")
+                .replace("{seconds}", String(restSeconds > 0 ? restSeconds : "—"))
+            : String(item.plan?.notes || "").trim();
+
+          return (
+            <li
+              key={`${item.name}-${index}`}
+              className="rounded-md border bg-background p-2 text-sm"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-medium whitespace-pre-wrap break-words">{item.name}</p>
+                <ExactExerciseDemoButton
+                  title={item.name}
+                  libraryVideos={exerciseLibraryVideos}
+                  onSelect={setSelectedVideo}
+                  watchDemoLabel={t("watchDemo")}
+                />
+              </div>
+              {prescribedPlan ? (
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed whitespace-pre-wrap">
+                  {prescribedPlan}
+                </p>
+              ) : null}
+              <MentionedExerciseDemoChips
+                title={item.name}
+                extraText={prescribedPlan}
+                libraryVideos={exerciseLibraryVideos}
+                onSelect={setSelectedVideo}
+                watchDemoLabel={t("watchDemo")}
+                matchedDemosLabel={t("matchedExerciseDemos")}
+              />
+              <p className="text-xs text-muted-foreground mt-1 tabular-nums leading-relaxed">
+                {lastHint ?? noPerfLabel}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      <Dialog open={!!selectedVideo} onOpenChange={(open) => !open && setSelectedVideo(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t("watchDemo")} — {selectedVideo?.title}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedVideo ? (
+            embeddedVideoUrl ? (
+              <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                <iframe
+                  className="h-full w-full"
+                  src={embeddedVideoUrl}
+                  title={`${t("watchDemo")}: ${selectedVideo.title}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <a
+                href={selectedVideo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+              >
+                {t("watchDemo")}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 /** Normalizes `workoutSessions` exercise rows for the completed-roster expand panel. */
 function buildSessionLogExercisesFromDoc(data: Record<string, unknown>): RosterSessionLogExercise[] {
@@ -297,6 +477,7 @@ type CalendarDayRosterRowProps = {
   setExpandedRosterPlanKey: Dispatch<SetStateAction<string | null>>;
   rosterPlanDetailByKey: Record<string, RosterPlanDetailEntry>;
   rosterSessionLogByKey: Record<string, RosterSessionLogEntry>;
+  exerciseLibraryVideos: LibraryExerciseVideo[];
   onRequestEditRosterSession?: (payload: {
     storageFid: string;
     session: EditWorkoutSessionDialogSession;
@@ -318,6 +499,7 @@ function CalendarDayRosterRow({
   setExpandedRosterPlanKey,
   rosterPlanDetailByKey,
   rosterSessionLogByKey,
+  exerciseLibraryVideos,
   onRequestEditRosterSession,
   t,
 }: CalendarDayRosterRowProps) {
@@ -587,25 +769,26 @@ function CalendarDayRosterRow({
           ) : sessionLog.status === "error" ? (
             <>
               <p className="text-xs text-destructive">{t("calendarRosterPlanDetailError")}</p>
-              <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
-                <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={coachSessionHrefForPlan(expandPlanId)}>
-                    <ClipboardList className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterLogOrEditSession")}
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button size="icon" className="h-9 w-9" asChild title={t("calendarRosterLogOrEditSession")}>
+                  <Link href={coachSessionHrefForPlan(expandPlanId)} aria-label={t("calendarRosterLogOrEditSession")}>
+                    <ClipboardList className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+                <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                   <Link
                     href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                    aria-label={t("calendarRosterOpenManagement")}
                   >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterOpenManagement")}
+                    <ExternalLink className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={`/students/${studentProfileId}?tab=workoutHistory`}>
-                    <History className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterViewWorkoutHistory")}
+                <Button variant="outline" size="icon" className="h-9 w-9" asChild title={t("calendarRosterViewWorkoutHistory")}>
+                  <Link
+                    href={`/students/${studentProfileId}?tab=workoutHistory`}
+                    aria-label={t("calendarRosterViewWorkoutHistory")}
+                  >
+                    <History className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
               </div>
@@ -645,38 +828,25 @@ function CalendarDayRosterRow({
                   </Button>
                 ) : null}
               </div>
-              {sessionLog.exercises.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("calendarRosterPlanDetailEmpty")}</p>
-              ) : (
-                <ul className="space-y-2">
-                  {sessionLog.exercises.map((exercise, index) => (
-                    <li
-                      key={`${exercise.name}-${index}`}
-                      className="rounded-md border bg-background p-2 text-sm"
-                    >
-                      <p className="font-medium">{exercise.name}</p>
-                      <div className="text-xs text-muted-foreground mt-1 space-y-0.5 tabular-nums leading-relaxed">
-                        {exercise.setLines.map((line, li) => (
-                          <p key={li}>{line}</p>
-                        ))}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
-                <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+              <RosterSessionExerciseList
+                exercises={sessionLog.exercises}
+                emptyLabel={t("calendarRosterPlanDetailEmpty")}
+              />
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                   <Link
                     href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                    aria-label={t("calendarRosterOpenManagement")}
                   >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterOpenManagement")}
+                    <ExternalLink className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={`/students/${studentProfileId}?tab=workoutHistory`}>
-                    <History className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterViewWorkoutHistory")}
+                <Button variant="outline" size="icon" className="h-9 w-9" asChild title={t("calendarRosterViewWorkoutHistory")}>
+                  <Link
+                    href={`/students/${studentProfileId}?tab=workoutHistory`}
+                    aria-label={t("calendarRosterViewWorkoutHistory")}
+                  >
+                    <History className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
               </div>
@@ -684,28 +854,26 @@ function CalendarDayRosterRow({
           ) : sessionLog.status === "empty" ? (
             <>
               <p className="text-xs text-muted-foreground mb-2">{t("calendarRosterSessionLogEmpty")}</p>
-              <p className="text-xs text-muted-foreground/90 mb-2 leading-snug">
-                {t("calendarRosterSessionLogCoachHint")}
-              </p>
-              <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
-                <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={coachSessionHrefForPlan(expandPlanId)}>
-                    <ClipboardList className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterLogOrEditSession")}
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button size="icon" className="h-9 w-9" asChild title={t("calendarRosterLogOrEditSession")}>
+                  <Link href={coachSessionHrefForPlan(expandPlanId)} aria-label={t("calendarRosterLogOrEditSession")}>
+                    <ClipboardList className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+                <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                   <Link
                     href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                    aria-label={t("calendarRosterOpenManagement")}
                   >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterOpenManagement")}
+                    <ExternalLink className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                  <Link href={`/students/${studentProfileId}?tab=workoutHistory`}>
-                    <History className="h-4 w-4 shrink-0" />
-                    {t("calendarRosterViewWorkoutHistory")}
+                <Button variant="outline" size="icon" className="h-9 w-9" asChild title={t("calendarRosterViewWorkoutHistory")}>
+                  <Link
+                    href={`/students/${studentProfileId}?tab=workoutHistory`}
+                    aria-label={t("calendarRosterViewWorkoutHistory")}
+                  >
+                    <History className="h-4 w-4" aria-hidden />
                   </Link>
                 </Button>
               </div>
@@ -721,44 +889,80 @@ function CalendarDayRosterRow({
           <p className="text-xs text-destructive">{t("calendarRosterPlanDetailError")}</p>
         ) : (
           <>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              {t("calendarRosterPlanDetailsTitle")}
-              {rosterDetail.title ? (
-                <span className="font-medium text-foreground normal-case"> — {rosterDetail.title}</span>
-              ) : null}
-            </p>
-            {rosterDetail.exercises.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t("calendarRosterPlanDetailEmpty")}</p>
+            {rosterDetail.lastSession ? (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide min-w-0">
+                    {t("calendarRosterLastSessionTitle")}
+                    <span className="font-medium text-foreground normal-case">
+                      {" "}
+                      —{" "}
+                      {rosterDetail.lastSession.title.trim()
+                        ? rosterDetail.lastSession.title
+                        : rosterDetail.title || t("calendarRosterUntitledSession")}
+                    </span>
+                  </p>
+                  {onRequestEditRosterSession ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 shrink-0"
+                      title={t("editSession")}
+                      aria-label={t("editSession")}
+                      onClick={() =>
+                        onRequestEditRosterSession({
+                          storageFid: fid,
+                          session: {
+                            id: rosterDetail.lastSession!.sessionId,
+                            workoutTitle: rosterDetail.lastSession!.title,
+                            exercises: rosterDetail.lastSession!.rawExercises,
+                          },
+                        })
+                      }
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
+                <RosterSessionExerciseList
+                  exercises={rosterDetail.lastSession.exercises}
+                  emptyLabel={t("calendarRosterPlanDetailEmpty")}
+                />
+              </>
             ) : (
-              <ul className="space-y-2">
-                {rosterDetail.exercises.map((exercise, index) => (
-                  <li
-                    key={`${exercise.exerciseName || exercise.name || "ex"}-${index}`}
-                    className="rounded-md border bg-background p-2 text-sm"
-                  >
-                    <p className="font-medium">
-                      {exercise.exerciseName || exercise.name || `${t("exerciseName")} ${index + 1}`}
-                    </p>
-                    {exercise.notes ? (
-                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{exercise.notes}</p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  {t("calendarRosterPlanDetailsTitle")}
+                  {rosterDetail.title ? (
+                    <span className="font-medium text-foreground normal-case"> — {rosterDetail.title}</span>
+                  ) : null}
+                </p>
+                {rosterDetail.exercises.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("calendarRosterPlanDetailEmpty")}</p>
+                ) : (
+                  <RosterPlanExercisePerformanceList
+                    items={rosterDetail.exercisePerformance}
+                    emptyLabel={t("calendarRosterPlanDetailEmpty")}
+                    noPerfLabel={t("calendarRosterNoLastPerformance")}
+                    exerciseLibraryVideos={exerciseLibraryVideos}
+                    t={t}
+                  />
+                )}
+              </>
             )}
-            <div className="flex flex-col sm:flex-row gap-2 pt-1">
-              <Button variant="secondary" size="sm" className="gap-2 w-full sm:w-auto" asChild>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button variant="secondary" size="icon" className="h-9 w-9" asChild title={t("calendarRosterOpenManagement")}>
                 <Link
                   href={`/students/${studentProfileId}?tab=management&expandPlan=${encodeURIComponent(expandPlanId)}`}
+                  aria-label={t("calendarRosterOpenManagement")}
                 >
-                  <ExternalLink className="h-4 w-4 shrink-0" />
-                  {t("calendarRosterOpenManagement")}
+                  <ExternalLink className="h-4 w-4" aria-hidden />
                 </Link>
               </Button>
-              <Button size="sm" className="gap-2 w-full sm:w-auto" asChild>
-                <Link href={coachSessionHrefForPlan(expandPlanId)}>
-                  <ClipboardList className="h-4 w-4 shrink-0" />
-                  {t("calendarRosterLogSession")}
+              <Button size="icon" className="h-9 w-9" asChild title={t("calendarRosterLogSession")}>
+                <Link href={coachSessionHrefForPlan(expandPlanId)} aria-label={t("calendarRosterLogSession")}>
+                  <ClipboardList className="h-4 w-4" aria-hidden />
                 </Link>
               </Button>
             </div>
@@ -1110,6 +1314,21 @@ export default function AssignmentCalendarPage() {
   }, [db, user]);
   const { data: rosterStudents, isLoading: isLoadingRoster } = useCollection(studentsQuery);
 
+  const exercisesQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, "exercises");
+  }, [db, user]);
+  const { data: exerciseLibrary } = useCollection(exercisesQuery);
+  const exerciseLibraryVideos = useMemo(() => {
+    const list: LibraryExerciseVideo[] = [];
+    for (const exercise of (exerciseLibrary || []) as Array<Record<string, unknown>>) {
+      const name = String(exercise.name || "").trim();
+      const videoUrl = String(exercise.videoUrl || "").trim();
+      if (name && videoUrl) list.push({ name, videoUrl });
+    }
+    return list;
+  }, [exerciseLibrary]);
+
   const portalStudentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collection(db, "students");
@@ -1339,17 +1558,6 @@ export default function AssignmentCalendarPage() {
     hasResolvableSlots: timeSlots.length > 0,
   });
 
-  const isBookingBlockedAtTime = useCallback(
-    (time: string) =>
-      isNewBookingBlocked({
-        dateStr: selectedDateStr,
-        time,
-        vacationPeriods,
-        openBlocks: openAvailabilityBlocks,
-      }),
-    [selectedDateStr, vacationPeriods, openAvailabilityBlocks]
-  );
-
   const slotsByTime = useMemo(() => {
     const map = new Map<string, SessionSlot>();
     sessionSlots.filter((s) => s.date === selectedDateStr).forEach((s) => map.set(s.startTime, s));
@@ -1374,8 +1582,9 @@ export default function AssignmentCalendarPage() {
     () =>
       datesWithActionablePendingAttendance(sessionSlots, Date.now(), {
         filterStudentId: isFilterActive ? filterStudentId : undefined,
+        vacationPeriods,
       }).map((d) => new Date(d + "T12:00:00")),
-    [sessionSlots, isFilterActive, filterStudentId]
+    [sessionSlots, isFilterActive, filterStudentId, vacationPeriods]
   );
 
   const studentsBookedOnSelectedDay = useMemo((): DayBookedStudent[] => {
@@ -1585,7 +1794,7 @@ export default function AssignmentCalendarPage() {
 
     setRosterPlanDetailByKey((prev) => {
       const cur = prev[expandedRosterPlanKey];
-      if (cur?.status === "ready" || cur?.status === "loading") return prev;
+      if (cur?.status === "loading") return prev;
       return { ...prev, [expandedRosterPlanKey]: { status: "loading" } };
     });
 
@@ -1593,22 +1802,61 @@ export default function AssignmentCalendarPage() {
     const key = expandedRosterPlanKey;
     (async () => {
       try {
-        const snap = await getDoc(
-          doc(db, "personalTrainers", user.uid, "students", storageFid, "workoutPlans", planId)
-        );
+        const [planSnap, sessionsSnap] = await Promise.all([
+          getDoc(doc(db, "personalTrainers", user.uid, "students", storageFid, "workoutPlans", planId)),
+          getDocs(collection(db, "personalTrainers", user.uid, "students", storageFid, "workoutSessions")),
+        ]);
         if (cancelled) return;
-        if (!snap.exists()) {
+        if (!planSnap.exists()) {
           setRosterPlanDetailByKey((p) => ({ ...p, [key]: { status: "error" } }));
           return;
         }
-        const data = snap.data() as Record<string, unknown>;
+        const data = planSnap.data() as Record<string, unknown>;
         const exercises = Array.isArray(data.exercises)
-          ? (data.exercises as Array<{ exerciseName?: string; name?: string; notes?: string }>)
+          ? (data.exercises as Array<{
+              exerciseName?: string;
+              name?: string;
+              notes?: string;
+              sets?: number;
+              reps?: string;
+              restTimeSeconds?: number;
+            }>)
           : [];
         const title = String(data.title || "").trim();
+
+        type SessionCand = { t: number; id: string; data: Record<string, unknown> };
+        const allSessions: Array<Record<string, unknown> & { workoutPlanId?: string; completedAt?: unknown; exercises?: unknown[] }> = [];
+        const planSessions: SessionCand[] = [];
+        for (const docSnap of sessionsSnap.docs) {
+          const sessionData = docSnap.data() as Record<string, unknown>;
+          allSessions.push(sessionData as typeof allSessions[number]);
+          if (String(sessionData.workoutPlanId || "").trim() !== planId) continue;
+          if (!sessionData.completedAt) continue;
+          const t = firestoreScalarToDate(sessionData.completedAt)?.getTime() ?? 0;
+          if (t <= 0) continue;
+          planSessions.push({ t, id: docSnap.id, data: sessionData });
+        }
+        planSessions.sort((a, b) => b.t - a.t);
+        const latestSession = planSessions[0];
+        const lastSession = latestSession
+          ? {
+              title: String(latestSession.data.workoutTitle || "").trim(),
+              exercises: buildSessionLogExercisesFromDoc(latestSession.data),
+              sessionId: latestSession.id,
+              rawExercises: latestSession.data.exercises,
+            }
+          : null;
+
+        const exercisePerformance = buildPlanExerciseLastPerformance(exercises, planId, allSessions).map(
+          (performance, index) => ({
+            ...performance,
+            plan: exercises[index],
+          })
+        );
+
         setRosterPlanDetailByKey((p) => ({
           ...p,
-          [key]: { status: "ready", title, exercises },
+          [key]: { status: "ready", title, exercises, exercisePerformance, lastSession },
         }));
       } catch {
         if (!cancelled) setRosterPlanDetailByKey((p) => ({ ...p, [key]: { status: "error" } }));
@@ -1617,7 +1865,7 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [expandedRosterPlanKey, db, user]);
+  }, [expandedRosterPlanKey, db, user, planMetaRefreshTick, sessionLogRefreshTick]);
 
   /** Load same-day `workoutSessions` row for expanded roster key (plan id match) — completed section UI. */
   useEffect(() => {
@@ -2294,14 +2542,6 @@ export default function AssignmentCalendarPage() {
 
   const openManageSlot = (time: string) => {
     const existing = slotsByTime.get(time) ?? null;
-    if (
-      isBookingBlockedAtTime(time) &&
-      !(existing?.students?.length) &&
-      !isSessionSlotCancelled(existing)
-    ) {
-      toast({ title: "Dia de férias — não é possível criar novos blocos", variant: "destructive" });
-      return;
-    }
     setManagingSlot({ date: selectedDateStr, startTime: time, slot: existing });
     setAddStudentId("");
     setSelectedPlanId("");
@@ -2346,17 +2586,6 @@ export default function AssignmentCalendarPage() {
     if (!managingSlot || !addStudentId || !db || !user) return;
     if (isSessionSlotCancelled(managingSlot.slot)) {
       toast({ title: t("coachSlotCancelledLabel"), description: t("coachReactivateSlotSessionDescription"), variant: "destructive" });
-      return;
-    }
-    if (
-      isNewBookingBlocked({
-        dateStr: managingSlot.date,
-        time: managingSlot.startTime,
-        vacationPeriods,
-        openBlocks: openAvailabilityBlocks,
-      })
-    ) {
-      toast({ title: "Dia de férias — não é possível inscrever novos alunos", variant: "destructive" });
       return;
     }
     setIsAddingStudent(true);
@@ -2591,10 +2820,6 @@ export default function AssignmentCalendarPage() {
       });
       return;
     }
-    if (!isEnrolled && isBookingBlockedAtTime(time)) {
-      toast({ title: "Dia de férias — não é possível inscrever", variant: "destructive" });
-      return;
-    }
     const startIdx = timeSlots.indexOf(time);
     if (startIdx === -1) return;
 
@@ -2721,6 +2946,13 @@ export default function AssignmentCalendarPage() {
     const durationMin = st.sessionDurationMin ?? slotDurationMin;
     const key = `${date}-${sessionStartResolved}-${st.studentId}`;
     const nowMs = Date.now();
+    if (isDateInVacation(date, vacationPeriods)) {
+      toast({
+        title: t("coachVacationAttendanceNotRequired"),
+        variant: "destructive",
+      });
+      return;
+    }
     if (!canCoachMarkSessionAttendanceAt(nowMs, date, sessionStartResolved)) {
       toast({
         title: t("coachAttendanceTooEarlyTitle"),
@@ -2878,7 +3110,6 @@ export default function AssignmentCalendarPage() {
       <div className="space-y-6">
         <header>
           <h2 className="text-3xl font-bold font-headline">{t("assignmentCalendar")}</h2>
-          <p className="text-muted-foreground">Agenda de sessões com blocos de horário</p>
         </header>
 
         {/* ── Assign to week dialog ─────────────────────────────────────────── */}
@@ -3254,13 +3485,7 @@ export default function AssignmentCalendarPage() {
                 Math.min(20, Math.max(1, slotMaxOverride || defaultMaxStudents)) !== persistedMax;
               const canAdd =
                 !isCancelled &&
-                slotStudents.length < maxS &&
-                !isNewBookingBlocked({
-                  dateStr: managingSlot.date,
-                  time: managingSlot.startTime,
-                  vacationPeriods,
-                  openBlocks: openAvailabilityBlocks,
-                });
+                slotStudents.length < maxS;
               return (
                 <>
                   <DialogHeader>
@@ -3324,7 +3549,6 @@ export default function AssignmentCalendarPage() {
                           const weekCount = getWeeklyCount(st.studentId, new Date(managingSlot.date + "T12:00:00"));
                           const overLimit = sessionsPerWeek != null && weekCount > sessionsPerWeek;
                           const sessionSr = st.sessionStart ?? managingSlot.startTime;
-                          const durMin = st.sessionDurationMin ?? slotDurationMin;
                           const tooEarlyForAttendance = !canCoachMarkSessionAttendanceAt(
                             Date.now(),
                             managingSlot.date,
@@ -3333,6 +3557,7 @@ export default function AssignmentCalendarPage() {
                           const attKey = `${managingSlot.date}-${sessionSr}-${st.studentId}`;
                           const savingAtt = isSavingAttendance === attKey;
                           const att = normalizeAttendance(st.sessionAttendance);
+                          const vacationDay = isDateInVacation(managingSlot.date, vacationPeriods);
                           return (
                             <div
                               key={`${st.studentId}-${sessionSr}`}
@@ -3358,6 +3583,12 @@ export default function AssignmentCalendarPage() {
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
+                              {vacationDay ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  {t("coachVacationAttendanceNotRequired")}
+                                </p>
+                              ) : (
+                                <>
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="text-[10px] text-muted-foreground uppercase tracking-wide shrink-0">
                                   Presença
@@ -3406,6 +3637,8 @@ export default function AssignmentCalendarPage() {
                                 </Button>
                                 {savingAtt && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                               </div>
+                                </>
+                              )}
                             </div>
                           );
                         })}
@@ -3602,9 +3835,8 @@ export default function AssignmentCalendarPage() {
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-primary" /> Calendário
+                <CalendarDays className="h-4 w-4 text-primary" aria-hidden /> Calendário
               </CardTitle>
-              <CardDescription>Seleciona um dia para ver o horário</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Student filter */}
@@ -3759,15 +3991,17 @@ export default function AssignmentCalendarPage() {
                       </button>
                     </CollapsibleTrigger>
                     <Button
-                      size="sm"
+                      size="icon"
                       variant="ghost"
-                      className="h-7 px-2 gap-1 text-xs shrink-0"
+                      className="h-7 w-7 shrink-0"
                       onClick={(e) => {
                         e.preventDefault();
                         openAvailability();
                       }}
+                      aria-label={t("edit")}
+                      title={t("edit")}
                     >
-                      <Settings2 className="h-3.5 w-3.5" /> Editar
+                      <Settings2 className="h-3.5 w-3.5" aria-hidden />
                     </Button>
                   </div>
                   <CollapsibleContent className="space-y-1">
@@ -3956,11 +4190,11 @@ export default function AssignmentCalendarPage() {
                   <Clock className="h-12 w-12 opacity-20" />
                   <div>
                     <p className="font-medium">
-                      {selectedDayOnVacation ? "Dia de férias" : "Dia sem disponibilidade"}
+                      {selectedDayOnVacation ? t("weeklySchedulingDayVacation") : "Dia sem disponibilidade"}
                     </p>
                     <p className="text-sm">
                       {selectedDayOnVacation
-                        ? "Marcaste este dia como indisponível. As marcações já existentes continuam visíveis noutros dias do intervalo."
+                        ? t("coachVacationEmptyDayHint")
                         : "Define o horário para este dia nas definições de disponibilidade."}
                     </p>
                   </div>
@@ -3968,7 +4202,14 @@ export default function AssignmentCalendarPage() {
                     <Settings2 className="h-3.5 w-3.5" /> Editar disponibilidade
                   </Button>
                 </div>
-              ) : isFilterActive ? (
+              ) : (
+                <div className="space-y-3">
+                  {selectedDayOnVacation && (
+                    <p className="text-sm rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-muted-foreground">
+                      {t("coachVacationAssignBanner")}
+                    </p>
+                  )}
+              {isFilterActive ? (
                 /* ── Student-centric view (when a student is selected) ── */
                 <div className="space-y-1.5 max-h-[620px] overflow-y-auto pr-1">
                   {timeSlots.map((time) => {
@@ -4083,19 +4324,27 @@ export default function AssignmentCalendarPage() {
                           )}
                         </div>
                         {isSessionStart ? (
-                          <Button size="sm" variant="outline"
-                            className="shrink-0 h-8 gap-1.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-                            onClick={() => handleCoachToggleStudent(time)} disabled={busy}>
-                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserMinus className="h-3.5 w-3.5" />}
-                            Remover
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="shrink-0 h-8 w-8 border-destructive/40 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleCoachToggleStudent(time)}
+                            disabled={busy}
+                            aria-label={t("remove")}
+                            title={t("remove")}
+                          >
+                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <UserMinus className="h-3.5 w-3.5" aria-hidden />}
                           </Button>
                         ) : isContinuation ? null : !isFull ? (
-                          <Button size="sm"
-                            className="shrink-0 h-8 gap-1.5 text-xs bg-primary/90"
+                          <Button
+                            size="icon"
+                            className="shrink-0 h-8 w-8 bg-primary/90"
                             onClick={() => handleCoachToggleStudent(time)}
-                            disabled={busy || isBookingBlockedAtTime(time)}>
-                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                            Inscrever
+                            disabled={busy}
+                            aria-label={t("sessionBookingJoin")}
+                            title={t("sessionBookingJoin")}
+                          >
+                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <UserPlus className="h-3.5 w-3.5" aria-hidden />}
                           </Button>
                         ) : null}
                       </div>
@@ -4182,6 +4431,8 @@ export default function AssignmentCalendarPage() {
                   })}
                 </div>
               )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -4252,14 +4503,16 @@ export default function AssignmentCalendarPage() {
                   </AlertDialog>
                 ) : null}
                 <Button
-                  size="sm"
-                  className="gap-1.5 shrink-0"
+                  size="icon"
+                  className="shrink-0"
                   onClick={() => {
                     setAssignWeekStudentIds(isFilterActive && filterStudentId ? [filterStudentId] : []);
                     setAssignWeekOpen(true);
                   }}
+                  aria-label={t("assignProgram")}
+                  title={t("assignProgram")}
                 >
-                  <UserPlus className="h-4 w-4" /> {t("assignProgram")}
+                  <UserPlus className="h-4 w-4" aria-hidden />
                 </Button>
               </div>
             </div>
@@ -4309,6 +4562,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
+                          exerciseLibraryVideos={exerciseLibraryVideos}
                           t={t}
                         />
                       ))}
@@ -4337,6 +4591,8 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
+                          exerciseLibraryVideos={exerciseLibraryVideos}
+                          onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />
                       ))}
@@ -4365,6 +4621,7 @@ export default function AssignmentCalendarPage() {
                           setExpandedRosterPlanKey={setExpandedRosterPlanKey}
                           rosterPlanDetailByKey={rosterPlanDetailByKey}
                           rosterSessionLogByKey={rosterSessionLogByKey}
+                          exerciseLibraryVideos={exerciseLibraryVideos}
                           onRequestEditRosterSession={(p) => setRosterSessionEdit(p)}
                           t={t}
                         />

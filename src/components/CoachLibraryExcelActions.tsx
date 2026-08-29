@@ -131,22 +131,24 @@ export function CoachLibraryExcelActions() {
       <Button
         type="button"
         variant="outline"
-        className="gap-2"
+        size="icon"
         disabled={!db || !user || isExporting}
         onClick={() => void handleExport()}
+        aria-label={t("exportExcel")}
+        title={t("exportExcel")}
       >
         {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        {t("exportExcel")}
       </Button>
       <Button
         type="button"
         variant="outline"
-        className="gap-2"
+        size="icon"
         disabled={!db || !user || isImporting}
         onClick={() => fileInputRef.current?.click()}
+        aria-label={t("importExcel")}
+        title={t("importExcel")}
       >
         {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-        {t("importExcel")}
       </Button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -154,7 +156,6 @@ export function CoachLibraryExcelActions() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("excelImportConfirmTitle")}</AlertDialogTitle>
             <AlertDialogDescription className="space-y-2">
-              <span className="block">{t("excelImportConfirmDesc")}</span>
               <span className="block text-sm text-muted-foreground">
                 {t("excelImportPreview")
                   .replace("{exercises}", String(previewExercises))

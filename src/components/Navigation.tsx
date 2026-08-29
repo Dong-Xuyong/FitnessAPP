@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import {
   LayoutDashboard,
   Users,
@@ -14,16 +14,23 @@ import {
   Search,
   User,
   Store,
+  Banknote,
   Globe,
+  Cake,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCoachBirthdayReminders } from "@/hooks/use-coach-birthday-reminders";
+import type { UpcomingBirthdayStudent } from "@/lib/coach-birthday-reminders";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -54,6 +61,7 @@ const navItemKeys = [
   { key: "students" as const, href: "/students", icon: Users },
   { key: "exercises" as const, href: "/exercises", icon: Search },
   { key: "shop" as const, href: "/shop", icon: Store },
+  { key: "revenue" as const, href: "/revenue", icon: Banknote },
   { key: "myProfile" as const, href: "/profile", icon: User },
 ];
 
@@ -63,18 +71,13 @@ type TrainerNavProfile = {
   photoUrl?: string;
 } | null;
 
-type SidebarTranslate = (
-  key:
-    | "dashboard"
-    | "students"
-    | "programs"
-    | "exercises"
-    | "assignmentCalendar"
-    | "coachProgressNav"
-    | "myProfile"
-    | "shop"
-    | "logout"
-) => string;
+type SidebarTranslate = (key: TranslationKey) => string;
+
+function formatBirthdayWhenLabel(daysUntil: number, t: SidebarTranslate): string {
+  if (daysUntil <= 0) return t("coachBirthdayWhenToday");
+  if (daysUntil === 1) return t("coachBirthdayWhenTomorrow");
+  return t("coachBirthdayWhenInDays").replace("{days}", String(daysUntil));
+}
 
 function trainerDisplayName(trainer: TrainerNavProfile): string {
   if (!trainer) return "Trainer";
@@ -237,6 +240,85 @@ function TrainerSidebarUtilityControls({
   );
 }
 
+function CoachBirthdaysSidebarSection({
+  upcomingBirthdays,
+  collapsed,
+  t,
+  onNavigate,
+}: {
+  upcomingBirthdays: UpcomingBirthdayStudent[];
+  collapsed: boolean;
+  t: SidebarTranslate;
+  onNavigate: () => void;
+}) {
+  if (collapsed) {
+    const first = upcomingBirthdays[0];
+    const tooltip =
+      upcomingBirthdays.length === 0
+        ? t("coachBirthdaysNavEmpty")
+        : upcomingBirthdays
+            .slice(0, 5)
+            .map((b) => `${b.name} · ${formatBirthdayWhenLabel(b.daysUntil, t)}`)
+            .join("\n");
+
+    return (
+      <SidebarGroup className="mt-auto">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              tooltip={tooltip}
+              size="lg"
+              className={cn(upcomingBirthdays.some((b) => b.daysUntil === 0) && "text-rose-600")}
+            >
+              <Link href={first ? `/students/${first.id}` : "/students"} onClick={onNavigate}>
+                <Cake className="h-5 w-5" />
+                <span>{t("coachBirthdaysNavTitle")}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+    );
+  }
+
+  return (
+    <SidebarGroup className="mt-auto">
+      <SidebarGroupLabel className="gap-1.5">
+        <Cake className="h-3.5 w-3.5" />
+        {t("coachBirthdaysNavTitle")}
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        {upcomingBirthdays.length === 0 ? (
+          <p className="px-2 py-1.5 text-xs text-sidebar-foreground/60 leading-snug">
+            {t("coachBirthdaysNavEmpty")}
+          </p>
+        ) : (
+          <SidebarMenu>
+            {upcomingBirthdays.map((b) => (
+              <SidebarMenuItem key={b.id}>
+                <SidebarMenuButton asChild size="sm" tooltip={b.name}>
+                  <Link href={`/students/${b.id}`} onClick={onNavigate}>
+                    <span className="truncate font-medium">{b.name}</span>
+                    <span
+                      className={cn(
+                        "ml-auto shrink-0 text-[10px] font-medium tabular-nums",
+                        b.daysUntil === 0 ? "text-rose-600" : "text-sidebar-foreground/60"
+                      )}
+                    >
+                      {formatBirthdayWhenLabel(b.daysUntil, t)}
+                    </span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        )}
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+}
+
 function AppSidebar({
   pathname,
   trainer,
@@ -245,6 +327,7 @@ function AppSidebar({
   t,
   locale,
   setLocale,
+  upcomingBirthdays,
 }: {
   pathname: string;
   trainer: TrainerNavProfile;
@@ -253,6 +336,7 @@ function AppSidebar({
   t: SidebarTranslate;
   locale: string;
   setLocale: (locale: "en" | "pt") => void;
+  upcomingBirthdays: UpcomingBirthdayStudent[];
 }) {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
@@ -298,6 +382,13 @@ function AppSidebar({
             ))}
           </SidebarMenu>
         </SidebarGroup>
+
+        <CoachBirthdaysSidebarSection
+          upcomingBirthdays={upcomingBirthdays}
+          collapsed={collapsed}
+          t={t}
+          onNavigate={handleNavClick}
+        />
       </SidebarContent>
 
       <SidebarFooter
@@ -336,6 +427,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
   const db = useFirestore();
   const { user } = useUser();
   const { t, locale, setLocale } = useI18n();
+  const { birthdays, upcomingBirthdays } = useCoachBirthdayReminders(db, user?.uid, t("unnamed"));
 
   const trainerRef = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -350,6 +442,27 @@ export function Navigation({ children }: { children: React.ReactNode }) {
     router.push("/");
   };
 
+  const birthdayTitle =
+    birthdays.length > 1 ? t("coachBirthdayTodayTitlePlural") : t("coachBirthdayTodayTitle");
+  const birthdayDescription = (() => {
+    if (birthdays.length === 0) return "";
+    if (birthdays.length === 1) {
+      const only = birthdays[0];
+      if (only.turningAge != null) {
+        return t("coachBirthdayTodayDescWithAge")
+          .replace("{name}", only.name)
+          .replace("{age}", String(only.turningAge));
+      }
+      return t("coachBirthdayTodayDesc").replace("{name}", only.name);
+    }
+    const names = birthdays.map((b) => b.name).join(", ");
+    return t("coachBirthdayTodayDescPlural").replace("{names}", names);
+  })();
+  const birthdayHref =
+    birthdays.length === 1 ? `/students/${birthdays[0].id}` : "/students";
+  const birthdayCta =
+    birthdays.length === 1 ? t("coachBirthdayCta") : t("coachBirthdayCtaList");
+
   return (
     <SidebarProvider>
       <AppSidebar
@@ -360,12 +473,27 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         t={t}
         locale={locale}
         setLocale={setLocale}
+        upcomingBirthdays={upcomingBirthdays}
       />
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:hidden sticky top-0 z-50 bg-background/95 backdrop-blur">
           <SidebarTrigger className="-ml-1 shadow-sm" />
         </header>
         <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto px-4 pb-4 md:p-6">
+          {birthdays.length > 0 ? (
+            <Alert className="mb-4 border-rose-500/40 bg-rose-500/5 text-foreground [&>svg]:text-rose-600">
+              <Cake className="h-4 w-4 shrink-0" />
+              <div>
+                <AlertTitle className="pr-8">{birthdayTitle}</AlertTitle>
+                <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mt-2">
+                  <p className="text-sm opacity-95">{birthdayDescription}</p>
+                  <Button size="sm" variant="secondary" className="shrink-0 w-fit" asChild>
+                    <Link href={birthdayHref}>{birthdayCta}</Link>
+                  </Button>
+                </AlertDescription>
+              </div>
+            </Alert>
+          ) : null}
           {children}
         </div>
       </SidebarInset>
