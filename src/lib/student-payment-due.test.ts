@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getPaymentReminderState } from "./student-payment-due";
+import {
+  buildSuggestedRecordPayment,
+  getPaymentReminderState,
+  selectDashboardPendingPayment,
+} from "./student-payment-due";
 
 const activeBilling = {
   billingStatus: "active",
@@ -55,6 +59,52 @@ describe("getPaymentReminderState soon window", () => {
       ],
     });
     assert.deepEqual(result, { show: false });
+  });
+});
+
+describe("selectDashboardPendingPayment", () => {
+  it("ignores a leftover pending row when that period is already paid", () => {
+    const selected = selectDashboardPendingPayment(
+      [
+        { period: "2026-08", status: "pending" },
+        { period: "2026-08", status: "paid" },
+        { period: "2026-09", status: "paid" },
+      ],
+      new Date(2026, 7, 29, 12, 0, 0)
+    );
+    assert.equal(selected, null);
+  });
+});
+
+describe("buildSuggestedRecordPayment", () => {
+  it("is zero when current and next months are already paid", () => {
+    const result = buildSuggestedRecordPayment({
+      payments: [
+        { period: "2026-08", status: "paid", amount: 37.5, baseAmount: 37.5, shopAmount: 0 },
+        { period: "2026-09", status: "paid", amount: 37.5, baseAmount: 37.5, shopAmount: 0 },
+      ],
+      monthlyRate: 37.5,
+      unpaidTargetPeriods: [],
+      unpaidShopForPeriod: () => 0,
+      now: new Date(2026, 7, 29, 12, 0, 0),
+    });
+    assert.equal(result.amount, 0);
+    assert.equal(result.baseAmount, 0);
+    assert.equal(result.shopAmount, 0);
+  });
+
+  it("uses a real pending row as the amount due", () => {
+    const result = buildSuggestedRecordPayment({
+      payments: [{ period: "2026-08", status: "pending", amount: 42, baseAmount: 37.5, shopAmount: 4.5 }],
+      monthlyRate: 37.5,
+      unpaidTargetPeriods: [],
+      unpaidShopForPeriod: () => 0,
+      now: new Date(2026, 7, 15, 12, 0, 0),
+    });
+    assert.equal(result.period, "2026-08");
+    assert.equal(result.amount, 42);
+    assert.equal(result.baseAmount, 37.5);
+    assert.equal(result.shopAmount, 4.5);
   });
 });
 

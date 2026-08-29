@@ -124,7 +124,11 @@ import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { ageFromBirthDate, normalizeBirthDateInput } from "@/lib/body-metric-input";
-import { normalizedPaymentPaid, normalizedPaymentPending } from "@/lib/student-payment-due";
+import {
+  buildSuggestedRecordPayment,
+  normalizedPaymentPaid,
+  normalizedPaymentPending,
+} from "@/lib/student-payment-due";
 import {
   buildPaymentAmounts,
   buildShopBillingPeriodContextFromPayments,
@@ -148,7 +152,6 @@ import {
   markShopRegistrationsPaidForPayment,
   repairShopLinesForPaidPayments,
 } from "@/lib/shop-billing-payments";
-import { currentBillingPeriod } from "@/lib/roster-payment-status";
 import { tryAutoUnblockAfterPaymentRecorded } from "@/lib/payment-auto-unblock";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
 import {
@@ -343,38 +346,22 @@ function BillingTab({
   }, [unpaidShopSummary, sortedPayments, shopRegs, shopCatalogMap, paymentPeriodLikes]);
 
   const suggestedRecordPayment = useMemo(() => {
-    const pendingRow = (sortedPayments || []).find((p: { status?: string }) =>
-      normalizedPaymentPending(String(p.status ?? "pending"))
-    ) as { period?: string; amount?: number; baseAmount?: number; shopAmount?: number } | undefined;
-
     const unpaidTargetPeriods = collectTargetPaymentPeriodsFromRegistrations(
       shopRegs,
       shopPaymentTargetResolver
     ).sort();
-
-    const period = pendingRow
-      ? String(pendingRow.period ?? currentBillingPeriod())
-      : unpaidTargetPeriods[0] ?? currentBillingPeriod();
-
-    const base = Number(monthlyRate) || calculatedMonthlyRate || 0;
-    const shopFromRegs = computeUnpaidShopForPaymentPeriod(
-      shopRegs,
-      shopCatalogMap,
-      period,
-      shopPaymentTargetResolver
-    );
-    const shop =
-      pendingRow && Number(pendingRow.shopAmount ?? 0) > 0
-        ? Number(pendingRow.shopAmount)
-        : shopFromRegs;
-    const amounts = buildPaymentAmounts(base, shop);
-
-    return {
-      period,
-      amount: pendingRow ? Number(pendingRow.amount) || amounts.amount : amounts.amount,
-      baseAmount: amounts.baseAmount,
-      shopAmount: amounts.shopAmount,
-    };
+    return buildSuggestedRecordPayment({
+      payments: sortedPayments || [],
+      monthlyRate: Number(monthlyRate) || calculatedMonthlyRate || 0,
+      unpaidTargetPeriods,
+      unpaidShopForPeriod: (period) =>
+        computeUnpaidShopForPaymentPeriod(
+          shopRegs,
+          shopCatalogMap,
+          period,
+          shopPaymentTargetResolver
+        ),
+    });
   }, [
     sortedPayments,
     monthlyRate,
