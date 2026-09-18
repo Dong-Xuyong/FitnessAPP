@@ -12,8 +12,8 @@ export const PROGRAM_COACH_NOTES_HEADER = "Notas do Treinador";
 const INSTRUCTION_ROW = 1;
 const DATA_START_ROW = 4;
 
-/** Column C on Exercises — Firestore id (exported for import matching, hidden in Excel). */
-const EXERCISE_ID_COLUMN = 3;
+/** Column D on Exercises — Firestore id (exported for import matching, hidden in Excel). */
+const EXERCISE_ID_COLUMN = 4;
 
 /** Taller data rows for readability (template default ~15.75pt). */
 const DATA_ROW_HEIGHT = 24;
@@ -21,7 +21,7 @@ const DATA_ROW_HEIGHT = 24;
 export type TemplateFillInput = {
   exercisesInstruction: string;
   programsInstruction: string;
-  exerciseRows: Array<[string, string, string]>;
+  exerciseRows: Array<[string, string, string, string]>;
   programRows: Array<[string, string, string, string, number, string]>;
 };
 
@@ -152,7 +152,7 @@ export async function fillCoachLibraryTemplate(
 
   const exSheet = workbook.getWorksheet(TEMPLATE_EXERCISES_SHEET);
   if (exSheet) {
-    fillWorksheet(exSheet, input.exercisesInstruction, input.exerciseRows, 3);
+    fillWorksheet(exSheet, input.exercisesInstruction, input.exerciseRows, 4);
     hideExerciseIdColumn(exSheet);
   }
 

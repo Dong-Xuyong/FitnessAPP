@@ -249,15 +249,19 @@ function WorkoutBuilderContent() {
                   <CardDescription>{exercises.length} {t("exercisesTotal")}</CardDescription>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="ghost" size="sm" asChild className="gap-2">
-                    <Link href="/exercises" target="_blank">
-                      <ExternalLink className="h-4 w-4" />
-                      {t("browseLibrary")}
+                  <Button variant="ghost" size="icon" asChild title={t("browseLibrary")}>
+                    <Link href="/exercises" target="_blank" aria-label={t("browseLibrary")}>
+                      <ExternalLink className="h-4 w-4" aria-hidden />
                     </Link>
                   </Button>
-                  <Button variant="outline" size="sm" onClick={handleAddExercise} className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    {t("addRow")}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleAddExercise}
+                    aria-label={t("addRow")}
+                    title={t("addRow")}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
                   </Button>
                 </div>
               </CardHeader>

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Dumbbell,
   CheckCircle2,
@@ -17,6 +18,8 @@ import {
   StickyNote,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
+  Info,
 } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
@@ -32,6 +35,7 @@ import {
   studentLocalCalendarDateKeyMs,
   type SessionSlotAttendance,
 } from "@/lib/session-attendance-streak";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { cn } from "@/lib/utils";
 import {
   isOpenTrainingAccess,
@@ -43,6 +47,12 @@ import {
   normalizeExerciseKey,
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
+import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
+import type { LibraryExerciseVideo } from "@/lib/find-library-exercises-in-text";
+import {
+  ExactExerciseDemoButton,
+  MentionedExerciseDemoChips,
+} from "@/components/ExerciseTextDemoButtons";
 
 const SESSION_QUERY_LIMIT = 40;
 const NOTE_MAX_LENGTH = 500;
@@ -120,6 +130,11 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [isSaving, setIsSaving] = useState(false);
   const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
   const [lastPerfLookup, setLastPerfLookup] = useState<Record<string, LastSessionPerf>>({});
+  const [exerciseLibraryVideos, setExerciseLibraryVideos] = useState<LibraryExerciseVideo[]>([]);
+  const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
+    title: string;
+    url: string;
+  } | null>(null);
   const [difficultyNotes, setDifficultyNotes] = useState("");
   const [moodNotes, setMoodNotes] = useState("");
   const [sessionDifficultyRating, setSessionDifficultyRating] = useState<number | null>(null);
@@ -133,6 +148,9 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [priorStepCompletedOverride, setPriorStepCompletedOverride] = useState(false);
   const prefilledSignatureRef = useRef<string | null>(null);
   const metricsPrefilledRef = useRef(false);
+  const embeddedExerciseVideoUrl = selectedExerciseVideo
+    ? getYouTubeEmbedUrl(selectedExerciseVideo.url)
+    : null;
 
   useEffect(() => {
     prefilledSignatureRef.current = null;
@@ -165,12 +183,25 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
           setSessionBodyWeightKg(wPref);
           setSessionBodyFatPercent(bfPref);
         }
-        const planDoc = await getDoc(
-          doc(db!, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans", workoutId)
-        );
+        const [planDoc, exercisesSnap] = await Promise.all([
+          getDoc(
+            doc(db!, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutPlans", workoutId)
+          ),
+          getDocs(collection(db!, "exercises")),
+        ]);
         if (planDoc.exists() && !cancelled) {
           const workoutData = { ...planDoc.data(), personalTrainerId: trainerId } as WorkoutPlan;
           setWorkout(workoutData);
+        }
+        if (!cancelled) {
+          const videos: LibraryExerciseVideo[] = [];
+          for (const exerciseDoc of exercisesSnap.docs) {
+            const exercise = exerciseDoc.data();
+            const name = String(exercise.name || "").trim();
+            const videoUrl = String(exercise.videoUrl || "").trim();
+            if (name && videoUrl) videos.push({ name, videoUrl });
+          }
+          setExerciseLibraryVideos(videos);
         }
       } catch (e) {
         console.error("Error fetching workout:", e);
@@ -230,11 +261,13 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
       rosterSnap.exists() && typeof (rosterSnap.data() as { sessionDurationMin?: number }).sessionDurationMin === "number"
         ? Number((rosterSnap.data() as { sessionDurationMin: number }).sessionDurationMin)
         : 60;
-    const slotsSnap = await getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots"));
+    const [slotsSnap, sessionsSnap, trainerSnap] = await Promise.all([
+      getDocs(collection(db, "personalTrainers", trainerId, "sessionSlots")),
+      getDocs(collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")),
+      getDoc(doc(db, "personalTrainers", trainerId)),
+    ]);
     const slots = slotsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as SessionSlotAttendance[];
-    const sessionsSnap = await getDocs(
-      collection(db, "personalTrainers", trainerId, "students", resolvedStudentId, "workoutSessions")
-    );
+    const vacationPeriods = normalizeVacationPeriods(trainerSnap.data()?.vacationPeriods);
     const todayK = studentLocalCalendarDateKeyMs(Date.now());
     let completedSessionToday = false;
     for (const docSn of sessionsSnap.docs) {
@@ -258,7 +291,8 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
       resolvedStudentId,
       workoutId,
       Date.now(),
-      fallbackDur
+      fallbackDur,
+      vacationPeriods
     );
     return present && !completedSessionToday;
   }, [db, user?.uid, workoutId]);
@@ -525,13 +559,16 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   }
 
   return (
+    <>
       <div className="max-w-2xl mx-auto space-y-6">
         <header className="space-y-1">
           <Link
             href="/student/workouts"
-            className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-muted/40"
+            aria-label={t("endSession")}
+            title={t("endSession")}
           >
-            <X className="h-3 w-3" /> {t("endSession")}
+            <X className="h-4 w-4" aria-hidden />
           </Link>
           <h1 className="text-2xl font-bold">{workout.title}</h1>
         </header>
@@ -539,16 +576,23 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
         <Card>
           <Collapsible open={sessionFeedbackOpen} onOpenChange={setSessionFeedbackOpen}>
             <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-              <div className="min-w-0 space-y-1">
+              <div className="min-w-0 flex items-center gap-2">
                 <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
-                <p className="text-xs text-muted-foreground">{t("sessionFeedbackHint")}</p>
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                  title={t("sessionFeedbackHint")}
+                  aria-label={t("sessionFeedbackHint")}
+                >
+                  <Info className="h-3.5 w-3.5" aria-hidden />
+                </button>
               </div>
               <CollapsibleTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="shrink-0 gap-1.5"
+                  size="icon"
+                  className="shrink-0"
                   aria-expanded={sessionFeedbackOpen}
                   aria-label={
                     sessionFeedbackOpen ? t("sessionFeedbackCollapse") : t("sessionFeedbackExpand")
@@ -559,9 +603,6 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                   ) : (
                     <ChevronDown className="h-4 w-4" />
                   )}
-                  <span className="hidden sm:inline">
-                    {sessionFeedbackOpen ? t("sessionFeedbackCollapse") : t("sessionFeedbackExpand")}
-                  </span>
                 </Button>
               </CollapsibleTrigger>
             </CardHeader>
@@ -635,12 +676,17 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
             </div>
             <div className="grid sm:grid-cols-2 gap-4 pt-1">
               <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="session-body-weight-kg">
+                <label className="text-sm font-medium inline-flex items-center gap-1.5" htmlFor="session-body-weight-kg">
                   {t("currentWeightKg")}
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                    title={t("sessionBodyWeightHint")}
+                    aria-label={t("sessionBodyWeightHint")}
+                  >
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </button>
                 </label>
-                <p id="session-body-weight-hint" className="text-xs text-muted-foreground">
-                  {t("sessionBodyWeightHint")}
-                </p>
                 <Input
                   id="session-body-weight-kg"
                   type="number"
@@ -652,16 +698,20 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                   value={sessionBodyWeightKg}
                   onChange={(e) => setSessionBodyWeightKg(e.target.value)}
                   className="text-lg font-bold h-12"
-                  aria-describedby="session-body-weight-hint"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="session-body-fat-percent">
+                <label className="text-sm font-medium inline-flex items-center gap-1.5" htmlFor="session-body-fat-percent">
                   {t("bodyFatPercent")}
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+                    title={t("sessionBodyFatHint")}
+                    aria-label={t("sessionBodyFatHint")}
+                  >
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </button>
                 </label>
-                <p id="session-body-fat-hint" className="text-xs text-muted-foreground">
-                  {t("sessionBodyFatHint")}
-                </p>
                 <Input
                   id="session-body-fat-percent"
                   type="number"
@@ -686,7 +736,9 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
           {exercises.map((exercise, index) => {
             const log = logs[index] ?? { weight: "", reps: "" };
             const logged = exerciseHasLoggedSet(log);
-            const prevPerf = lastPerfLookup[normalizeExerciseKey(exercise.exerciseName)];
+            const exerciseKey = normalizeExerciseKey(exercise.exerciseName);
+            const notes = String(exercise.notes || "").trim();
+            const prevPerf = lastPerfLookup[exerciseKey];
             const lastHint = formatLastSessionPerformanceLabel(prevPerf, {
               weighted: (weight, reps) =>
                 t("lastSessionPerformance")
@@ -700,20 +752,40 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
               <Card key={index}>
                 <CardHeader>
                   <div className="flex justify-between items-start gap-4">
-                    <div className="space-y-1">
+                    <div className="space-y-1 min-w-0 flex-1">
                       <Badge variant="outline" className="text-xs mb-1">
                         {t("exercises")} {index + 1}/{totalExercises}
                       </Badge>
-                      <CardTitle className="text-2xl">{exercise.exerciseName}</CardTitle>
+                      <div className="flex items-start gap-2">
+                        <CardTitle className="text-2xl flex-1 whitespace-pre-wrap break-words">
+                          {exercise.exerciseName}
+                        </CardTitle>
+                        <ExactExerciseDemoButton
+                          title={exercise.exerciseName}
+                          libraryVideos={exerciseLibraryVideos}
+                          onSelect={setSelectedExerciseVideo}
+                          watchDemoLabel={t("watchDemo")}
+                          className="h-8 w-8 -mt-1 shrink-0 text-primary hover:text-primary"
+                          iconClassName="h-5 w-5"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  {exercise.notes && (
+                  {notes ? (
                     <div className="flex items-start gap-2 mt-3 p-3 rounded-lg bg-muted/40 border border-muted text-sm text-muted-foreground">
                       <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-primary/70" />
-                      <p className="leading-relaxed">{exercise.notes}</p>
+                      <p className="leading-relaxed whitespace-pre-wrap">{notes}</p>
                     </div>
-                  )}
+                  ) : null}
+                  <MentionedExerciseDemoChips
+                    title={exercise.exerciseName}
+                    extraText={notes}
+                    libraryVideos={exerciseLibraryVideos}
+                    onSelect={setSelectedExerciseVideo}
+                    watchDemoLabel={t("watchDemo")}
+                    matchedDemosLabel={t("matchedExerciseDemos")}
+                  />
                 </CardHeader>
 
                 <CardContent className="space-y-4">
@@ -770,5 +842,42 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
           </Button>
         </CardFooter>
       </div>
+      <Dialog
+        open={!!selectedExerciseVideo}
+        onOpenChange={(open) => !open && setSelectedExerciseVideo(null)}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t("watchDemo")} — {selectedExerciseVideo?.title}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedExerciseVideo ? (
+            embeddedExerciseVideoUrl ? (
+              <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                <iframe
+                  className="h-full w-full"
+                  src={embeddedExerciseVideoUrl}
+                  title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <a
+                href={selectedExerciseVideo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+              >
+                {t("watchDemo")}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

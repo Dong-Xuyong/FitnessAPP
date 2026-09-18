@@ -3,6 +3,7 @@ import {
   isWithinLastFourDaysOfMonth,
   nextBillingPeriod,
 } from "@/lib/roster-payment-status";
+import { buildPaymentAmounts } from "@/lib/shop-billing";
 
 /**
  * Client-side billing dates use the device local calendar (same as `Date` getters).
@@ -90,7 +91,11 @@ export function selectDashboardPendingPayment<T extends PaymentPeriodRow>(
   now = new Date()
 ): T | null {
   const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const pending = payments.filter((p) => normalizedPaymentPending(p.status));
+  const pending = payments.filter((p) => {
+    if (!normalizedPaymentPending(p.status)) return false;
+    const pYm = canonicalBillingPeriodYm(p.period);
+    return !pYm || !isPeriodPaid(payments, pYm);
+  });
   if (!pending.length) return null;
 
   const ym = (p: PaymentPeriodRow) => canonicalBillingPeriodYm(p.period);
@@ -113,6 +118,66 @@ export function selectDashboardPendingPayment<T extends PaymentPeriodRow>(
     })
     .sort((a, b) => (ym(b) ?? "").localeCompare(ym(a) ?? ""));
   return past[0] ?? null;
+}
+
+export type SuggestedRecordPayment = {
+  period: string;
+  amount: number;
+  baseAmount: number;
+  shopAmount: number;
+};
+
+/**
+ * Amount due to record next. Zero when the current (and, in the late-month
+ * window, next) billing period is already paid and there is no unpaid shop.
+ */
+export function buildSuggestedRecordPayment(args: {
+  payments: Array<{
+    period?: string;
+    status?: string;
+    amount?: number;
+    baseAmount?: number;
+    shopAmount?: number;
+  }>;
+  monthlyRate: number;
+  unpaidTargetPeriods: string[];
+  unpaidShopForPeriod: (period: string) => number;
+  now?: Date;
+}): SuggestedRecordPayment {
+  const now = args.now ?? new Date();
+  const current = currentBillingPeriod(now);
+  const next = nextBillingPeriod(now);
+  const pendingRow = selectDashboardPendingPayment(args.payments, now);
+
+  let period = current;
+  if (pendingRow) {
+    period = canonicalBillingPeriodYm(pendingRow.period) ?? current;
+  } else {
+    const shopPeriod = args.unpaidTargetPeriods.find((p) => !isPeriodPaid(args.payments, p));
+    if (shopPeriod) {
+      period = shopPeriod;
+    } else if (!isPeriodPaid(args.payments, current)) {
+      period = current;
+    } else if (isWithinLastFourDaysOfMonth(now) && !isPeriodPaid(args.payments, next)) {
+      period = next;
+    }
+  }
+
+  const shopFromPending = Number(pendingRow?.shopAmount ?? 0);
+  const shop =
+    pendingRow && Number.isFinite(shopFromPending) && shopFromPending > 0
+      ? shopFromPending
+      : args.unpaidShopForPeriod(period);
+  const chargeMembership = Boolean(pendingRow) || !isPeriodPaid(args.payments, period);
+  const base = chargeMembership && Number.isFinite(args.monthlyRate) ? Math.max(0, args.monthlyRate) : 0;
+  const amounts = buildPaymentAmounts(base, shop);
+  const pendingAmount = Number(pendingRow?.amount);
+  return {
+    period,
+    amount: pendingRow && Number.isFinite(pendingAmount) && pendingAmount > 0 ? pendingAmount : amounts.amount,
+    baseAmount: amounts.baseAmount,
+    shopAmount: amounts.shopAmount,
+  };
 }
 
 export function isPeriodPaid(

@@ -10,7 +10,6 @@ import {
   VacationPeriod,
   OpenAvailabilityBlock,
   consecutiveSlotBlocksFrom,
-  isNewBookingBlocked,
   resolveDaySlotTimes,
   weekdayKeyFromDate,
 } from "@/lib/trainer-availability";
@@ -25,7 +24,8 @@ export type SlotStudent = {
   sessionDurationMin?: number;
   workoutPlanId?: string;
   workoutTitle?: string;
-  sessionAttendance: "pending" | "present" | "absent";
+  sessionAttendance?: "pending" | "present" | "absent";
+  sessionAttendanceAt?: string;
 };
 
 export type SessionSlot = {
@@ -77,6 +77,283 @@ export type RemoveAllEnrollmentsResult = {
 
 export function slotDocId(date: string, time: string): string {
   return `${date}_${time.replace(":", "")}`;
+}
+
+export function normalizeStudentMatchIds(ids: readonly unknown[]): string[] {
+  return [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+}
+
+export function findSlotStudent(
+  slot: Pick<SessionSlot, "students"> | null | undefined,
+  candidateIds: readonly string[]
+): SlotStudent | undefined {
+  const ids = new Set(normalizeStudentMatchIds(candidateIds));
+  return slot?.students.find((student) => ids.has(String(student.studentId || "").trim()));
+}
+
+export function sessionSlotHasStudent(
+  slot: Pick<SessionSlot, "students"> | null | undefined,
+  candidateIds: readonly string[]
+): boolean {
+  return Boolean(findSlotStudent(slot, candidateIds));
+}
+
+/** A remaining continuation row whose original start block no longer contains the student. */
+export function isOrphanedSessionContinuation(params: {
+  slot: SessionSlot;
+  student: SlotStudent;
+  daySlots: SessionSlot[];
+  studentIds: string[];
+}): boolean {
+  const { slot, student, daySlots, studentIds } = params;
+  const sessionStart = student.sessionStart;
+  if (!sessionStart || sessionStart === slot.startTime) return false;
+  const startSlot = daySlots.find(
+    (candidate) => candidate.date === slot.date && candidate.startTime === sessionStart
+  );
+  const startEntry = findSlotStudent(startSlot, studentIds);
+  return !startEntry || (startEntry.sessionStart ?? startSlot?.startTime) !== sessionStart;
+}
+
+export type SessionSlotBlock = Pick<SessionSlot, "date" | "startTime" | "maxStudents">;
+
+export type SessionSlotWrite = {
+  id: string;
+  slot: SessionSlot;
+};
+
+export type SessionSlotMutationErrorCode =
+  | "slot-cancelled"
+  | "slot-full"
+  | "partial-enrollment";
+
+export class SessionSlotMutationError extends Error {
+  constructor(
+    public readonly code: SessionSlotMutationErrorCode,
+    message: string
+  ) {
+    super(message);
+    this.name = "SessionSlotMutationError";
+  }
+}
+
+function uniqueBlocks(blocks: SessionSlotBlock[]): Array<SessionSlotBlock & { id: string }> {
+  const unique = new Map<string, SessionSlotBlock & { id: string }>();
+  for (const block of blocks) {
+    const id = slotDocId(block.date, block.startTime);
+    unique.set(id, { ...block, id });
+  }
+  return [...unique.values()];
+}
+
+export function planSessionSlotEnrollment(params: {
+  blocks: SessionSlotBlock[];
+  currentSlots: Array<SessionSlot | null>;
+  student: SlotStudent;
+  studentIds: string[];
+}): { writes: SessionSlotWrite[]; slots: SessionSlot[]; changed: boolean } {
+  const blocks = uniqueBlocks(params.blocks);
+  const ids = normalizeStudentMatchIds([...params.studentIds, params.student.studentId]);
+  const currentById = new Map(
+    params.currentSlots.filter((slot): slot is SessionSlot => Boolean(slot)).map((slot) => [slot.id, slot])
+  );
+  const hasStudent = blocks.map((block) => sessionSlotHasStudent(currentById.get(block.id), ids));
+
+  if (hasStudent.some(Boolean)) {
+    if (hasStudent.every(Boolean)) {
+      return {
+        writes: [],
+        slots: blocks.map((block) => currentById.get(block.id)!),
+        changed: false,
+      };
+    }
+    throw new SessionSlotMutationError(
+      "partial-enrollment",
+      "Foi encontrada uma inscrição incompleta. Cancela-a antes de voltares a reservar."
+    );
+  }
+
+  const slots = blocks.map((block) => {
+    const current = currentById.get(block.id);
+    if (isSessionSlotCancelled(current)) {
+      throw new SessionSlotMutationError("slot-cancelled", `O bloco ${block.startTime} foi cancelado.`);
+    }
+    const maxStudents =
+      Number.isFinite(Number(current?.maxStudents)) && Number(current?.maxStudents) > 0
+        ? Number(current!.maxStudents)
+        : Math.max(1, Number(block.maxStudents) || 1);
+    const students = Array.isArray(current?.students) ? current.students : [];
+    if (students.length >= maxStudents) {
+      throw new SessionSlotMutationError("slot-full", `O bloco ${block.startTime} está cheio.`);
+    }
+    return {
+      ...(current ?? {}),
+      id: block.id,
+      date: block.date,
+      startTime: block.startTime,
+      maxStudents,
+      students: [...students, params.student],
+    } satisfies SessionSlot;
+  });
+
+  return {
+    writes: slots.map((slot) => ({ id: slot.id, slot })),
+    slots,
+    changed: true,
+  };
+}
+
+export function planSessionSlotRemoval(params: {
+  currentSlots: Array<SessionSlot | null>;
+  studentIds: string[];
+  sessionStart?: string;
+}): {
+  writes: SessionSlotWrite[];
+  slots: SessionSlot[];
+  removedEntries: number;
+} {
+  const ids = new Set(normalizeStudentMatchIds(params.studentIds));
+  const writes: SessionSlotWrite[] = [];
+  const slots: SessionSlot[] = [];
+  let removedEntries = 0;
+
+  for (const slot of params.currentSlots) {
+    if (!slot) continue;
+    const students = Array.isArray(slot.students) ? slot.students : [];
+    const remaining = students.filter((student) => {
+      if (!ids.has(String(student.studentId || "").trim())) return true;
+      const rowStart = student.sessionStart ?? slot.startTime;
+      if (params.sessionStart && rowStart !== params.sessionStart) return true;
+      removedEntries++;
+      return false;
+    });
+    if (remaining.length === students.length) continue;
+    const updated = { ...slot, students: remaining };
+    writes.push({ id: slot.id, slot: updated });
+    slots.push(updated);
+  }
+
+  return { writes, slots, removedEntries };
+}
+
+export async function mutateSessionSlotsAtomically<T>(params: {
+  db: Firestore;
+  trainerId: string;
+  blocks: SessionSlotBlock[];
+  mutate: (
+    currentSlots: Array<SessionSlot | null>,
+    blocks: Array<SessionSlotBlock & { id: string }>
+  ) => { writes: SessionSlotWrite[]; result: T };
+}): Promise<T> {
+  const blocks = uniqueBlocks(params.blocks);
+  const { doc, runTransaction } = await import("firebase/firestore");
+
+  return runTransaction(params.db, async (transaction) => {
+    const refs = blocks.map((block) =>
+      doc(params.db, "personalTrainers", params.trainerId, "sessionSlots", block.id)
+    );
+    const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+    const currentSlots = snapshots.map((snapshot, index): SessionSlot | null => {
+      if (!snapshot.exists()) return null;
+      const block = blocks[index]!;
+      const data = snapshot.data() as Partial<SessionSlot>;
+      return {
+        ...data,
+        id: snapshot.id,
+        date: String(data.date || block.date),
+        startTime: String(data.startTime || block.startTime),
+        maxStudents: Number(data.maxStudents) || block.maxStudents,
+        students: Array.isArray(data.students) ? data.students : [],
+      };
+    });
+    const { writes, result } = params.mutate(currentSlots, blocks);
+    const refsById = new Map(refs.map((ref) => [ref.id, ref]));
+    for (const write of writes) {
+      const ref = refsById.get(write.id);
+      if (!ref) throw new Error(`Session slot ${write.id} was not read by the transaction.`);
+      const { id: _id, ...data } = write.slot;
+      transaction.set(ref, data);
+    }
+    return result;
+  });
+}
+
+export async function enrollStudentInSessionSlots(params: {
+  db: Firestore;
+  trainerId: string;
+  blocks: SessionSlotBlock[];
+  student: SlotStudent;
+  studentIds: string[];
+}): Promise<{ slots: SessionSlot[]; changed: boolean }> {
+  return mutateSessionSlotsAtomically({
+    db: params.db,
+    trainerId: params.trainerId,
+    blocks: params.blocks,
+    mutate: (currentSlots) => {
+      const planned = planSessionSlotEnrollment({ ...params, currentSlots });
+      return {
+        writes: planned.writes,
+        result: { slots: planned.slots, changed: planned.changed },
+      };
+    },
+  });
+}
+
+export async function removeStudentFromSessionSlots(params: {
+  db: Firestore;
+  trainerId: string;
+  blocks: SessionSlotBlock[];
+  studentIds: string[];
+  sessionStart?: string;
+}): Promise<{
+  slots: SessionSlot[];
+  removedEntries: number;
+}> {
+  return mutateSessionSlotsAtomically({
+    db: params.db,
+    trainerId: params.trainerId,
+    blocks: params.blocks,
+    mutate: (currentSlots) => {
+      const planned = planSessionSlotRemoval({ ...params, currentSlots });
+      return { writes: planned.writes, result: planned };
+    },
+  });
+}
+
+export async function patchStudentInSessionSlots(params: {
+  db: Firestore;
+  trainerId: string;
+  blocks: SessionSlotBlock[];
+  studentIds: string[];
+  sessionStart?: string;
+  patch: Partial<Omit<SlotStudent, "studentId">>;
+}): Promise<SessionSlot[]> {
+  return mutateSessionSlotsAtomically({
+    db: params.db,
+    trainerId: params.trainerId,
+    blocks: params.blocks,
+    mutate: (currentSlots) => {
+      const ids = new Set(normalizeStudentMatchIds(params.studentIds));
+      const writes: SessionSlotWrite[] = [];
+      const slots: SessionSlot[] = [];
+      for (const slot of currentSlots) {
+        if (!slot) continue;
+        let changed = false;
+        const students = slot.students.map((student) => {
+          if (!ids.has(String(student.studentId || "").trim())) return student;
+          const rowStart = student.sessionStart ?? slot.startTime;
+          if (params.sessionStart && rowStart !== params.sessionStart) return student;
+          changed = true;
+          return { ...student, ...params.patch };
+        });
+        if (!changed) continue;
+        const updated = { ...slot, students };
+        writes.push({ id: slot.id, slot: updated });
+        slots.push(updated);
+      }
+      return { writes, result: slots };
+    },
+  });
 }
 
 /** YYYY-MM-DD for a Date. */
@@ -136,6 +413,7 @@ export async function bulkEnrollWeeklyCycle(params: {
   db: Firestore;
   trainerId: string;
   studentId: string;
+  studentIds?: string[];
   studentName: string;
   studentPhotoUrl?: string;
   pattern: WeeklySlotPattern;
@@ -152,6 +430,7 @@ export async function bulkEnrollWeeklyCycle(params: {
 }): Promise<BulkEnrollResult> {
   const {
     db, trainerId, studentId, studentName, studentPhotoUrl,
+    studentIds,
     pattern, cycleStartMonday, repeatWeeks,
     sessionDurationMin, slotDurationMin, defaultMaxStudents,
     availability, vacationPeriods, openBlocks,
@@ -169,6 +448,7 @@ export async function bulkEnrollWeeklyCycle(params: {
   // Build a mutable map of slots so we can reflect writes within the same cycle
   // (prevents double-booking the same block for the same student across pattern entries)
   const slotMap = new Map<string, SessionSlot>(existingSlots.map((s) => [s.id, { ...s, students: [...s.students] }]));
+  const matchIds = normalizeStudentMatchIds([studentId, ...(studentIds ?? [])]);
 
   const slotsNeeded = Math.max(1, Math.ceil(sessionDurationMin / slotDurationMin));
 
@@ -184,15 +464,9 @@ export async function bulkEnrollWeeklyCycle(params: {
     for (const { weekday, startTime } of pattern) {
       const dateStr = dateForWeekdayInCycle(cycleStartMonday, w, weekday);
 
-      // 1. Vacation check
-      if (isNewBookingBlocked({ dateStr, time: startTime, vacationPeriods, openBlocks })) {
-        result.skippedVacation++;
-        continue;
-      }
-
-      // 2. Already booked this day check
+      // 1. Already booked this day check
       const alreadyBookedToday = [...slotMap.values()].some(
-        (s) => s.date === dateStr && s.students.some((st) => st.studentId === studentId)
+        (s) => s.date === dateStr && sessionSlotHasStudent(s, matchIds)
       );
       if (alreadyBookedToday) {
         result.skippedAlreadyBooked++;
@@ -222,25 +496,7 @@ export async function bulkEnrollWeeklyCycle(params: {
         continue;
       }
 
-      // 5. Capacity check on all required blocks
-      let anyFull = false;
-      for (const t of blocksToBook) {
-        const id = slotDocId(dateStr, t);
-        const existing = slotMap.get(id);
-        const maxS = existing?.maxStudents ?? defaultMaxStudents;
-        if ((existing?.students.length ?? 0) >= maxS) {
-          anyFull = true;
-          break;
-        }
-      }
-      if (anyFull) {
-        result.skippedFull++;
-        continue;
-      }
-
-      // 6. Write all blocks
-      const { setDoc, doc } = await import("firebase/firestore");
-
+      // 5. Write all blocks atomically from current Firestore state
       const newEntry: SlotStudent = {
         studentId,
         studentName,
@@ -251,21 +507,30 @@ export async function bulkEnrollWeeklyCycle(params: {
         ...(matchedPlan?.id ? { workoutPlanId: matchedPlan.id, workoutTitle: matchedPlan.title } : {}),
       };
 
-      for (const t of blocksToBook) {
-        const id = slotDocId(dateStr, t);
-        const existing = slotMap.get(id);
-        const maxS = existing?.maxStudents ?? defaultMaxStudents;
-        const newStudents = [...(existing?.students ?? []), newEntry];
-        const newSlot: SessionSlot = { id, date: dateStr, startTime: t, maxStudents: maxS, students: newStudents };
-        await setDoc(doc(db, "personalTrainers", trainerId, "sessionSlots", id), {
-          date: dateStr,
-          startTime: t,
-          maxStudents: maxS,
-          students: newStudents,
+      try {
+        const mutation = await enrollStudentInSessionSlots({
+          db,
+          trainerId,
+          student: newEntry,
+          studentIds: matchIds,
+          blocks: blocksToBook.map((time) => ({
+            date: dateStr,
+            startTime: time,
+            maxStudents: slotMap.get(slotDocId(dateStr, time))?.maxStudents ?? defaultMaxStudents,
+          })),
         });
-        slotMap.set(id, newSlot);
+        if (!mutation.changed) {
+          result.skippedAlreadyBooked++;
+          continue;
+        }
+        for (const slot of mutation.slots) slotMap.set(slot.id, slot);
+        result.created++;
+      } catch (error) {
+        if (!(error instanceof SessionSlotMutationError)) throw error;
+        if (error.code === "slot-full") result.skippedFull++;
+        else if (error.code === "slot-cancelled") result.skippedInsufficientBlocks++;
+        else result.skippedAlreadyBooked++;
       }
-      result.created++;
     }
   }
 
@@ -288,23 +553,19 @@ export function previewCycleDates(params: {
   return out;
 }
 
-function studentMatchesIds(studentId: string, candidateIds: Set<string>): boolean {
-  return candidateIds.has(studentId);
-}
-
 /** Count unique logical sessions (date + sessionStart) for matching student ids. */
 export function countStudentLogicalSessions(
   sessionSlots: SessionSlot[],
   studentIds: string[],
   options?: { excludePast?: boolean; now?: Date }
 ): number {
-  const ids = new Set(studentIds.filter(Boolean));
+  const ids = new Set(normalizeStudentMatchIds(studentIds));
   const seen = new Set<string>();
   for (const slot of sessionSlots) {
     const dateStr = String(slot.date || "").substring(0, 10);
     if (options?.excludePast && isDateBeforeToday(dateStr, options.now)) continue;
     for (const st of slot.students) {
-      if (!studentMatchesIds(st.studentId, ids)) continue;
+      if (!ids.has(String(st.studentId || "").trim())) continue;
       const sessionStart = st.sessionStart ?? slot.startTime;
       seen.add(`${dateStr}__${sessionStart}`);
     }
@@ -312,7 +573,7 @@ export function countStudentLogicalSessions(
   return seen.size;
 }
 
-/** Remove this student from every sessionSlots document (delete empty slot docs). */
+/** Remove this student from every future session while preserving slot metadata. */
 export async function removeAllStudentSessionEnrollments(params: {
   db: Firestore;
   trainerId: string;
@@ -320,42 +581,45 @@ export async function removeAllStudentSessionEnrollments(params: {
   sessionSlots: SessionSlot[];
 }): Promise<RemoveAllEnrollmentsResult> {
   const { db, trainerId, studentIds, sessionSlots } = params;
-  const ids = new Set(studentIds.filter(Boolean));
-  const { setDoc, deleteDoc, doc } = await import("firebase/firestore");
-
-  const removedLogical = new Set<string>();
+  const ids = new Set(normalizeStudentMatchIds(studentIds));
+  const logicalSessions = new Map<string, { date: string; sessionStart: string }>();
   let updatedSlotDocs = 0;
-  let deletedSlotDocs = 0;
 
   const now = new Date();
 
   for (const slot of sessionSlots) {
     const dateStr = String(slot.date || "").substring(0, 10);
     if (isDateBeforeToday(dateStr, now)) continue;
-
-    const hasStudent = slot.students.some((st) => studentMatchesIds(st.studentId, ids));
-    if (!hasStudent) continue;
-
     for (const st of slot.students) {
-      if (!studentMatchesIds(st.studentId, ids)) continue;
+      if (!ids.has(String(st.studentId || "").trim())) continue;
       const sessionStart = st.sessionStart ?? slot.startTime;
-      removedLogical.add(`${dateStr}__${sessionStart}`);
-    }
-
-    const newStudents = slot.students.filter((st) => !studentMatchesIds(st.studentId, ids));
-    const ref = doc(db, "personalTrainers", trainerId, "sessionSlots", slot.id);
-    if (newStudents.length === 0) {
-      await deleteDoc(ref);
-      deletedSlotDocs++;
-    } else {
-      await setDoc(ref, { ...slot, students: newStudents });
-      updatedSlotDocs++;
+      logicalSessions.set(`${dateStr}__${sessionStart}`, { date: dateStr, sessionStart });
     }
   }
 
+  let removedSessions = 0;
+  for (const logical of logicalSessions.values()) {
+    const dayBlocks = sessionSlots
+      .filter((slot) => slot.date === logical.date)
+      .map((slot) => ({
+        date: slot.date,
+        startTime: slot.startTime,
+        maxStudents: slot.maxStudents,
+      }));
+    const mutation = await removeStudentFromSessionSlots({
+      db,
+      trainerId,
+      blocks: dayBlocks,
+      studentIds: [...ids],
+      sessionStart: logical.sessionStart,
+    });
+    if (mutation.removedEntries > 0) removedSessions++;
+    updatedSlotDocs += mutation.slots.length;
+  }
+
   return {
-    removedSessions: removedLogical.size,
+    removedSessions,
     updatedSlotDocs,
-    deletedSlotDocs,
+    deletedSlotDocs: 0,
   };
 }

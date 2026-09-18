@@ -1,15 +1,18 @@
 import type { TranslationKey } from "@/lib/i18n";
 
 export type BodyMetricGroup = "composition" | "measurements";
-export type BodyMetricUnit = "kg" | "%" | "score" | "cm";
+export type BodyMetricUnit = "kg" | "%" | "score" | "cm" | "index";
 export type BodyMetricSource = "coach" | "student";
 
 export type BodyMetricKey =
   | "weightKg"
+  | "leanMassPercent"
+  | "fatMassPercent"
   | "bodyFatPercent"
   | "leanMassKg"
   | "fatMassKg"
   | "visceralFatScore"
+  | "bmi"
   | "armRightCm"
   | "armLeftCm"
   | "chestCm"
@@ -31,10 +34,14 @@ export type BodyMetricFieldDef = {
 
 export const BODY_METRIC_FIELDS: Record<BodyMetricKey, BodyMetricFieldDef> = {
   weightKg: { group: "composition", unit: "kg", editable: true, chartable: true, labelKey: "metricWeightKg" },
-  bodyFatPercent: { group: "composition", unit: "%", editable: true, chartable: true, labelKey: "metricBodyFatPercent" },
+  leanMassPercent: { group: "composition", unit: "%", editable: true, chartable: true, labelKey: "metricLeanMassPercent" },
+  fatMassPercent: { group: "composition", unit: "%", editable: true, chartable: true, labelKey: "metricFatMassPercent" },
+  /** Legacy alias of fatMassPercent — kept for history/session compatibility */
+  bodyFatPercent: { group: "composition", unit: "%", editable: false, chartable: true, labelKey: "metricBodyFatPercent" },
   leanMassKg: { group: "composition", unit: "kg", editable: false, chartable: true, labelKey: "metricLeanMassKg" },
   fatMassKg: { group: "composition", unit: "kg", editable: false, chartable: true, labelKey: "metricFatMassKg" },
   visceralFatScore: { group: "composition", unit: "score", editable: true, chartable: true, labelKey: "metricVisceralFatScore" },
+  bmi: { group: "composition", unit: "index", editable: true, chartable: true, labelKey: "metricBmi" },
   armRightCm: { group: "measurements", unit: "cm", editable: true, chartable: true, labelKey: "metricArmRightCm" },
   armLeftCm: { group: "measurements", unit: "cm", editable: true, chartable: true, labelKey: "metricArmLeftCm" },
   chestCm: { group: "measurements", unit: "cm", editable: true, chartable: true, labelKey: "metricChestCm" },
@@ -72,11 +79,12 @@ export type BodyMetricChartPoint = {
 /** Session docs use legacy names for weight/body fat */
 export const SESSION_FIELD_TO_METRIC: Partial<Record<string, BodyMetricKey>> = {
   bodyWeightKg: "weightKg",
-  sessionBodyFatPercent: "bodyFatPercent",
+  sessionBodyFatPercent: "fatMassPercent",
 };
 
 export const METRIC_TO_SESSION_FIELD: Partial<Record<BodyMetricKey, string>> = {
   weightKg: "bodyWeightKg",
+  fatMassPercent: "sessionBodyFatPercent",
   bodyFatPercent: "sessionBodyFatPercent",
 };
 
@@ -111,6 +119,13 @@ export function bodyMetricsFromProfile(data: Record<string, unknown> | null | un
   for (const key of Object.keys(BODY_METRIC_FIELDS) as BodyMetricKey[]) {
     const v = Number(data[key]);
     if (Number.isFinite(v) && v > 0) out[key] = v;
+  }
+  // Legacy profiles may only have bodyFatPercent
+  if (out.fatMassPercent == null && out.bodyFatPercent != null) {
+    out.fatMassPercent = out.bodyFatPercent;
+  }
+  if (out.bodyFatPercent == null && out.fatMassPercent != null) {
+    out.bodyFatPercent = out.fatMassPercent;
   }
   return out;
 }

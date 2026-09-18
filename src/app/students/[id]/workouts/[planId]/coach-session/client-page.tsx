@@ -12,8 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dumbbell, CheckCircle2, Save, Loader2, X, StickyNote, ChevronDown, ChevronUp } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { commitFinishedWorkoutSession, exerciseHasLoggedSet } from "@/lib/workout-session-finish";
+import { resolveSequenceEffectiveUnlock } from "@/lib/workout-plan-sequence";
 import { cn } from "@/lib/utils";
 import { getStudentDisplayName } from "@/lib/student-display";
 
@@ -43,6 +44,8 @@ interface WorkoutPlan {
   exercises: WorkoutExercise[];
   personalTrainerId: string;
   studentUnlocked?: boolean;
+  sequenceGroupId?: string | null;
+  sequenceUnlockAfterPlanId?: string | null;
   sequenceNextPlanId?: string | null;
 }
 
@@ -99,12 +102,16 @@ export default function CoachWorkoutSessionPage({
   const [sessionBodyWeightKg, setSessionBodyWeightKg] = useState("");
   const [sessionBodyFatPercent, setSessionBodyFatPercent] = useState("");
   const [sessionFeedbackOpen, setSessionFeedbackOpen] = useState(false);
+  const [sequenceUnlockPending, setSequenceUnlockPending] = useState(false);
+  const [effectivelyUnlocked, setEffectivelyUnlocked] = useState(true);
   const metricsPrefilledRef = useRef(false);
 
   useEffect(() => {
     metricsPrefilledRef.current = false;
     setSessionBodyWeightKg("");
     setSessionBodyFatPercent("");
+    setSequenceUnlockPending(false);
+    setEffectivelyUnlocked(true);
   }, [planId, storageStudentId]);
 
   useEffect(() => {
@@ -165,6 +172,46 @@ export default function CoachWorkoutSessionPage({
     };
   }, [db, user?.uid, storageStudentId, planId]);
 
+  useEffect(() => {
+    if (!db || !user?.uid || !workout) return;
+    if (workout.studentUnlocked !== false) {
+      setEffectivelyUnlocked(true);
+      setSequenceUnlockPending(false);
+      return;
+    }
+    let cancelled = false;
+    setSequenceUnlockPending(true);
+    void resolveSequenceEffectiveUnlock(db, user.uid, storageStudentId, { ...workout, id: planId })
+      .then(async (unlocked) => {
+        if (cancelled) return;
+        setEffectivelyUnlocked(unlocked);
+        setSequenceUnlockPending(false);
+        if (unlocked && workout.studentUnlocked === false) {
+          try {
+            await updateDoc(
+              doc(db, "personalTrainers", user.uid, "students", storageStudentId, "workoutPlans", planId),
+              { studentUnlocked: true }
+            );
+            if (!cancelled) {
+              setWorkout((prev) => (prev ? { ...prev, studentUnlocked: true } : prev));
+            }
+          } catch (e) {
+            console.error("Failed to heal sequence unlock flag:", e);
+          }
+        }
+      })
+      .catch((e) => {
+        console.error("Sequence unlock check failed:", e);
+        if (!cancelled) {
+          setEffectivelyUnlocked(false);
+          setSequenceUnlockPending(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, user?.uid, storageStudentId, planId, workout]);
+
   const exercises = workout?.exercises || [];
   const totalExercises = exercises.length;
 
@@ -179,7 +226,7 @@ export default function CoachWorkoutSessionPage({
       setIsFinished(true);
       return;
     }
-    if (workout.studentUnlocked === false) return;
+    if (workout.studentUnlocked === false && !effectivelyUnlocked) return;
     setIsSaving(true);
     try {
       const parsedBw = parseOptionalBodyWeightKg(sessionBodyWeightKg);
@@ -212,7 +259,9 @@ export default function CoachWorkoutSessionPage({
 
   const studentLabel = rosterRow ? getStudentDisplayName(rosterRow, storageStudentId) : storageStudentId;
 
-  if (isLoadingWorkout) {
+  const isSequenceLocked = workout?.studentUnlocked === false && !effectivelyUnlocked;
+
+  if (isLoadingWorkout || (workout && workout.studentUnlocked === false && sequenceUnlockPending)) {
     return (
       <Navigation>
         <div className="flex items-center justify-center h-[60vh]">
@@ -236,7 +285,7 @@ export default function CoachWorkoutSessionPage({
     );
   }
 
-  if (workout.studentUnlocked === false) {
+  if (isSequenceLocked) {
     return (
       <Navigation>
         <div className="text-center py-20 space-y-4 max-w-md mx-auto px-4">
@@ -304,47 +353,41 @@ export default function CoachWorkoutSessionPage({
         <header className="space-y-1">
           <Link
             href={`/students/${storageStudentId}?tab=management`}
-            className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-muted/40"
+            aria-label={t("coachWorkoutSessionBack")}
+            title={t("coachWorkoutSessionBack")}
           >
-            <X className="h-3 w-3" /> {t("coachWorkoutSessionBack")}
+            <X className="h-4 w-4" aria-hidden />
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="text-xs">
               {t("coachWorkoutSessionTitle")}
             </Badge>
+            <span className="text-sm text-muted-foreground truncate">{studentLabel}</span>
           </div>
           <h1 className="text-3xl font-bold font-headline tracking-tight">{workout.title}</h1>
-          <p className="text-muted-foreground text-sm">
-            {studentLabel} — {t("coachWorkoutSessionSubtitle")}
-          </p>
         </header>
 
         <Card>
           <Collapsible open={sessionFeedbackOpen} onOpenChange={setSessionFeedbackOpen}>
             <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-              <div className="min-w-0 space-y-1">
-                <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
-                <p className="text-xs text-muted-foreground">{t("sessionFeedbackHint")}</p>
-              </div>
+              <CardTitle className="text-lg">{t("sessionFeedbackTitle")}</CardTitle>
               <CollapsibleTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="shrink-0 gap-1.5"
+                  size="icon"
+                  className="shrink-0"
                   aria-expanded={sessionFeedbackOpen}
                   aria-label={
                     sessionFeedbackOpen ? t("coachSessionFeedbackCollapse") : t("coachSessionFeedbackExpand")
                   }
                 >
                   {sessionFeedbackOpen ? (
-                    <ChevronUp className="h-4 w-4" />
+                    <ChevronUp className="h-4 w-4" aria-hidden />
                   ) : (
-                    <ChevronDown className="h-4 w-4" />
+                    <ChevronDown className="h-4 w-4" aria-hidden />
                   )}
-                  <span className="hidden sm:inline">
-                    {sessionFeedbackOpen ? t("coachSessionFeedbackCollapse") : t("coachSessionFeedbackExpand")}
-                  </span>
                 </Button>
               </CollapsibleTrigger>
             </CardHeader>

@@ -24,7 +24,7 @@ function formatTooltipValue(value: unknown, unit: string): string {
   if (!Number.isFinite(n)) return "—";
   if (unit === "%") return `${n}%`;
   if (unit === "cm") return `${n} cm`;
-  if (unit === "score") return String(n);
+  if (unit === "score" || unit === "index") return String(n);
   return `${n} kg`;
 }
 
@@ -33,7 +33,7 @@ export function BodyMetricsTrendChart({
   primaryMetric,
   secondaryMetric,
   emptyLabel,
-  chartClassName = "h-[300px] w-full min-h-[260px]",
+  chartClassName = "h-[min(36vh,280px)] w-full min-w-0 min-h-[180px] sm:min-h-[220px] sm:h-[280px]",
 }: {
   data: BodyMetricChartPoint[];
   primaryMetric: BodyMetricKey;
@@ -61,7 +61,7 @@ export function BodyMetricsTrendChart({
   if (filteredData.length === 0) {
     return (
       <div
-        className={`flex items-center justify-center text-sm text-muted-foreground border-2 border-dashed rounded-lg ${chartClassName}`}
+        className={`flex items-center justify-center text-sm text-muted-foreground border-2 border-dashed rounded-lg overflow-hidden ${chartClassName}`}
       >
         {emptyLabel}
       </div>
@@ -72,7 +72,7 @@ export function BodyMetricsTrendChart({
   const secondaryLabel = secondaryMetric ? t(BODY_METRIC_FIELDS[secondaryMetric].labelKey) : null;
 
   return (
-    <div className={chartClassName}>
+    <div className={`overflow-hidden ${chartClassName}`}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={filteredData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
           <defs>
@@ -172,7 +172,7 @@ export function BodyCompositionTrendChart({
     <BodyMetricsTrendChart
       data={data}
       primaryMetric="weightKg"
-      secondaryMetric="bodyFatPercent"
+      secondaryMetric="fatMassPercent"
       emptyLabel={emptyLabel}
       chartClassName={chartClassName}
     />

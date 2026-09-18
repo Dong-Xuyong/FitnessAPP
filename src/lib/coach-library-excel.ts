@@ -12,7 +12,7 @@ import {
 export const EXERCISES_SHEET = "Exercises";
 export const PROGRAMS_SHEET = "Programs";
 
-export const EXERCISE_VISIBLE_COLUMNS = ["name", "description"] as const;
+export const EXERCISE_VISIBLE_COLUMNS = ["name", "description", "videoUrl"] as const;
 export const EXERCISE_HIDDEN_COLUMNS = ["id"] as const;
 export const PROGRAM_VISIBLE_COLUMNS = [
   "programName",
@@ -28,6 +28,7 @@ export type ExerciseExportRow = {
   id: string;
   name: string;
   description: string;
+  videoUrl?: string;
 };
 
 export type ProgramExportRow = {
@@ -44,6 +45,7 @@ export type ExerciseImportRow = {
   id: string;
   name: string;
   description: string;
+  videoUrl: string;
 };
 
 export type ProgramImportRow = {
@@ -92,13 +94,18 @@ const PROGRAM_HEADER_MARKERS = new Set([
   "exercisename",
 ]);
 
-const EXERCISE_HEADER_ALIASES: Record<string, "id" | "name" | "description"> = {
+const EXERCISE_HEADER_ALIASES: Record<string, "id" | "name" | "description" | "videoUrl"> = {
   id: "id",
   name: "name",
   nome: "name",
   description: "description",
   descrição: "description",
   descricao: "description",
+  videourl: "videoUrl",
+  urlvideo: "videoUrl",
+  urlvideoyoutube: "videoUrl",
+  linkvideo: "videoUrl",
+  linkyoutube: "videoUrl",
 };
 
 const PROGRAM_HEADER_ALIASES: Record<
@@ -381,7 +388,7 @@ export function buildTemplateFillInput(
     exercisesInstruction: labels.exercisesInstruction,
     programsInstruction: labels.programsInstruction,
     exerciseRows: input.exercises.map(
-      (ex) => [ex.name, ex.description, ex.id] as [string, string, string]
+      (ex) => [ex.name, ex.description, ex.videoUrl ?? "", ex.id] as [string, string, string, string]
     ),
     programRows: flattenProgramsForExport(input.programs).map((r) => [
       r.programName,
@@ -430,6 +437,7 @@ export function parseCoachLibraryWorkbook(buffer: ArrayBuffer): ParsedCoachLibra
       const id = String(mapped.id ?? "").trim();
       const name = String(mapped.name ?? "").trim();
       const description = String(mapped.description ?? "").trim();
+      const videoUrl = String(mapped.videoUrl ?? "").trim();
       if (!id && !name) return;
       if (EXERCISE_HEADER_MARKERS.has(normalizeHeader(name))) return;
       exerciseRows.push({
@@ -437,6 +445,7 @@ export function parseCoachLibraryWorkbook(buffer: ArrayBuffer): ParsedCoachLibra
         id,
         name,
         description,
+        videoUrl,
       });
     });
   }
@@ -643,6 +652,7 @@ export async function fetchCoachLibraryForExport(
         id: d.id,
         name: String(data.name ?? ""),
         description: String(data.description ?? ""),
+        videoUrl: String(data.videoUrl ?? ""),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -729,7 +739,7 @@ export async function applyExerciseImportCreates(
       category: "Other",
       difficulty: "intermediate",
       equipment: "",
-      videoUrl: "",
+      videoUrl: row.videoUrl ?? "",
       createdBy: trainerId,
       createdAt: now,
       updatedAt: now,
@@ -765,6 +775,7 @@ export async function applyExerciseImportUpdates(
     const patch: Record<string, string> = { updatedAt: now };
     if (row.name) patch.name = row.name.trim();
     patch.description = row.description ?? "";
+    patch.videoUrl = row.videoUrl ?? "";
 
     await updateDoc(doc(db, "exercises", targetId), patch);
     updated++;

@@ -186,14 +186,12 @@ export default function WorkoutsPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
           <div>
             <h2 className="text-2xl font-bold font-headline">{t("trainingPrograms")}</h2>
-            <p className="text-muted-foreground">{t("manageAndAssign")}</p>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
             <CoachLibraryExcelActions />
-            <Button className="gap-2" asChild>
-              <Link href="/workouts/builder">
-                <Plus className="h-4 w-4" />
-                {t("createProgram")}
+            <Button size="icon" asChild title={t("createProgram")}>
+              <Link href="/workouts/builder" aria-label={t("createProgram")}>
+                <Plus className="h-4 w-4" aria-hidden />
               </Link>
             </Button>
           </div>
@@ -203,10 +201,9 @@ export default function WorkoutsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <ListOrdered className="h-5 w-5 text-primary" />
+                <ListOrdered className="h-5 w-5 text-primary" aria-hidden />
                 {t("defaultStudentSequenceCardTitle")}
               </CardTitle>
-              <CardDescription>{t("defaultStudentSequenceCardDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
@@ -312,10 +309,9 @@ export default function WorkoutsPage() {
               <CardDescription>{t("noProgramsYetDesc")}</CardDescription>
             </CardHeader>
             <CardFooter className="flex flex-wrap gap-3">
-              <Button asChild className="gap-2">
-                <Link href="/workouts/builder">
-                  <Plus className="h-4 w-4" />
-                  {t("createProgram")}
+              <Button asChild size="icon" title={t("createProgram")}>
+                <Link href="/workouts/builder" aria-label={t("createProgram")}>
+                  <Plus className="h-4 w-4" aria-hidden />
                 </Link>
               </Button>
               <Button

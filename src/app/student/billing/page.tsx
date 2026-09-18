@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, CreditCard } from "lucide-react";
 import { useUser, useFirestore } from "@/firebase";
 import { useI18n } from "@/lib/i18n";
@@ -34,10 +34,9 @@ export default function StudentBillingPage() {
     <div className="space-y-6 w-full min-w-0 max-w-2xl">
       <header>
         <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
-          <CreditCard className="h-8 w-8 text-primary" />
+          <CreditCard className="h-8 w-8 text-primary" aria-hidden />
           {t("billing")}
         </h1>
-        <p className="text-muted-foreground mt-1">{t("viewPaymentStatus")}</p>
       </header>
 
       {plan ? <StudentCurrentPlanCard plan={plan} /> : null}
@@ -66,7 +65,6 @@ export default function StudentBillingPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">{t("paymentHistory")}</CardTitle>
-          <CardDescription>{t("paymentsRecordedByCoach")}</CardDescription>
         </CardHeader>
         <CardContent>
           <StudentPaymentHistoryList payments={paidPayments} defaultMethod={paymentMethod} />

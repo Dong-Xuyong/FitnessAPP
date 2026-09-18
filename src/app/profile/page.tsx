@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Navigation } from "@/components/Navigation";
 import { ProfilePhotoCropDialog } from "@/components/ProfilePhotoCropDialog";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -185,7 +185,6 @@ export default function TrainerProfilePage() {
       <div className="max-w-2xl mx-auto space-y-6">
         <header>
           <h1 className="text-3xl font-bold font-headline">{t("coachProfile")}</h1>
-          <p className="text-muted-foreground">{t("coachProfileDesc")}</p>
         </header>
 
         <form onSubmit={handleSave}>
@@ -197,7 +196,6 @@ export default function TrainerProfilePage() {
                 </div>
                 <div>
                   <CardTitle>{t("professionalDetails")}</CardTitle>
-                  <CardDescription>{t("professionalDetailsDesc")}</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -276,13 +274,12 @@ export default function TrainerProfilePage() {
                     className="pl-10 bg-muted/50"
                   />
                 </div>
-                <p className="text-[10px] text-muted-foreground">{t("emailManagedViaAccount")}</p>
               </div>
             </CardContent>
             <CardFooter className="bg-muted/10 border-t py-4">
               <Button type="submit" className="w-full gap-2" disabled={isSaving}>
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {t("updateCoachProfile")}
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
+                <span className="sr-only">{t("updateCoachProfile")}</span>
               </Button>
             </CardFooter>
           </Card>

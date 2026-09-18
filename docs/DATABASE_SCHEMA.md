@@ -117,8 +117,8 @@ firestore (root)
 - `photoUrl`: Profile picture URL
 - `dateJoined`: When the trainer registered
 - `availability`: Weekly schedule — per weekday (`sunday` … `saturday`): `{ enabled, ranges: [{ startTime, endTime }] }` (times as `HH:mm`)
-- `openAvailabilityBlocks`: Date-specific extra availability — array of `{ id, date, startTime, endTime }` (`date` as `YYYY-MM-DD`, times as `HH:mm`). Within each block’s time window, slot generation and new bookings use that window instead of overlapping weekly ranges, and vacation does not block new bookings in that window. Session length for bookings follows each student’s roster `sessionDurationMin`. Outside the window, weekly schedule and vacation rules apply unchanged.
-- `vacationPeriods`: Date-specific time off — array of `{ id, startDate, endDate, label }` with inclusive `YYYY-MM-DD` bounds and a required short description; overrides weekly hours for new bookings
+- `openAvailabilityBlocks`: Date-specific extra availability — array of `{ id, date, startTime, endTime }` (`date` as `YYYY-MM-DD`, times as `HH:mm`). Within each block’s time window, slot generation uses that window instead of overlapping weekly ranges. Session length for bookings follows each student’s roster `sessionDurationMin`. Outside the window, weekly schedule applies unchanged.
+- `vacationPeriods`: Date-specific time off — array of `{ id, startDate, endDate, label }` with inclusive `YYYY-MM-DD` bounds. Student self-booking is blocked on these dates. Coach assignment still uses weekly hours plus any `openAvailabilityBlocks`. Attendance is not required; students with a booking can train that day.
 - `slotDurationMin`, `maxStudentsPerSlot`: Calendar block settings (minutes per slot, default capacity)
 
 **Access Pattern**: 

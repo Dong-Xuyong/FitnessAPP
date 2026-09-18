@@ -13,7 +13,7 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <Button variant="outline" size="icon" disabled>
+      <Button variant="outline" size="icon" disabled aria-label="Toggle dark mode">
         <Sun className="h-4 w-4" />
       </Button>
     );

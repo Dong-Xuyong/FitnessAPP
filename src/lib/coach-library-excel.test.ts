@@ -37,10 +37,17 @@ const LABELS = {
 };
 
 describe("coach-library-excel", () => {
-  it("builds export from formatted template with name, description, id", async () => {
+  it("builds export from formatted template with name, description, video URL, and id", async () => {
     const buffer = await buildCoachLibraryWorkbook(
       {
-        exercises: [{ id: "ex1", name: "Bench Press", description: "Flat bench" }],
+        exercises: [
+          {
+            id: "ex1",
+            name: "Bench Press",
+            description: "Flat bench",
+            videoUrl: "https://www.youtube.com/shorts/example123",
+          },
+        ],
         programs: [],
       },
       LABELS
@@ -50,22 +57,31 @@ describe("coach-library-excel", () => {
     assert.ok(String(exSheet.A1?.v).includes("Add exercise"));
     assert.equal(exSheet.A3?.v, "name");
     assert.equal(exSheet.B3?.v, "description");
-    assert.equal(exSheet.C3?.v, "id");
+    assert.equal(exSheet.C3?.v, "videoUrl");
+    assert.equal(exSheet.D3?.v, "id");
     assert.equal(exSheet.A4?.v, "Bench Press");
-    assert.equal(exSheet.C4?.v, "ex1");
+    assert.equal(exSheet.C4?.v, "https://www.youtube.com/shorts/example123");
+    assert.equal(exSheet.D4?.v, "ex1");
     assert.ok(String(exSheet.A1?.v).includes("Add exercise"));
 
     const wbStyled = new ExcelJS.Workbook();
     await wbStyled.xlsx.load(buffer);
     const exStyled = wbStyled.getWorksheet(EXERCISES_SHEET)!;
-    assert.equal(exStyled.getColumn(3).hidden, true);
+    assert.equal(exStyled.getColumn(4).hidden, true);
     assert.equal(exStyled.getRow(4).height, 24);
   });
 
   it("parses exercise rows after instruction and header rows", async () => {
     const buffer = await buildCoachLibraryWorkbook(
       {
-        exercises: [{ id: "ex1", name: "Bench Press", description: "Flat bench" }],
+        exercises: [
+          {
+            id: "ex1",
+            name: "Bench Press",
+            description: "Flat bench",
+            videoUrl: "https://www.youtube.com/shorts/example123",
+          },
+        ],
         programs: [],
       },
       LABELS
@@ -74,6 +90,7 @@ describe("coach-library-excel", () => {
     assert.equal(parsed.exerciseRows.length, 1);
     assert.equal(parsed.exerciseRows[0].name, "Bench Press");
     assert.equal(parsed.exerciseRows[0].description, "Flat bench");
+    assert.equal(parsed.exerciseRows[0].videoUrl, "https://www.youtube.com/shorts/example123");
   });
 
   it("flattens program sessions with rowKey only", () => {
@@ -192,8 +209,8 @@ describe("coach-library-excel", () => {
     ]);
     const { updateRows, createRows } = partitionExerciseImportRows(
       [
-        { rowIndex: 4, id: "", name: "Test", description: "New move" },
-        { rowIndex: 5, id: "", name: "Bench Press", description: "Updated" },
+        { rowIndex: 4, id: "", name: "Test", description: "New move", videoUrl: "" },
+        { rowIndex: 5, id: "", name: "Bench Press", description: "Updated", videoUrl: "" },
       ],
       existingById,
       "trainer-1"
