@@ -573,7 +573,7 @@ export default function StudentProfilePage() {
                             <Info className="h-3.5 w-3.5" aria-hidden />
                           </button>
                           <Link
-                            href="/student/progress"
+                            href="/student/dashboard#progress"
                             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-primary hover:bg-muted/40"
                             title={t("myProgress")}
                             aria-label={t("myProgress")}

@@ -11,7 +11,15 @@ const translations = {
     students: "Students",
     programs: "Programs",
     exercises: "Exercises",
-    coachProgressNav: "Dashboard",
+    coachProgressNav: "Progress",
+    navGroupOverview: "Overview",
+    navGroupCoaching: "Coaching",
+    navGroupStudio: "Studio",
+    navGroupToday: "Today",
+    navGroupLibrary: "Library",
+    navGroupAccount: "Account",
+    sidebarNavigation: "Main navigation",
+    skipToContent: "Skip to content",
     coachDashboardTabStudents: "Student management",
     coachDashboardTabProgress: "Progress",
     coachDashboardTabMilestones: "Milestones",
@@ -1197,7 +1205,15 @@ const translations = {
     students: "Alunos",
     programs: "Programas",
     exercises: "Exercícios",
-    coachProgressNav: "Dashboard",
+    coachProgressNav: "Progresso",
+    navGroupOverview: "Visão geral",
+    navGroupCoaching: "Treino",
+    navGroupStudio: "Estúdio",
+    navGroupToday: "Hoje",
+    navGroupLibrary: "Biblioteca",
+    navGroupAccount: "Conta",
+    sidebarNavigation: "Navegação principal",
+    skipToContent: "Saltar para o conteúdo",
     coachDashboardTabStudents: "Gestão de alunos",
     coachDashboardTabProgress: "Progresso",
     coachDashboardTabMilestones: "Marcos",
@@ -2406,6 +2422,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       setLocaleState(saved);
     }
   }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   const setLocale = (l: Locale) => {
     setLocaleState(l);

@@ -17,6 +17,7 @@ import {
   Banknote,
   Globe,
   Cake,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -53,17 +54,49 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
-const navItemKeys = [
-  { key: "assignmentCalendar" as const, href: "/assignment-calendar", icon: CalendarDays },
-  { key: "programs" as const, href: "/workouts", icon: Dumbbell },
-  { key: "dashboard" as const, href: "/dashboard", icon: LayoutDashboard },
-  { key: "coachProgressNav" as const, href: "/progress", icon: LineChart },
-  { key: "students" as const, href: "/students", icon: Users },
-  { key: "exercises" as const, href: "/exercises", icon: Search },
-  { key: "shop" as const, href: "/shop", icon: Store },
-  { key: "revenue" as const, href: "/revenue", icon: Banknote },
-  { key: "myProfile" as const, href: "/profile", icon: User },
+type CoachNavItem = {
+  key: TranslationKey;
+  href: string;
+  icon: LucideIcon;
+};
+
+type CoachNavGroup = {
+  key: TranslationKey;
+  items: CoachNavItem[];
+};
+
+const coachNavGroups: CoachNavGroup[] = [
+  {
+    key: "navGroupOverview" as const,
+    items: [
+      { key: "dashboard" as const, href: "/dashboard", icon: LayoutDashboard },
+      { key: "coachProgressNav" as const, href: "/progress", icon: LineChart },
+    ],
+  },
+  {
+    key: "navGroupCoaching" as const,
+    items: [
+      { key: "assignmentCalendar" as const, href: "/assignment-calendar", icon: CalendarDays },
+      { key: "students" as const, href: "/students", icon: Users },
+      { key: "programs" as const, href: "/workouts", icon: Dumbbell },
+      { key: "exercises" as const, href: "/exercises", icon: Search },
+    ],
+  },
+  {
+    key: "navGroupStudio" as const,
+    items: [
+      { key: "shop" as const, href: "/shop", icon: Store },
+      { key: "revenue" as const, href: "/revenue", icon: Banknote },
+      { key: "myProfile" as const, href: "/profile", icon: User },
+    ],
+  },
 ];
+
+const coachNavItems = coachNavGroups.flatMap((group) => group.items);
+
+function isNavItemActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 type TrainerNavProfile = {
   firstName?: string;
@@ -118,6 +151,7 @@ function TrainerSidebarIdentity({
           <Link
             href="/dashboard"
             onClick={onNavigate}
+            aria-label={displayName}
             className="flex justify-center rounded-lg p-2 -m-2 transition-colors hover:bg-sidebar-accent"
           >
             <Avatar className="h-10 w-10 shrink-0 ring-2 ring-primary/10">
@@ -352,7 +386,12 @@ function AppSidebar({
 
   return (
     <Sidebar collapsible="icon" className="border-sidebar-border">
-      <SidebarHeader className={cn("border-b border-sidebar-border", collapsed ? "p-2" : "p-4 pb-4")}>
+      <SidebarHeader
+        className={cn(
+          "border-b border-sidebar-border",
+          isMobile ? "p-4 pr-14" : collapsed ? "p-2" : "p-4 pb-4"
+        )}
+      >
         <TrainerSidebarIdentity
           trainer={trainer}
           user={user}
@@ -363,25 +402,39 @@ function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarMenu>
-            {navItemKeys.map((item) => (
-              <SidebarMenuItem key={item.key}>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname === item.href}
-                  tooltip={t(item.key)}
-                  size="lg"
-                >
-                  <Link href={item.href} onClick={handleNavClick}>
-                    <item.icon className="h-5 w-5" />
-                    <span>{t(item.key)}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        <nav aria-label={t("sidebarNavigation")}>
+          {coachNavGroups.map((group) => (
+            <SidebarGroup key={group.key}>
+              <SidebarGroupLabel aria-hidden={collapsed}>{t(group.key)}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => {
+                    const isActive = isNavItemActive(pathname, item.href);
+                    return (
+                      <SidebarMenuItem key={item.key}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive}
+                          tooltip={t(item.key)}
+                          size="lg"
+                        >
+                          <Link
+                            href={item.href}
+                            onClick={handleNavClick}
+                            aria-current={isActive ? "page" : undefined}
+                          >
+                            <item.icon className="h-5 w-5" />
+                            <span>{t(item.key)}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
+        </nav>
 
         <CoachBirthdaysSidebarSection
           upcomingBirthdays={upcomingBirthdays}
@@ -398,6 +451,7 @@ function AppSidebar({
         {collapsed ? (
           <SidebarMenuButton
             tooltip={t("logout")}
+            aria-label={t("logout")}
             className="text-muted-foreground"
             onClick={handleSignOut}
           >
@@ -462,9 +516,16 @@ export function Navigation({ children }: { children: React.ReactNode }) {
     birthdays.length === 1 ? `/students/${birthdays[0].id}` : "/students";
   const birthdayCta =
     birthdays.length === 1 ? t("coachBirthdayCta") : t("coachBirthdayCtaList");
+  const activeNavItem = coachNavItems.find((item) => isNavItemActive(pathname, item.href));
 
   return (
     <SidebarProvider>
+      <a
+        href="#main-content"
+        className="fixed left-4 top-[calc(1rem+env(safe-area-inset-top))] z-[100] -translate-y-[200%] rounded-md bg-background px-4 py-3 font-medium shadow-lg transition-transform focus:translate-y-0"
+      >
+        {t("skipToContent")}
+      </a>
       <AppSidebar
         pathname={pathname}
         trainer={trainer as TrainerNavProfile}
@@ -476,10 +537,17 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         upcomingBirthdays={upcomingBirthdays}
       />
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:hidden sticky top-0 z-50 bg-background/95 backdrop-blur">
+        <header className="sticky top-0 z-50 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur md:hidden">
           <SidebarTrigger className="-ml-1 shadow-sm" />
+          <span className="truncate text-sm font-semibold">
+            {t(activeNavItem?.key ?? "dashboard")}
+          </span>
         </header>
-        <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto px-4 pb-4 md:p-6">
+        <div
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto px-4 pb-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:p-6"
+        >
           {birthdays.length > 0 ? (
             <Alert className="mb-4 border-rose-500/40 bg-rose-500/5 text-foreground [&>svg]:text-rose-600">
               <Cake className="h-4 w-4 shrink-0" />

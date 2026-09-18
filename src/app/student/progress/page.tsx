@@ -1,9 +1,5 @@
-"use client";
-
-import { StudentProgressPanel } from "@/components/StudentProgressPanel";
+import { redirect } from "next/navigation";
 
 export default function StudentProgressPage() {
-  return (
-      <StudentProgressPanel />
-  );
+  redirect("/student/dashboard#progress");
 }
