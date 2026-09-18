@@ -5,6 +5,12 @@ import {
   getWeekStart,
   isDateBeforeToday,
   dateForWeekdayInCycle,
+  findSlotStudent,
+  isOrphanedSessionContinuation,
+  normalizeStudentMatchIds,
+  planSessionSlotEnrollment,
+  planSessionSlotRemoval,
+  SessionSlotMutationError,
   slotDocId,
   previewCycleDates,
   countStudentLogicalSessions,
@@ -283,5 +289,249 @@ describe("vacation skip logic", () => {
     });
     const blocks = consecutiveSlotBlocksFrom(daySlotTimes, "09:00", 2, 30);
     assert.deepEqual(blocks, ["09:00", "09:30"]);
+  });
+});
+
+describe("student identity aliases", () => {
+  const slot: SessionSlot = {
+    id: "2026-06-01_0900",
+    date: "2026-06-01",
+    startTime: "09:00",
+    maxStudents: 4,
+    students: [{ studentId: "auth-uid", studentName: "A", sessionAttendance: "pending" }],
+  };
+
+  it("normalizes duplicate and blank IDs", () => {
+    assert.deepEqual(
+      normalizeStudentMatchIds([" roster-id ", "", "auth-uid", "roster-id", null]),
+      ["roster-id", "auth-uid"]
+    );
+  });
+
+  it("finds a legacy auth UID through roster/auth aliases", () => {
+    assert.equal(findSlotStudent(slot, ["roster-id", "auth-uid"])?.studentId, "auth-uid");
+  });
+});
+
+describe("atomic enrollment planning", () => {
+  const blocks = [
+    { date: "2026-06-01", startTime: "09:00", maxStudents: 2 },
+    { date: "2026-06-01", startTime: "09:30", maxStudents: 2 },
+  ];
+  const existingStudent = {
+    studentId: "other",
+    studentName: "Other",
+    sessionAttendance: "pending" as const,
+  };
+  const newStudent = {
+    studentId: "roster-id",
+    studentName: "Student",
+    sessionStart: "09:00",
+    sessionDurationMin: 60,
+    sessionAttendance: "pending" as const,
+  };
+
+  it("preserves students read from current Firestore state", () => {
+    const currentSlots: SessionSlot[] = blocks.map((block) => ({
+      ...block,
+      id: slotDocId(block.date, block.startTime),
+      students: [existingStudent],
+    }));
+    const planned = planSessionSlotEnrollment({
+      blocks,
+      currentSlots,
+      student: newStudent,
+      studentIds: ["roster-id", "auth-uid"],
+    });
+    assert.equal(planned.changed, true);
+    assert.deepEqual(
+      planned.slots.map((slot) => slot.students.map((student) => student.studentId)),
+      [["other", "roster-id"], ["other", "roster-id"]]
+    );
+  });
+
+  it("is idempotent when an alias is already in every block", () => {
+    const currentSlots: SessionSlot[] = blocks.map((block, index) => ({
+      ...block,
+      id: slotDocId(block.date, block.startTime),
+      students: [{ ...newStudent, studentId: index === 0 ? "auth-uid" : "roster-id" }],
+    }));
+    const planned = planSessionSlotEnrollment({
+      blocks,
+      currentSlots,
+      student: newStudent,
+      studentIds: ["roster-id", "auth-uid"],
+    });
+    assert.equal(planned.changed, false);
+    assert.equal(planned.writes.length, 0);
+  });
+
+  it("rejects a partial prior enrollment instead of duplicating it", () => {
+    const currentSlots: Array<SessionSlot | null> = [
+      { ...blocks[0], id: slotDocId(blocks[0].date, blocks[0].startTime), students: [newStudent] },
+      null,
+    ];
+    assert.throws(
+      () =>
+        planSessionSlotEnrollment({
+          blocks,
+          currentSlots,
+          student: newStudent,
+          studentIds: ["roster-id", "auth-uid"],
+        }),
+      (error: unknown) =>
+        error instanceof SessionSlotMutationError && error.code === "partial-enrollment"
+    );
+  });
+
+  it("rejects the whole session when a later block is full", () => {
+    const currentSlots: SessionSlot[] = [
+      { ...blocks[0], id: slotDocId(blocks[0].date, blocks[0].startTime), students: [] },
+      {
+        ...blocks[1],
+        id: slotDocId(blocks[1].date, blocks[1].startTime),
+        maxStudents: 1,
+        students: [existingStudent],
+      },
+    ];
+    assert.throws(
+      () =>
+        planSessionSlotEnrollment({
+          blocks,
+          currentSlots,
+          student: newStudent,
+          studentIds: ["roster-id"],
+        }),
+      (error: unknown) => error instanceof SessionSlotMutationError && error.code === "slot-full"
+    );
+    assert.equal(currentSlots[0].students.length, 0);
+  });
+
+  it("rejects cancelled blocks", () => {
+    const currentSlots: Array<SessionSlot | null> = [
+      null,
+      {
+        ...blocks[1],
+        id: slotDocId(blocks[1].date, blocks[1].startTime),
+        students: [],
+        cancelledAt: "2026-05-31T12:00:00.000Z",
+      },
+    ];
+    assert.throws(
+      () =>
+        planSessionSlotEnrollment({
+          blocks,
+          currentSlots,
+          student: newStudent,
+          studentIds: ["roster-id"],
+        }),
+      (error: unknown) =>
+        error instanceof SessionSlotMutationError && error.code === "slot-cancelled"
+    );
+  });
+});
+
+describe("atomic cancellation planning", () => {
+  it("removes both roster and auth aliases while preserving other students", () => {
+    const currentSlots: SessionSlot[] = ["09:00", "09:30"].map((startTime) => ({
+      id: slotDocId("2026-06-01", startTime),
+      date: "2026-06-01",
+      startTime,
+      maxStudents: 3,
+      students: [
+        {
+          studentId: startTime === "09:00" ? "auth-uid" : "roster-id",
+          studentName: "A",
+          sessionStart: "09:00",
+          sessionDurationMin: 60,
+          sessionAttendance: "pending",
+        },
+        { studentId: "other", studentName: "Other", sessionAttendance: "pending" },
+      ],
+    }));
+    const planned = planSessionSlotRemoval({
+      currentSlots,
+      studentIds: ["roster-id", "auth-uid"],
+      sessionStart: "09:00",
+    });
+    assert.equal(planned.removedEntries, 2);
+    assert.deepEqual(
+      planned.slots.map((slot) => slot.students.map((student) => student.studentId)),
+      [["other"], ["other"]]
+    );
+  });
+
+  it("preserves metadata on blocks emptied by cancellation", () => {
+    const currentSlots: SessionSlot[] = ["09:00", "09:30"].map((startTime) => ({
+      id: slotDocId("2026-06-01", startTime),
+      date: "2026-06-01",
+      startTime,
+      maxStudents: 2,
+      students: [{
+        studentId: "roster-id",
+        studentName: "A",
+        sessionStart: "09:00",
+        sessionDurationMin: 60,
+        sessionAttendance: "pending",
+      }],
+    }));
+    const planned = planSessionSlotRemoval({
+      currentSlots,
+      studentIds: ["roster-id"],
+      sessionStart: "09:00",
+    });
+    assert.deepEqual(
+      planned.slots.map((slot) => ({ id: slot.id, maxStudents: slot.maxStudents, students: slot.students })),
+      [
+        { id: "2026-06-01_0900", maxStudents: 2, students: [] },
+        { id: "2026-06-01_0930", maxStudents: 2, students: [] },
+      ]
+    );
+  });
+});
+
+describe("orphan continuation recovery", () => {
+  const continuation: SessionSlot = {
+    id: "2026-06-01_0930",
+    date: "2026-06-01",
+    startTime: "09:30",
+    maxStudents: 2,
+    students: [{
+      studentId: "auth-uid",
+      studentName: "A",
+      sessionStart: "09:00",
+      sessionDurationMin: 60,
+      sessionAttendance: "pending",
+    }],
+  };
+
+  it("detects a continuation whose start block is missing", () => {
+    assert.equal(
+      isOrphanedSessionContinuation({
+        slot: continuation,
+        student: continuation.students[0],
+        daySlots: [continuation],
+        studentIds: ["roster-id", "auth-uid"],
+      }),
+      true
+    );
+  });
+
+  it("accepts a start block stored under an alias", () => {
+    const start: SessionSlot = {
+      ...continuation,
+      id: "2026-06-01_0900",
+      startTime: "09:00",
+      students: [{ ...continuation.students[0], studentId: "roster-id" }],
+    };
+    assert.equal(
+      isOrphanedSessionContinuation({
+        slot: continuation,
+        student: continuation.students[0],
+        daySlots: [start, continuation],
+        studentIds: ["roster-id", "auth-uid"],
+      }),
+      false
+    );
   });
 });

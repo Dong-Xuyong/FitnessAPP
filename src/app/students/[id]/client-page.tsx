@@ -3431,6 +3431,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
             {user?.uid && (
               <StudentWeeklySchedulingTab
                 trainerId={user.uid}
+                bookingStudentId={paymentsFirestoreStudentId}
                 studentId={id}
                 studentName={`${student?.firstName || ""} ${student?.lastName || ""}`.trim() || (student as any)?.name || ""}
                 studentPhotoUrl={(student as any)?.photoUrl ?? undefined}

@@ -15,10 +15,11 @@ import {
   CheckCircle2, Lock, CalendarCheck, TrendingUp, Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useUser, useFirestore } from "@/firebase";
-import { doc, getDoc, collection, getDocs, updateDoc, setDoc } from "firebase/firestore";
+import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
+import { doc, getDoc, collection, getDocs, updateDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import {
+  blocksForLogicalSession,
   resolveStudentPresentStartPlans,
   studentLocalCalendarDateKeyMs,
   type SessionAttendanceStatus,
@@ -31,7 +32,15 @@ import {
   normalizeTrainingAccessMode,
   type TrainingAccessMode,
 } from "@/lib/student-training-access";
-import { isSessionSlotCancelled } from "@/lib/session-slot-enrollment";
+import {
+  enrollStudentInSessionSlots,
+  findSlotStudent,
+  isOrphanedSessionContinuation,
+  isSessionSlotCancelled,
+  normalizeStudentMatchIds,
+  removeStudentFromSessionSlots,
+  sessionSlotHasStudent,
+} from "@/lib/session-slot-enrollment";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   buildLatestPerfByExerciseName,
@@ -55,6 +64,7 @@ import {
   normalizeVacationPeriods,
   openBlocksForDate,
   resolveDaySlotTimes,
+  consecutiveSlotBlocksFrom,
   studentDayBookable,
   type OpenAvailabilityBlock,
   type VacationPeriod,
@@ -272,6 +282,30 @@ export default function StudentWorkoutsPage() {
 
   /** Roster document id under the trainer (falls back to auth uid until first fetch). */
   const myId = rosterDocId || user?.uid || "";
+  const myIds = useMemo(
+    () => normalizeStudentMatchIds([rosterDocId, user?.uid]),
+    [rosterDocId, user?.uid]
+  );
+
+  const sessionSlotsRef = useMemoFirebase(
+    () =>
+      db && trainerId
+        ? collection(db, "personalTrainers", trainerId, "sessionSlots")
+        : null,
+    [db, trainerId]
+  );
+  const { data: liveSessionSlots, isLoading: isLoadingSlots } =
+    useCollection<SessionSlot>(sessionSlotsRef);
+
+  useEffect(() => {
+    if (!liveSessionSlots) return;
+    setSessionSlots(
+      liveSessionSlots.map((slot) => ({
+        ...slot,
+        students: Array.isArray(slot.students) ? slot.students : [],
+      }))
+    );
+  }, [liveSessionSlots]);
 
   // ── Data fetching ────────────────────────────────────────────────────────────
 
@@ -294,10 +328,9 @@ export default function StudentWorkoutsPage() {
         setRosterDocId(rid);
         setTrainingAccessMode(globalAccessMode);
 
-        const [rosterDoc, trainerDoc, slotsSnap, plansSnap, sessionsSnap, exercisesSnap] = await Promise.all([
+        const [rosterDoc, trainerDoc, plansSnap, sessionsSnap, exercisesSnap] = await Promise.all([
           getDoc(doc(db!, "personalTrainers", tid, "students", rid)),
           getDoc(doc(db!, "personalTrainers", tid)),
-          getDocs(collection(db!, "personalTrainers", tid, "sessionSlots")),
           getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutPlans")),
           getDocs(collection(db!, "personalTrainers", tid, "students", rid, "workoutSessions")),
           getDocs(collection(db!, "exercises")),
@@ -340,9 +373,6 @@ export default function StudentWorkoutsPage() {
             }
           }
         }
-
-        // 4. All session slots
-        setSessionSlots(slotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SessionSlot)));
 
         const todayKey = studentLocalCalendarDateKeyMs(Date.now());
         let completedSessionToday = false;
@@ -521,13 +551,13 @@ export default function StudentWorkoutsPage() {
     [selectedDateStr, openAvailabilityBlocks]
   );
   const hasBookingOnSelectedDay = sessionSlots.some(
-    (s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId)
+    (s) => s.date === selectedDateStr && sessionSlotHasStudent(s, myIds)
   );
 
   const timeSlots = useMemo(() => {
     const bookedTimes = selectedDayOnVacation
       ? sessionSlots
-          .filter((s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId))
+          .filter((s) => s.date === selectedDateStr && sessionSlotHasStudent(s, myIds))
           .map((s) => s.startTime)
       : sessionSlots.filter((s) => s.date === selectedDateStr).map((s) => s.startTime);
     if (selectedDayOnVacation) {
@@ -549,7 +579,7 @@ export default function StudentWorkoutsPage() {
     vacationPeriods,
     sessionSlots,
     selectedDayOnVacation,
-    myId,
+    myIds,
   ]);
 
   const showStudentDaySchedule =
@@ -600,12 +630,12 @@ export default function StudentWorkoutsPage() {
     const daysWithBooking = new Set<string>();
     for (const slot of sessionSlots) {
       if (!weekDateSet.has(slot.date)) continue;
-      if (slot.students.some((s) => s.studentId === myId)) {
+      if (sessionSlotHasStudent(slot, myIds)) {
         daysWithBooking.add(slot.date);
       }
     }
     return daysWithBooking.size;
-  }, [sessionSlots, selectedDate, myId]);
+  }, [sessionSlots, selectedDate, myId, myIds]);
 
   const weeklyAllowance = sessionsPerWeek ?? 0;
   const weeklyAllowanceDisplay = Math.max(1, weeklyAllowance);
@@ -629,9 +659,9 @@ export default function StudentWorkoutsPage() {
 
   const bookedDates = useMemo(() => {
     if (!myId) return [];
-    return [...new Set(sessionSlots.filter(s => s.students.some(st => st.studentId === myId)).map(s => s.date))]
+    return [...new Set(sessionSlots.filter((slot) => sessionSlotHasStudent(slot, myIds)).map(s => s.date))]
       .map(s => new Date(s + "T12:00:00"));
-  }, [sessionSlots, myId]);
+  }, [sessionSlots, myId, myIds]);
 
   // Highlight every day in weeks that have an assigned program
   const workoutDates = useMemo(() => {
@@ -696,21 +726,24 @@ export default function StudentWorkoutsPage() {
       id: w.id,
       sequenceStepIndex: Number(w.sequenceStepIndex) || 0,
     }));
-    const resolved = resolveStudentPresentStartPlans(
-      slots,
-      myId,
-      candidates,
-      now,
-      sessionDurationMin,
-      hasCompletedWorkoutSessionToday,
-      vacationPeriods
+    const resolvedById = myIds.map((studentId) =>
+      resolveStudentPresentStartPlans(
+        slots,
+        studentId,
+        candidates,
+        now,
+        sessionDurationMin,
+        hasCompletedWorkoutSessionToday,
+        vacationPeriods
+      )
     );
     for (const w of weekPlansOrdered) {
-      map.set(w.id, resolved.get(w.id) === true);
+      map.set(w.id, resolvedById.some((resolved) => resolved.get(w.id) === true));
     }
     return map;
   }, [
     myId,
+    myIds,
     isOpenAccess,
     plansToShow,
     completedPlanIds,
@@ -738,7 +771,7 @@ export default function StudentWorkoutsPage() {
     if (startIdx === -1) return;
 
     const existingAtTime = slotsByTime.get(time);
-    const myEntry = existingAtTime?.students.find(s => s.studentId === myId);
+    const myEntry = findSlotStudent(existingAtTime, myIds);
     const isEnrolled = !!myEntry;
 
     if (!isEnrolled && isSessionSlotCancelled(existingAtTime)) {
@@ -772,23 +805,18 @@ export default function StudentWorkoutsPage() {
           return;
         }
         const enrolledDur = myEntry.sessionDurationMin ?? sessionDurForTime;
-        const freeCount = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
-        const blocksToFree = Array.from({ length: freeCount }, (_, i) =>
-          addMin(sessionStart, i * slotDurationMin)
-        );
-
-        const nextSlots = [...sessionSlots];
-        for (const t of blocksToFree) {
-          const docId = slotDocId(selectedDateStr, t);
-          const slot = slotsByTime.get(t);
-          if (!slot) continue;
-          const newStudents = slot.students.filter(s => s.studentId !== myId);
-          await setDoc(doc(db, "personalTrainers", trainerId, "sessionSlots", docId),
-            { ...slot, students: newStudents });
-          const idx = nextSlots.findIndex(s => s.id === docId);
-          if (idx >= 0) nextSlots[idx] = { ...nextSlots[idx], students: newStudents };
-        }
-        setSessionSlots(nextSlots);
+        const blocksToFree = blocksForLogicalSession(sessionStart, enrolledDur, slotDurationMin);
+        await removeStudentFromSessionSlots({
+          db,
+          trainerId,
+          studentIds: myIds,
+          sessionStart,
+          blocks: blocksToFree.map((startTime) => ({
+            date: selectedDateStr,
+            startTime,
+            maxStudents: slotsByTime.get(startTime)?.maxStudents ?? defaultMaxStudents,
+          })),
+        });
         toast({ title: "Inscrição cancelada" });
       } else {
         // ── Register: book slotsNeeded consecutive blocks ──
@@ -810,7 +838,7 @@ export default function StudentWorkoutsPage() {
           return;
         }
         const hasSessionThisDay = sessionSlots.some(
-          (s) => s.date === selectedDateStr && s.students.some((st) => st.studentId === myId)
+          (s) => s.date === selectedDateStr && sessionSlotHasStudent(s, myIds)
         );
         if (hasSessionThisDay) {
           toast({
@@ -820,25 +848,18 @@ export default function StudentWorkoutsPage() {
           });
           return;
         }
-        const blocksToBook = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
-        if (
-          blocksToBook.length < slotsNeededForTime ||
-          !areConsecutiveBlocks(blocksToBook, slotDurationMin)
-        ) {
+        const blocksToBook = consecutiveSlotBlocksFrom(
+          timeSlots,
+          time,
+          slotsNeededForTime,
+          slotDurationMin
+        );
+        if (blocksToBook.length < slotsNeededForTime) {
           toast({
             title: `Não há blocos consecutivos suficientes para uma sessão de ${sessionDurForTime} min neste horário.`,
             variant: "destructive",
           });
           return;
-        }
-
-        // Check capacity for all required blocks
-        for (const t of blocksToBook) {
-          const slot = slotsByTime.get(t);
-          const maxS = slot?.maxStudents ?? defaultMaxStudents;
-          if ((slot?.students.length ?? 0) >= maxS) {
-            toast({ title: `Bloco ${t} está cheio`, variant: "destructive" }); return;
-          }
         }
 
         // Match plan by week (not specific date), else first unlocked undated sequence step
@@ -856,31 +877,31 @@ export default function StudentWorkoutsPage() {
             )
             .sort((a, b) => (Number(a.sequenceStepIndex) || 0) - (Number(b.sequenceStepIndex) || 0))[0];
         const totalSessionMin = sessionDurForTime;
-        const nextSlots = [...sessionSlots];
-
-        for (const t of blocksToBook) {
-          const docId = slotDocId(selectedDateStr, t);
-          const slot = slotsByTime.get(t);
-          const maxS = slot?.maxStudents ?? defaultMaxStudents;
-          const bookPhotoUrl = (myPhotoUrl || user?.photoURL || "").trim();
-          const newStudent: SlotStudent = {
-            studentId: myId,
-            studentName,
-            sessionStart: time,
-            sessionDurationMin: totalSessionMin,
-            sessionAttendance: "pending",
-            ...(bookPhotoUrl ? { studentPhotoUrl: bookPhotoUrl } : {}),
-            ...(matchingPlan ? { workoutPlanId: matchingPlan.id, workoutTitle: matchingPlan.title } : {}),
-          };
-          const newStudents = [...(slot?.students || []), newStudent];
-          const newSlotData: SessionSlot = { id: docId, date: selectedDateStr, startTime: t, maxStudents: maxS, students: newStudents };
-          await setDoc(doc(db, "personalTrainers", trainerId, "sessionSlots", docId), newSlotData);
-          const idx = nextSlots.findIndex(s => s.id === docId);
-          if (idx >= 0) nextSlots[idx] = newSlotData;
-          else nextSlots.push(newSlotData);
+        const bookPhotoUrl = (myPhotoUrl || user?.photoURL || "").trim();
+        const newStudent: SlotStudent = {
+          studentId: myId,
+          studentName,
+          sessionStart: time,
+          sessionDurationMin: totalSessionMin,
+          sessionAttendance: "pending",
+          ...(bookPhotoUrl ? { studentPhotoUrl: bookPhotoUrl } : {}),
+          ...(matchingPlan ? { workoutPlanId: matchingPlan.id, workoutTitle: matchingPlan.title } : {}),
+        };
+        const mutation = await enrollStudentInSessionSlots({
+          db,
+          trainerId,
+          student: newStudent,
+          studentIds: myIds,
+          blocks: blocksToBook.map((startTime) => ({
+            date: selectedDateStr,
+            startTime,
+            maxStudents: slotsByTime.get(startTime)?.maxStudents ?? defaultMaxStudents,
+          })),
+        });
+        if (!mutation.changed) {
+          toast({ title: t("studentAlreadyBookedTodayTitle") });
+          return;
         }
-
-        setSessionSlots(nextSlots);
         toast({ title: `Sessão de ${totalSessionMin} min reservada! (${blocksToBook[0]} – ${addMin(blocksToBook[blocksToBook.length-1], slotDurationMin)})` });
       }
     } catch (e: any) {
@@ -892,7 +913,7 @@ export default function StudentWorkoutsPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
-  if (isUserLoading || isLoading) {
+  if (isUserLoading || isLoading || (Boolean(trainerId) && isLoadingSlots)) {
     return (
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -1078,13 +1099,22 @@ export default function StudentWorkoutsPage() {
                     const slot = slotsByTime.get(time);
                     const maxS = slot?.maxStudents ?? defaultMaxStudents;
                     const count = slot?.students.length ?? 0;
-                    const mySlotEntry = slot?.students.find(s => s.studentId === myId);
+                    const mySlotEntry = findSlotStudent(slot, myIds);
                     const isEnrolled = !!mySlotEntry;
                     const slotsNeededForTime = getSlotsNeededForTime(time);
                     const sessionMinForTime = getSessionDurationForTime(time);
+                    const isOrphanedContinuation =
+                      Boolean(slot && mySlotEntry) &&
+                      isOrphanedSessionContinuation({
+                        slot: slot!,
+                        student: mySlotEntry!,
+                        daySlots: sessionSlots.filter((candidate) => candidate.date === selectedDateStr),
+                        studentIds: myIds,
+                      });
 
                     // A slot is a continuation only if it is strictly adjacent to sessionStart
                     const isContinuation = isEnrolled
+                      && !isOrphanedContinuation
                       && mySlotEntry.sessionStart !== undefined
                       && mySlotEntry.sessionStart !== time
                       && (() => {
