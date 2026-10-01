@@ -9,6 +9,19 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin',
+          },
+        ],
+      },
+    ];
+  },
   images: {
     // Firebase App Hosting: avoid /_next/image unless explicitly wired (see Firebase image-loading docs).
     unoptimized: true,

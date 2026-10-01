@@ -82,3 +82,17 @@
     @apply bg-background text-foreground;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  .animate-in,
+  .animate-out,
+  .animate-spin,
+  .animate-pulse {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

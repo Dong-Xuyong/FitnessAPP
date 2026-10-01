@@ -25,7 +25,8 @@ import {
   monthlySessionAllowance,
   type SessionSlotAttendance,
 } from "@/lib/session-attendance-streak";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { normalizeVacationPeriods } from "@/lib/trainer-availability";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -46,6 +47,37 @@ function computeEpleyOneRm(weight: number, reps: number): number {
   return weight * (1 + reps / 30);
 }
 
+async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex;
+      nextIndex += 1;
+      results[i] = await worker(items[i]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: limit }, () => runWorker()));
+  return results;
+}
+
+type LeaderboardRow = {
+  studentId: string;
+  name: string;
+  booked: number;
+  present: number;
+  absent: number;
+  monthlyAllowance: number | null;
+};
+
 function ProgressPageContent() {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -58,20 +90,14 @@ function ProgressPageContent() {
   const db = useFirestore();
   const [pendingDeleteMilestoneId, setPendingDeleteMilestoneId] = useState<string | null>(null);
   const [deletingMilestoneId, setDeletingMilestoneId] = useState<string | null>(null);
-  const [leaderboard, setLeaderboard] = useState<
-    Array<{
-      studentId: string;
-      name: string;
-      booked: number;
-      absent: number;
-      monthlyAllowance: number | null;
-    }>
-  >([]);
-  const [avgCompletionRate, setAvgCompletionRate] = useState(0);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
   const [growthMetric, setGrowthMetric] = useState(0);
   const [topPerformer, setTopPerformer] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsReady, setMetricsReady] = useState(false);
   const [metricsLoadFailed, setMetricsLoadFailed] = useState(false);
+  const [presenceLoadFailed, setPresenceLoadFailed] = useState(false);
   /** Global `students/{docId}` display names for milestone.studentId / roster id fallbacks */
   const [directoryNamesByStudentDocId, setDirectoryNamesByStudentDocId] = useState<
     Record<string, string>
@@ -133,21 +159,27 @@ function ProgressPageContent() {
     return { resolve };
   }, [rosterStudents]);
 
+  // Fast path: Presence leaderboard only needs roster + sessionSlots.
   useEffect(() => {
     if (!db || !user || isUserLoading) return;
 
+    const trainerUid = user.uid;
     let cancelled = false;
 
-    async function calculateMetrics() {
+    async function loadPresenceLeaderboard() {
       setIsLoading(true);
-      setMetricsLoadFailed(false);
+      setPresenceLoadFailed(false);
       try {
-        const rosterRef = collection(db, "personalTrainers", user.uid, "students");
-        const [rosterSnap, sessionSlotsSnap] = await Promise.all([
+        const rosterRef = collection(db, "personalTrainers", trainerUid, "students");
+        const [rosterSnap, sessionSlotsSnap, trainerSnap] = await Promise.all([
           getDocs(rosterRef),
-          getDocs(collection(db, "personalTrainers", user.uid, "sessionSlots")),
+          getDocs(collection(db, "personalTrainers", trainerUid, "sessionSlots")),
+          getDoc(doc(db, "personalTrainers", trainerUid)),
         ]);
 
+        if (cancelled) return;
+
+        const vacationPeriods = normalizeVacationPeriods(trainerSnap.data()?.vacationPeriods);
         const sessionSlotsList: SessionSlotAttendance[] = sessionSlotsSnap.docs.map((d) => {
           const data = d.data() as SessionSlotAttendance;
           return {
@@ -160,132 +192,48 @@ function ProgressPageContent() {
         });
 
         const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-        const leaderboardData: Array<{
-          studentId: string;
-          name: string;
-          booked: number;
-          absent: number;
-          monthlyAllowance: number | null;
-        }> = [];
-        const completionRates: number[] = [];
-        let maxGrowth = 0;
-        let topStudent: any = null;
-
-        for (const studentDoc of rosterSnap.docs) {
-          const studentData: any = studentDoc.data();
+        const leaderboardData: LeaderboardRow[] = rosterSnap.docs.map((studentDoc) => {
+          const studentData = studentDoc.data() as Record<string, unknown>;
           const studentId = studentDoc.id;
-          
-          // Get workout plans and sessions this month
-          const [plansSnap, sessionsSnap] = await Promise.all([
-            getDocs(collection(db, "personalTrainers", user.uid, "students", studentId, "workoutPlans")),
-            getDocs(collection(db, "personalTrainers", user.uid, "students", studentId, "workoutSessions")),
-          ]);
-          
-          const completedPlanIds = new Set<string>();
-          let studentGrowth = 0;
-          
-          sessionsSnap.forEach((sessDoc) => {
-            const data: any = sessDoc.data();
-            if (data.completedAt) {
-              completedPlanIds.add(data.workoutPlanId);
-              
-              // Calculate strength growth per session
-              (data.exercises || []).forEach((exercise: any) => {
-                if (Array.isArray(exercise.sets)) {
-                  exercise.sets.forEach((set: any) => {
-                    if (set.completed !== false) {
-                      const oneRm = computeEpleyOneRm(Number(set.weight) || 0, Number(set.reps) || 0);
-                      if (oneRm > 0) studentGrowth += oneRm / 30; // Approximate growth contribution
-                    }
-                  });
-                }
-              });
-            }
-          });
-          
-          // Month completion rate
-          const monthPlans = plansSnap.docs.filter((planDoc) => {
-            const assignedDate = new Date(planDoc.data().assignedAt || planDoc.data().createdAt || "");
-            return assignedDate >= monthStart && assignedDate <= monthEnd;
-          });
-          
-          const monthCompleted = monthPlans.filter((p) => completedPlanIds.has(p.id)).length;
-          const completionRate = monthPlans.length > 0 ? Math.round((monthCompleted / monthPlans.length) * 100) : 0;
-          completionRates.push(completionRate);
-
           const displayName =
-            `${studentData.firstName || ""} ${studentData.lastName || ""}`.trim() ||
-            studentData.name ||
-            studentData.email ||
+            `${String(studentData.firstName || "")} ${String(studentData.lastName || "")}`.trim() ||
+            String(studentData.name || "") ||
+            String(studentData.email || "") ||
             "Unknown";
-
           const candidateIds = [studentId, studentData.userId]
             .map((x) => String(x || "").trim())
             .filter(Boolean);
-          const { booked, absent } = countMonthlySessionAttendanceStats(
+          const { booked, present, absent } = countMonthlySessionAttendanceStats(
             sessionSlotsList,
             candidateIds,
-            now
+            now,
+            vacationPeriods
           );
-          const allowance = monthlySessionAllowance(studentData.sessionsPerWeek, now);
-
-          leaderboardData.push({
+          return {
             studentId,
             name: displayName,
             booked,
+            present,
             absent,
-            monthlyAllowance: allowance,
-          });
-          
-          // Track growth
-          if (studentGrowth > maxGrowth) {
-            maxGrowth = studentGrowth;
-          }
-          
-          // Compute dynamic streak from consecutive completed workout plans (most recent first)
-          const completedPlanIdsSet = completedPlanIds;
-          const sortedPlans = plansSnap.docs
-            .map((d) => ({ id: d.id, assignedAt: d.data().assignedAt || d.data().createdAt || "" }))
-            .sort((a, b) => (b.assignedAt || "").localeCompare(a.assignedAt || ""));
-          let dynamicStreak = 0;
-          for (const plan of sortedPlans) {
-            if (completedPlanIdsSet.has(plan.id)) {
-              dynamicStreak += 1;
-            } else {
-              break;
-            }
-          }
+            monthlyAllowance: monthlySessionAllowance(
+              Number(studentData.sessionsPerWeek) || null,
+              now
+            ),
+          };
+        });
 
-          // Track top performer by dynamic streak
-          if (!topStudent || dynamicStreak > (topStudent.dynamicStreak || 0)) {
-            topStudent = { ...studentData, studentId, name: displayName, dynamicStreak };
-          }
-        }
-        
-        if (!cancelled) {
-          setLeaderboard(
-            leaderboardData.sort(
-              (a, b) =>
-                b.booked - a.booked ||
-                b.absent - a.absent ||
-                a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-            )
-          );
-          setAvgCompletionRate(
-            completionRates.length > 0
-              ? Math.round(completionRates.reduce((sum, n) => sum + n, 0) / completionRates.length)
-              : 0
-          );
-          setGrowthMetric(Number(maxGrowth.toFixed(1)));
-          setTopPerformer(topStudent);
-        }
+        setLeaderboard(
+          leaderboardData.sort(
+            (a, b) =>
+              b.booked - a.booked ||
+              b.absent - a.absent ||
+              a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+          )
+        );
       } catch (error) {
-        console.error("Error calculating metrics", error);
+        console.error("Error loading presence leaderboard", error);
         if (!cancelled) {
-          setMetricsLoadFailed(true);
+          setPresenceLoadFailed(true);
           setLeaderboard([]);
         }
       } finally {
@@ -293,9 +241,179 @@ function ProgressPageContent() {
       }
     }
 
-    calculateMetrics();
-    return () => { cancelled = true; };
+    void loadPresenceLeaderboard();
+    return () => {
+      cancelled = true;
+    };
   }, [db, user, isUserLoading]);
+
+  const rosterLoaded = rosterStudents != null;
+  const rosterIdsKey = useMemo(
+    () =>
+      (rosterStudents ?? [])
+        .map((s) => String((s as { id?: string }).id || ""))
+        .filter(Boolean)
+        .sort()
+        .join(","),
+    [rosterStudents]
+  );
+  const rosterStudentsDataRef = useRef(rosterStudents);
+  rosterStudentsDataRef.current = rosterStudents;
+
+  // Heavy Progress-tab metrics: load only when that tab is open, with bounded concurrency.
+  useEffect(() => {
+    if (!db || !user || isUserLoading) return;
+    if (activeCoachTab !== "progress") return;
+    if (metricsReady) return;
+    if (!rosterLoaded) return;
+
+    const fs = db;
+    const rosterRows = (rosterStudentsDataRef.current || []) as Array<
+      Record<string, unknown> & { id: string }
+    >;
+    const trainerUid = user.uid;
+    let cancelled = false;
+
+    async function loadProgressMetrics() {
+      setMetricsLoading(true);
+      setMetricsLoadFailed(false);
+      try {
+        type StudentMetric = {
+          growth: number;
+          topCandidate: {
+            studentId: string;
+            name: string;
+            firstName?: string;
+            lastName?: string;
+            photoUrl?: string;
+            dynamicStreak: number;
+          } | null;
+        };
+
+        const perStudent = await mapPool(rosterRows, 5, async (student): Promise<StudentMetric> => {
+          const studentId = student.id;
+          const [plansSnap, sessionsSnap] = await Promise.all([
+            getDocs(collection(fs, "personalTrainers", trainerUid, "students", studentId, "workoutPlans")),
+            getDocs(
+              collection(fs, "personalTrainers", trainerUid, "students", studentId, "workoutSessions")
+            ),
+          ]);
+
+          const completedPlanIds = new Set<string>();
+          let studentGrowth = 0;
+
+          sessionsSnap.forEach((sessDoc) => {
+            const data = sessDoc.data() as Record<string, unknown>;
+            if (!data.completedAt) return;
+            if (typeof data.workoutPlanId === "string") {
+              completedPlanIds.add(data.workoutPlanId);
+            }
+            const exercises = Array.isArray(data.exercises) ? data.exercises : [];
+            for (const exercise of exercises) {
+              const sets = Array.isArray((exercise as { sets?: unknown }).sets)
+                ? ((exercise as { sets: Array<{ weight?: unknown; reps?: unknown; completed?: boolean }> }).sets)
+                : [];
+              for (const set of sets) {
+                if (set.completed === false) continue;
+                const oneRm = computeEpleyOneRm(Number(set.weight) || 0, Number(set.reps) || 0);
+                if (oneRm > 0) studentGrowth += oneRm / 30;
+              }
+            }
+          });
+
+          const displayName =
+            `${String(student.firstName || "")} ${String(student.lastName || "")}`.trim() ||
+            String(student.name || "") ||
+            String(student.email || "") ||
+            "Unknown";
+
+          const sortedPlans = plansSnap.docs
+            .map((d) => ({
+              id: d.id,
+              assignedAt: String(d.data().assignedAt || d.data().createdAt || ""),
+            }))
+            .sort((a, b) => (b.assignedAt || "").localeCompare(a.assignedAt || ""));
+          let dynamicStreak = 0;
+          for (const plan of sortedPlans) {
+            if (completedPlanIds.has(plan.id)) dynamicStreak += 1;
+            else break;
+          }
+
+          return {
+            growth: studentGrowth,
+            topCandidate: {
+              studentId,
+              name: displayName,
+              firstName: typeof student.firstName === "string" ? student.firstName : undefined,
+              lastName: typeof student.lastName === "string" ? student.lastName : undefined,
+              photoUrl: typeof student.photoUrl === "string" ? student.photoUrl : undefined,
+              dynamicStreak,
+            },
+          };
+        });
+
+        if (cancelled) return;
+
+        let maxGrowth = 0;
+        let topStudent: StudentMetric["topCandidate"] = null;
+        for (const row of perStudent) {
+          if (row.growth > maxGrowth) maxGrowth = row.growth;
+          if (
+            row.topCandidate &&
+            (!topStudent || row.topCandidate.dynamicStreak > (topStudent.dynamicStreak || 0))
+          ) {
+            topStudent = row.topCandidate;
+          }
+        }
+
+        setGrowthMetric(Number(maxGrowth.toFixed(1)));
+        setTopPerformer(topStudent);
+        setMetricsReady(true);
+      } catch (error) {
+        console.error("Error calculating progress metrics", error);
+        if (!cancelled) setMetricsLoadFailed(true);
+      } finally {
+        if (!cancelled) setMetricsLoading(false);
+      }
+    }
+
+    void loadProgressMetrics();
+    return () => {
+      cancelled = true;
+    };
+    // rosterIdsKey avoids restarting when useCollection emits a new array for the same roster.
+  }, [db, user, isUserLoading, activeCoachTab, rosterLoaded, rosterIdsKey, metricsReady]);
+
+  /** Attendance show-up rate from calendar sessions; falls back to roster fill vs monthly limit. */
+  const teamPresenceMetric = useMemo(() => {
+    let present = 0;
+    let absent = 0;
+    let booked = 0;
+    let allowance = 0;
+    for (const row of leaderboard) {
+      present += row.present;
+      absent += row.absent;
+      booked += row.booked;
+      if (row.monthlyAllowance != null) allowance += row.monthlyAllowance;
+    }
+    const marked = present + absent;
+    if (marked > 0) {
+      return {
+        kind: "attendance" as const,
+        percent: Math.round((present / marked) * 100),
+      };
+    }
+    if (allowance > 0) {
+      return {
+        kind: "fill" as const,
+        percent: Math.min(100, Math.round((booked / allowance) * 100)),
+      };
+    }
+    if (booked > 0) {
+      return { kind: "booked" as const, booked };
+    }
+    return { kind: "empty" as const };
+  }, [leaderboard]);
 
   const activeMilestones = useMemo(() => {
     if (!allMilestones) return [];
@@ -426,25 +544,22 @@ function ProgressPageContent() {
             <Card>
               <CardHeader>
                 <CardTitle>{t("completionLeaderboard")}</CardTitle>
-                <CardDescription className="space-y-2">
-                  <span className="block">{t("completionLeaderboardDesc")}</span>
-                  <span className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                    <span className="text-yellow-600 dark:text-yellow-400">
-                      ● {t("coachRosterLegendBooked")}
-                    </span>
-                    <span className="text-destructive">● {t("coachRosterLegendAbsent")}</span>
-                    <span className="text-neutral-900 dark:text-neutral-100">
-                      ● {t("coachRosterLegendAllowance")}
-                    </span>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
+                  <span className="text-yellow-600 dark:text-yellow-400">
+                    ● {t("coachRosterLegendBooked")}
                   </span>
-                </CardDescription>
+                  <span className="text-destructive">● {t("coachRosterLegendAbsent")}</span>
+                  <span className="text-neutral-900 dark:text-neutral-100">
+                    ● {t("coachRosterLegendAllowance")}
+                  </span>
+                </div>
               </CardHeader>
               <CardContent className="space-y-6">
                 {isLoading ? (
                   <div className="flex justify-center py-8">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
-                ) : metricsLoadFailed ? (
+                ) : presenceLoadFailed ? (
                   <p className="text-sm text-destructive">{t("coachRosterMetricsLoadFailed")}</p>
                 ) : leaderboard.length > 0 ? (
                   <RosterMonthlySessionChart rows={leaderboard} />
@@ -458,6 +573,9 @@ function ProgressPageContent() {
           </TabsContent>
 
           <TabsContent value="progress" className="mt-0 focus-visible:outline-none">
+            {metricsLoadFailed ? (
+              <p className="text-sm text-destructive mb-4">{t("coachRosterMetricsLoadFailed")}</p>
+            ) : null}
             <div className="grid md:grid-cols-3 gap-6">
               <Card className="bg-primary text-primary-foreground overflow-hidden relative">
                 <div className="absolute right-0 bottom-0 opacity-10">
@@ -466,12 +584,33 @@ function ProgressPageContent() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Award className="h-5 w-5" />
-                    {t("teamVelocity")}
+                    {teamPresenceMetric.kind === "fill"
+                      ? t("teamFillRateTitle")
+                      : teamPresenceMetric.kind === "booked"
+                        ? t("teamSessionsBookedTitle")
+                        : t("teamAttendanceTitle")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-bold mb-2">{avgCompletionRate}%</div>
-                  <p className="text-sm opacity-90">{t("avgCompletionRate")}</p>
+                  {isLoading ? (
+                    <Loader2 className="h-8 w-8 animate-spin mb-2" />
+                  ) : teamPresenceMetric.kind === "attendance" ||
+                    teamPresenceMetric.kind === "fill" ? (
+                    <div className="text-4xl font-bold mb-2">{teamPresenceMetric.percent}%</div>
+                  ) : teamPresenceMetric.kind === "booked" ? (
+                    <div className="text-4xl font-bold mb-2">{teamPresenceMetric.booked}</div>
+                  ) : (
+                    <div className="text-4xl font-bold mb-2">—</div>
+                  )}
+                  <p className="text-sm opacity-90">
+                    {teamPresenceMetric.kind === "fill"
+                      ? t("teamFillRateDesc")
+                      : teamPresenceMetric.kind === "booked"
+                        ? t("teamSessionsBookedDesc")
+                        : teamPresenceMetric.kind === "empty"
+                          ? t("teamAttendanceEmptyDesc")
+                          : t("teamAttendanceDesc")}
+                  </p>
                 </CardContent>
               </Card>
 
@@ -483,7 +622,11 @@ function ProgressPageContent() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-bold mb-2">+{growthMetric}kg</div>
+                  {metricsLoading || (!metricsReady && !metricsLoadFailed) ? (
+                    <Loader2 className="h-8 w-8 animate-spin mb-2" />
+                  ) : (
+                    <div className="text-4xl font-bold mb-2">+{growthMetric}kg</div>
+                  )}
                   <p className="text-sm opacity-90">{t("teamGrowthDesc")}</p>
                 </CardContent>
               </Card>
@@ -496,7 +639,9 @@ function ProgressPageContent() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex items-center gap-4">
-                  {topPerformer ? (
+                  {metricsLoading || (!metricsReady && !metricsLoadFailed) ? (
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  ) : topPerformer ? (
                     <>
                       <Avatar className="h-12 w-12">
                         <AvatarImage src={topPerformer.photoUrl || `https://picsum.photos/seed/${topPerformer.studentId}/100/100`} />
@@ -519,7 +664,6 @@ function ProgressPageContent() {
             <Card>
               <CardHeader>
                 <CardTitle>{t("upcomingMilestones")}</CardTitle>
-                <CardDescription>{t("nextGoalsToCelebrate")}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {activeMilestones.length > 0 ? (

@@ -14,6 +14,7 @@ import {
   Users,
   Ban,
   Banknote,
+  Cake,
 } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
@@ -22,6 +23,7 @@ import { collection } from "firebase/firestore";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
 import { fetchRosterPaymentStatusMap } from "@/lib/roster-payment-status";
 import { normalizedPaymentPaid } from "@/lib/student-payment-due";
+import { isBirthdayToday } from "@/lib/coach-birthday-reminders";
 
 export default function StudentsPage() {
   const { user } = useUser();
@@ -157,6 +159,15 @@ export default function StudentsPage() {
                           </h3>
                           {rosterRow && (
                             <Badge variant="outline" className="mt-1 text-[10px] uppercase tracking-wide">{t("roster")}</Badge>
+                          )}
+                          {isBirthdayToday(rosterRow?.birthDate ?? row.birthDate) && (
+                            <Badge
+                              variant="outline"
+                              className="mt-1 text-[10px] uppercase tracking-wide gap-1 bg-rose-100 text-rose-900 border-rose-200"
+                            >
+                              <Cake className="h-3 w-3" />
+                              {t("coachBirthdayBadge")}
+                            </Badge>
                           )}
                           {isBlocked && (
                             <Badge variant="destructive" className="mt-1 text-[10px] uppercase tracking-wide gap-1">

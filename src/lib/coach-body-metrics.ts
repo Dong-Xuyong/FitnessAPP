@@ -21,7 +21,13 @@ export async function saveBodyMetrics(params: {
   existingWeightHistory?: unknown;
 }): Promise<void> {
   const metrics = { ...params.metrics };
-  const { leanMassKg, fatMassKg } = computeLeanAndFatMass(metrics.weightKg, metrics.bodyFatPercent);
+  if (metrics.fatMassPercent != null) {
+    metrics.bodyFatPercent = metrics.fatMassPercent;
+  } else if (metrics.bodyFatPercent != null && metrics.fatMassPercent == null) {
+    metrics.fatMassPercent = metrics.bodyFatPercent;
+  }
+  const fatForCalc = metrics.fatMassPercent ?? metrics.bodyFatPercent;
+  const { leanMassKg, fatMassKg } = computeLeanAndFatMass(metrics.weightKg, fatForCalc);
   if (leanMassKg != null) metrics.leanMassKg = leanMassKg;
   if (fatMassKg != null) metrics.fatMassKg = fatMassKg;
 

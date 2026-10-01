@@ -5,11 +5,14 @@ import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Loader2, ExternalLink, TrendingUp } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Search, Loader2, ExternalLink, TrendingUp, CirclePlay } from "lucide-react";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
 
 const categories = ["All", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body", "Cardio", "Other"];
 
@@ -35,11 +38,16 @@ export default function StudentExercisesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedExerciseName, setSelectedExerciseName] = useState("");
+  const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{ title: string; url: string } | null>(null);
   const [exerciseHistory, setExerciseHistory] = useState<Array<{ date: string; oneRm: number }>>([]);
   const [exerciseAttempts, setExerciseAttempts] = useState<
     Array<{ timestamp: number; oneRm: number; weight: number; reps: number }>
   >([]);
   const [isLoadingStrength, setIsLoadingStrength] = useState(false);
+
+  const embeddedExerciseVideoUrl = selectedExerciseVideo
+    ? getYouTubeEmbedUrl(selectedExerciseVideo.url)
+    : null;
 
   const exercisesQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -179,7 +187,7 @@ export default function StudentExercisesPage() {
       <div className="space-y-4">
         <header>
           <h1 className="text-2xl md:text-3xl font-bold font-headline">{t("exercises")}</h1>
-          <p className="text-sm text-muted-foreground">{t("exerciseLibraryShared")}</p>
+          <p className="text-sm text-muted-foreground mt-1">{t("exerciseLibraryShared")}</p>
         </header>
 
         <div className="relative">
@@ -299,27 +307,37 @@ export default function StudentExercisesPage() {
                   <p className="text-sm text-muted-foreground line-clamp-2">
                     {exercise.description || t("noDescriptionAvailable")}
                   </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {exercise.difficulty && (
-                      <Badge variant="outline" className="text-xs capitalize">
-                        {exercise.difficulty}
-                      </Badge>
-                    )}
-                    {exercise.equipment && (
-                      <span className="text-xs text-muted-foreground">{exercise.equipment}</span>
-                    )}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      {exercise.difficulty && (
+                        <Badge variant="outline" className="text-xs capitalize">
+                          {exercise.difficulty}
+                        </Badge>
+                      )}
+                      {exercise.equipment && (
+                        <span className="text-xs text-muted-foreground">{exercise.equipment}</span>
+                      )}
+                    </div>
+                    {exercise.videoUrl ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 shrink-0 text-primary hover:text-primary"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedExerciseVideo({
+                            title: String(exercise.name || ""),
+                            url: String(exercise.videoUrl),
+                          });
+                        }}
+                        title={t("watchDemo")}
+                        aria-label={`${t("watchDemo")}: ${exercise.name || t("unnamedExercise")}`}
+                      >
+                        <CirclePlay className="h-5 w-5" />
+                      </Button>
+                    ) : null}
                   </div>
-                  {exercise.videoUrl ? (
-                    <a
-                      href={exercise.videoUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                    >
-                      {t("watchDemo")}
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
-                  ) : null}
                 </CardContent>
               </Card>
             ))}
@@ -332,6 +350,43 @@ export default function StudentExercisesPage() {
             <p className="text-sm mt-1">{t("tryDifferentSearch")}</p>
           </div>
         ) : null}
+
+        <Dialog
+          open={!!selectedExerciseVideo}
+          onOpenChange={(open) => !open && setSelectedExerciseVideo(null)}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>
+                {t("watchDemo")} — {selectedExerciseVideo?.title}
+              </DialogTitle>
+            </DialogHeader>
+            {selectedExerciseVideo ? (
+              embeddedExerciseVideoUrl ? (
+                <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                  <iframe
+                    className="h-full w-full"
+                    src={embeddedExerciseVideoUrl}
+                    title={`${t("watchDemo")}: ${selectedExerciseVideo.title}`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    allowFullScreen
+                  />
+                </div>
+              ) : (
+                <a
+                  href={selectedExerciseVideo.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+                >
+                  {t("watchDemo")}
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )
+            ) : null}
+          </DialogContent>
+        </Dialog>
       </div>
   );
 }

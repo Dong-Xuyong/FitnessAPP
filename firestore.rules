@@ -70,10 +70,13 @@ service cloud.firestore {
         request.auth.uid != studentId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'weightKg',
+          'leanMassPercent',
+          'fatMassPercent',
           'bodyFatPercent',
           'leanMassKg',
           'fatMassKg',
           'visceralFatScore',
+          'bmi',
           'armRightCm',
           'armLeftCm',
           'chestCm',

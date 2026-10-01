@@ -28,7 +28,6 @@ import {
   normalizeVacationPeriods,
   normalizeOpenAvailabilityBlocks,
   resolveDaySlotTimes,
-  isNewBookingBlocked,
   weekdayKeyFromDate,
   type Availability,
 } from "@/lib/trainer-availability";
@@ -78,6 +77,7 @@ function migrateDaySchedule(raw: unknown): { enabled: boolean; ranges: { startTi
 
 type Props = {
   trainerId: string;
+  bookingStudentId?: string;
   studentId: string;
   studentName: string;
   studentPhotoUrl?: string;
@@ -98,6 +98,7 @@ type WeeklySchedulingDefault = {
 
 export function StudentWeeklySchedulingTab({
   trainerId,
+  bookingStudentId,
   studentId,
   studentName,
   studentPhotoUrl,
@@ -128,12 +129,12 @@ export function StudentWeeklySchedulingTab({
   const [isSavingDefault, setIsSavingDefault] = useState(false);
 
   const matchIds = useMemo(() => {
-    const ids = new Set<string>([studentId]);
+    const ids = new Set<string>([studentId, bookingStudentId || studentId]);
     for (const id of studentMatchIds ?? []) {
       if (id) ids.add(String(id));
     }
     return [...ids];
-  }, [studentId, studentMatchIds]);
+  }, [studentId, bookingStudentId, studentMatchIds]);
 
   // ── Firestore refs ─────────────────────────────────────────────────────────
 
@@ -276,10 +277,6 @@ export function StudentWeeklySchedulingTab({
       const date = new Date(dateStr + "T12:00:00");
       const dayKey = weekdayKeyFromDate(date);
       const weeklySched = availability[dayKey];
-      const onVacation = isNewBookingBlocked({ dateStr, time: "00:00", vacationPeriods, openBlocks })
-        // rough check: if any time is blocked that day
-        && !openBlocks.some((b) => b.date === dateStr);
-
       const slotTimes = resolveDaySlotTimes({
         dateStr,
         weeklySched,
@@ -419,7 +416,8 @@ export function StudentWeeklySchedulingTab({
       const result = await bulkEnrollWeeklyCycle({
         db,
         trainerId,
-        studentId,
+        studentId: bookingStudentId || studentId,
+        studentIds: matchIds,
         studentName,
         studentPhotoUrl,
         pattern: predefinedPattern,

@@ -97,6 +97,27 @@ export function findSequenceAppendContext(
 }
 
 /**
+ * Plan ids completed via plan doc fields or logged workout sessions.
+ * Matches student profile and calendar roster unlock heuristics.
+ */
+export function buildCompletedWorkoutPlanIds(
+  plans: Array<Record<string, unknown> & { id?: string }>,
+  sessions: Array<Record<string, unknown> & { workoutPlanId?: string; completedAt?: unknown }> = []
+): Set<string> {
+  const completed = new Set<string>();
+  for (const p of plans) {
+    const pid = String(p.id || "").trim();
+    if (!pid) continue;
+    if (isWorkoutPlanDocCompleted(p)) completed.add(pid);
+  }
+  for (const sess of sessions) {
+    const wid = String(sess.workoutPlanId || "").trim();
+    if (wid && sess.completedAt) completed.add(wid);
+  }
+  return completed;
+}
+
+/**
  * Treat a sequence step as unlocked when Firestore says so, or when the prior plan id
  * is in `completedPlanIds` (doc completed / session logged) so UI matches reality if
  * `studentUnlocked` was not updated.
@@ -110,6 +131,31 @@ export function isSequenceStepEffectiveUnlocked(
   const prior = typeof plan.sequenceUnlockAfterPlanId === "string" ? plan.sequenceUnlockAfterPlanId.trim() : "";
   if (!prior) return false;
   return completedPlanIds.has(prior);
+}
+
+/** Loads completion data and applies the same unlock heuristic as profile/calendar UI. */
+export async function resolveSequenceEffectiveUnlock(
+  db: Firestore,
+  trainerId: string,
+  storageStudentId: string,
+  plan: SequencePlanUnlockFields
+): Promise<boolean> {
+  if (!plan.sequenceGroupId || plan.studentUnlocked !== false) {
+    return isSequenceStepEffectiveUnlocked(plan, new Set());
+  }
+  const plansColl = collection(db, "personalTrainers", trainerId, "students", storageStudentId, "workoutPlans");
+  const sessionsColl = collection(
+    db,
+    "personalTrainers",
+    trainerId,
+    "students",
+    storageStudentId,
+    "workoutSessions"
+  );
+  const [plansSnap, sessionsSnap] = await Promise.all([getDocs(plansColl), getDocs(sessionsColl)]);
+  const plans = plansSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const sessions = sessionsSnap.docs.map((d) => d.data());
+  return isSequenceStepEffectiveUnlocked(plan, buildCompletedWorkoutPlanIds(plans, sessions));
 }
 
 /**

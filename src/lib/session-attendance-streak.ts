@@ -3,6 +3,8 @@
  * Multi-block bookings (same logical session duplicated across consecutive slot docs) are deduped.
  */
 
+import { isDateInVacation, type VacationPeriod } from "@/lib/trainer-availability";
+
 export type SessionAttendanceStatus = "pending" | "present" | "absent";
 
 export type SlotStudentAttendance = {
@@ -105,6 +107,8 @@ export function canCoachMarkSessionAttendanceAt(
 export type ActionablePendingAttendanceOptions = {
   /** When set, only this student's bookings are considered (coach roster filter). */
   filterStudentId?: string;
+  /** Vacation days never require coach attendance. */
+  vacationPeriods?: VacationPeriod[];
 };
 
 /**
@@ -117,11 +121,13 @@ export function datesWithActionablePendingAttendance(
   options?: ActionablePendingAttendanceOptions
 ): string[] {
   const filterId = options?.filterStudentId?.trim();
+  const vacationPeriods = options?.vacationPeriods ?? [];
   const days = new Set<string>();
 
   for (const slot of slots) {
     if (!slot.date || !slot.startTime || !Array.isArray(slot.students)) continue;
     const dateKey = slot.date.substring(0, 10);
+    if (isDateInVacation(dateKey, vacationPeriods)) continue;
     for (const st of slot.students) {
       if (!st?.studentId) continue;
       if (filterId && st.studentId !== filterId) continue;
@@ -136,16 +142,16 @@ export function datesWithActionablePendingAttendance(
 
 /**
  * True when the student may open the live workout for `workoutPlanId`: a booked slot on **today's
- * calendar date** (local) where the coach marked them `present`, and the slot's linked plan (if any)
- * matches `workoutPlanId`. The narrow pre-start / post-grace time window is not used — the whole
- * session day counts once present is recorded.
+ * calendar date** (local) where the coach marked them `present`, or the booking falls on a coach
+ * vacation day (no attendance required). The narrow pre-start / post-grace time window is not used.
  */
 export function studentHasCoachPresentAccessForPlan(
   slots: SessionSlotAttendance[],
   studentId: string,
   workoutPlanId: string,
   nowMs: number,
-  _fallbackSessionDurationMin: number
+  _fallbackSessionDurationMin: number,
+  vacationPeriods: VacationPeriod[] = []
 ): boolean {
   if (!studentId || !workoutPlanId) return false;
   const seenLogical = new Set<string>();
@@ -154,7 +160,6 @@ export function studentHasCoachPresentAccessForPlan(
   for (const slot of slots) {
     for (const st of slot.students || []) {
       if (st.studentId !== studentId) continue;
-      if (normalizeAttendance(st.sessionAttendance) !== "present") continue;
       const startClock = st.sessionStart ?? slot.startTime;
       const logicalKey = `${slot.date}|${startClock}|${studentId}`;
       if (seenLogical.has(logicalKey)) continue;
@@ -162,7 +167,8 @@ export function studentHasCoachPresentAccessForPlan(
 
       const slotDateKey = (slot.date || "").substring(0, 10);
       if (!slotDateKey || slotDateKey !== todayKey) continue;
-      return true;
+      if (isDateInVacation(slotDateKey, vacationPeriods)) return true;
+      if (normalizeAttendance(st.sessionAttendance) === "present") return true;
     }
   }
   return false;
@@ -182,7 +188,8 @@ export function resolveStudentPresentStartPlans(
   candidates: readonly PlanPresentCandidate[],
   nowMs: number,
   fallbackSessionDurationMin: number,
-  hasCompletedWorkoutSessionToday: boolean
+  hasCompletedWorkoutSessionToday: boolean,
+  vacationPeriods: VacationPeriod[] = []
 ): Map<string, boolean> {
   const out = new Map<string, boolean>();
   for (const c of candidates) out.set(c.id, false);
@@ -196,7 +203,8 @@ export function resolveStudentPresentStartPlans(
         studentId,
         c.id,
         nowMs,
-        fallbackSessionDurationMin
+        fallbackSessionDurationMin,
+        vacationPeriods
       )
     ) {
       rawOk.push(c);
@@ -227,14 +235,18 @@ export function maxAttendanceStreakForCandidates(
   slots: SessionSlotAttendance[],
   candidateStudentIds: string[],
   nowMs: number,
-  trainerSlotDurationMin: number
+  trainerSlotDurationMin: number,
+  vacationPeriods: VacationPeriod[] = []
 ): number {
   let max = 0;
   const seen = new Set<string>();
   for (const sid of candidateStudentIds) {
     if (!sid || seen.has(sid)) continue;
     seen.add(sid);
-    max = Math.max(max, computeSessionAttendanceStreak(slots, sid, nowMs, trainerSlotDurationMin));
+    max = Math.max(
+      max,
+      computeSessionAttendanceStreak(slots, sid, nowMs, trainerSlotDurationMin, vacationPeriods)
+    );
   }
   return max;
 }
@@ -246,7 +258,8 @@ export function computeSessionAttendanceStreak(
   slots: SessionSlotAttendance[],
   studentId: string,
   nowMs: number,
-  trainerSlotDurationMin: number
+  trainerSlotDurationMin: number,
+  vacationPeriods: VacationPeriod[] = []
 ): number {
   const step = trainerSlotDurationMin > 0 ? trainerSlotDurationMin : 30;
   type Accum = {
@@ -257,6 +270,7 @@ export function computeSessionAttendanceStreak(
 
   for (const slot of slots) {
     if (!slot.date || !slot.startTime || !Array.isArray(slot.students)) continue;
+    if (isDateInVacation(slot.date.substring(0, 10), vacationPeriods)) continue;
 
     for (const st of slot.students) {
       if (!st?.studentId || st.studentId !== studentId) continue;
@@ -339,7 +353,8 @@ export function monthlySessionAllowance(
 export function countMonthlySessionAttendanceStats(
   slots: SessionSlotAttendance[],
   candidateStudentIds: string[],
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  vacationPeriods: VacationPeriod[] = []
 ): { booked: number; present: number; absent: number } {
   const month = referenceDate.getMonth();
   const year = referenceDate.getFullYear();
@@ -349,6 +364,7 @@ export function countMonthlySessionAttendanceStats(
   for (const slot of slots) {
     const dateKey = String(slot.date || "").substring(0, 10);
     if (!dateKey) continue;
+    if (isDateInVacation(dateKey, vacationPeriods)) continue;
     const d = new Date(`${dateKey}T12:00:00`);
     if (Number.isNaN(d.getTime()) || d.getMonth() !== month || d.getFullYear() !== year) continue;
 

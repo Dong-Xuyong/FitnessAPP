@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import {
   LayoutDashboard,
   Dumbbell,
   History,
+  BarChart3,
   LogOut,
   CreditCard,
   User,
@@ -15,6 +16,8 @@ import {
   Globe,
   ShieldBan,
   AlertCircle,
+  Search,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -25,6 +28,9 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -41,18 +47,52 @@ import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { isOpenTrainingAccess, normalizeTrainingAccessMode } from "@/lib/student-training-access";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { StudentBirthdayPrompt } from "@/components/StudentBirthdayPrompt";
 import { useStudentPaymentReminder } from "@/hooks/use-student-payment-reminder";
 import { STUDENT_PROFILE_PHOTO_UPDATED } from "@/lib/student-profile-events";
 
-const navItems = [
-  { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
-  { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
-  { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
-  { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: History },
-  { key: "billing" as const, href: "/student/billing", icon: CreditCard },
-  { key: "shop" as const, href: "/student/shop", icon: Store },
-  { key: "profile" as const, href: "/student/profile", icon: User },
+type StudentNavItem = {
+  key: TranslationKey;
+  href: string;
+  icon: LucideIcon;
+};
+
+type StudentNavGroup = {
+  key: TranslationKey;
+  items: StudentNavItem[];
+};
+
+const studentNavGroups: StudentNavGroup[] = [
+  {
+    key: "navGroupToday" as const,
+    items: [
+      { key: "myDashboard" as const, href: "/student/dashboard", icon: LayoutDashboard },
+      { key: "workouts" as const, href: "/student/workouts", icon: Dumbbell },
+    ],
+  },
+  {
+    key: "navGroupLibrary" as const,
+    items: [
+      { key: "exercises" as const, href: "/student/exercises", icon: Search },
+      { key: "workoutHistory" as const, href: "/student/workout-history", icon: History },
+      { key: "exerciseHistory" as const, href: "/student/exercise-history", icon: BarChart3 },
+    ],
+  },
+  {
+    key: "navGroupAccount" as const,
+    items: [
+      { key: "billing" as const, href: "/student/billing", icon: CreditCard },
+      { key: "shop" as const, href: "/student/shop", icon: Store },
+      { key: "profile" as const, href: "/student/profile", icon: User },
+    ],
+  },
 ];
+
+const navItems = studentNavGroups.flatMap((group) => group.items);
+
+function isNavItemActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 function splitName(rawName?: string): { firstName?: string; fullName?: string } {
   const value = (rawName || "").trim().replace(/\s+/g, " ");
@@ -185,6 +225,7 @@ function StudentSidebarIdentity({
           <Link
             href="/student/dashboard"
             onClick={onNavigate}
+            aria-label={displayName}
             className="flex justify-center rounded-lg p-2 -m-2 transition-colors hover:bg-accent/5"
           >
             <Avatar className="h-10 w-10 shrink-0 ring-2 ring-accent/10">
@@ -239,11 +280,11 @@ function StudentSidebarPanel({
 }: {
   profile: { firstName?: string; fullName?: string; photoUrl?: string } | null;
   user: ReturnType<typeof useUser>["user"];
-  visibleNavItems: typeof navItems;
-  navLinkActive: (item: (typeof navItems)[number]) => boolean;
+  visibleNavItems: StudentNavItem[];
+  navLinkActive: (item: StudentNavItem) => boolean;
   locale: string;
   setLocale: (locale: "en" | "pt") => void;
-  t: (key: (typeof navItems)[number]["key"] | "logout") => string;
+  t: (key: TranslationKey) => string;
   onSignOut: () => void;
 }) {
   const { isMobile, state, setOpenMobile } = useSidebar();
@@ -258,7 +299,7 @@ function StudentSidebarPanel({
       <SidebarHeader
         className={cn(
           "border-b shrink-0",
-          isMobile ? "p-6 pb-4" : collapsed ? "p-2" : "p-6 pb-4"
+          isMobile ? "p-6 pb-4 pr-14" : collapsed ? "p-2" : "p-6 pb-4"
         )}
       >
         <StudentSidebarIdentity
@@ -270,33 +311,47 @@ function StudentSidebarPanel({
         />
       </SidebarHeader>
 
-      <SidebarContent className={cn(isMobile ? "px-4 py-4" : collapsed ? "px-2" : "px-4")}>
-        <SidebarMenu className="space-y-1">
-          {visibleNavItems.map((item) => {
-            const isActive = navLinkActive(item);
+      <SidebarContent className={isMobile ? "py-4" : undefined}>
+        <nav aria-label={t("sidebarNavigation")}>
+          {studentNavGroups.map((group) => {
+            const items = group.items.filter((item) =>
+              visibleNavItems.some((visibleItem) => visibleItem.href === item.href)
+            );
+            if (items.length === 0) return null;
             return (
-              <SidebarMenuItem key={item.key}>
-                <SidebarMenuButton
-                  asChild
-                  isActive={isActive}
-                  tooltip={t(item.key)}
-                  size="lg"
-                  className={cn(
-                    "font-medium",
-                    isActive
-                      ? "bg-accent/10 text-accent hover:bg-accent/10 hover:text-accent"
-                      : "text-muted-foreground hover:bg-accent/5 hover:text-accent"
-                  )}
-                >
-                  <Link href={item.href} onClick={closeMobile}>
-                    <item.icon className="h-5 w-5" />
-                    <span>{t(item.key)}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              <SidebarGroup key={group.key}>
+                <SidebarGroupLabel aria-hidden={collapsed}>{t(group.key)}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu className="space-y-1">
+                    {items.map((item) => {
+                      const isActive = navLinkActive(item);
+                      return (
+                        <SidebarMenuItem key={item.key}>
+                          <SidebarMenuButton
+                            asChild
+                            isActive={isActive}
+                            tooltip={t(item.key)}
+                            size="lg"
+                            className="font-medium"
+                          >
+                            <Link
+                              href={item.href}
+                              onClick={closeMobile}
+                              aria-current={isActive ? "page" : undefined}
+                            >
+                              <item.icon className="h-5 w-5" />
+                              <span>{t(item.key)}</span>
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
             );
           })}
-        </SidebarMenu>
+        </nav>
       </SidebarContent>
 
       <SidebarFooter
@@ -405,7 +460,9 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
     [isOpenAccess]
   );
 
-  const navLinkActive = (item: (typeof navItems)[number]) => pathname === item.href;
+  const navLinkActive = (item: StudentNavItem) =>
+    isNavItemActive(pathname, item.href);
+  const activeNavItem = visibleNavItems.find(navLinkActive);
 
   const handleSignOut = () => {
     if (!auth) return;
@@ -416,6 +473,12 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarProvider>
+      <a
+        href="#main-content"
+        className="fixed left-4 top-[calc(1rem+env(safe-area-inset-top))] z-[100] -translate-y-[200%] rounded-md bg-background px-4 py-3 font-medium shadow-lg transition-transform focus:translate-y-0"
+      >
+        {t("skipToContent")}
+      </a>
       <Sidebar collapsible="icon">
         <StudentSidebarPanel
           profile={profile}
@@ -431,11 +494,20 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
       </Sidebar>
 
       <SidebarInset>
-        <header className="flex shrink-0 items-center gap-2 border-b p-3 md:hidden">
+        <header className="sticky top-0 z-50 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur md:hidden">
           <SidebarTrigger className="shadow-sm" />
+          <span className="truncate text-sm font-semibold">
+            {t(activeNavItem?.key ?? "myDashboard")}
+          </span>
         </header>
 
-        <div className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 min-w-0">
+        <StudentBirthdayPrompt />
+
+        <div
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 overflow-x-hidden overflow-y-auto p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:p-6 min-w-0"
+        >
           {reminder.show && !isBlocked ? (
             <Alert
               variant={reminder.variant === "overdue" ? "destructive" : "default"}
@@ -464,8 +536,16 @@ export function StudentNavigation({ children }: { children: React.ReactNode }) {
                       })
                     )}
                   </p>
-                  <Button size="sm" variant="secondary" className="shrink-0 w-fit" asChild>
-                    <Link href="/student/billing">{t("paymentReminderCta")}</Link>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="shrink-0"
+                    asChild
+                    title={t("paymentReminderCta")}
+                  >
+                    <Link href="/student/billing" aria-label={t("paymentReminderCta")}>
+                      <CreditCard className="h-4 w-4" aria-hidden />
+                    </Link>
                   </Button>
                 </AlertDescription>
               </div>

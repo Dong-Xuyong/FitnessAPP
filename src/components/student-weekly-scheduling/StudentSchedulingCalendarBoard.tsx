@@ -208,10 +208,9 @@ export function StudentSchedulingCalendarBoard({
       <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarDays className="h-4 w-4 text-primary" />
+            <CalendarDays className="h-4 w-4 text-primary" aria-hidden />
             {t("weeklySchedulingCalendarTitle")}
           </CardTitle>
-          <CardDescription>{t("weeklySchedulingCalendarDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
@@ -241,7 +240,6 @@ export function StudentSchedulingCalendarBoard({
             <p className="text-xs text-muted-foreground">
               {t("weeklySchedulingActiveWeek")} {cycleStartDisplay}
             </p>
-            <p className="text-xs text-muted-foreground">{t("weeklySchedulingWeekPickerDesc")}</p>
           </div>
 
           <MonthCalendar

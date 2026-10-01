@@ -356,13 +356,14 @@ export default function StudentWorkoutHistoryPage() {
                           <div className="flex flex-wrap gap-2 border-b bg-muted/10 px-4 py-2.5">
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon"
                               variant="outline"
-                              className="gap-1.5 text-xs"
+                              className="h-8 w-8"
                               onClick={() => startEditSession(session)}
+                              aria-label={t("editSession")}
+                              title={t("editSession")}
                             >
-                              <Pencil className="h-3.5 w-3.5" />
-                              {t("editSession")}
+                              <Pencil className="h-3.5 w-3.5" aria-hidden />
                             </Button>
                           </div>
                         )}
