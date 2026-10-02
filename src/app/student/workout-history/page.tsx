@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useUser, useFirestore } from "@/firebase";
 import { cn } from "@/lib/utils";
 import { parseSessionCompletedAtMs } from "@/lib/student-monthly-workout-completion";
+import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -154,6 +155,7 @@ export default function StudentWorkoutHistoryPage() {
 
       const completedSessions = sessionsSnap.docs
         .map((d) => ({ id: d.id, ...d.data() } as WorkoutSession))
+        .filter((s) => !isCoachBodyMetricSession(s as unknown as Record<string, unknown>))
         .filter((s) => parseSessionCompletedAtMs(s.completedAt as unknown) != null)
         .sort(
           (a, b) =>

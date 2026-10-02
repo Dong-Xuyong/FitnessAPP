@@ -1972,9 +1972,11 @@ export default function StudentDetailPage({ id }: { id: string }) {
 
   const sortedSessions = useMemo(
     () =>
-      [...(workoutSessions || [])].sort((a: any, b: any) =>
-        (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
-      ),
+      [...(workoutSessions || [])]
+        .filter((session) => !isCoachBodyMetricSession(session as Record<string, unknown>))
+        .sort((a: any, b: any) =>
+          (b.completedAt || b.startedAt || "").localeCompare(a.completedAt || a.startedAt || "")
+        ),
     [workoutSessions]
   );
 
