@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,11 @@ import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection } from "firebase/firestore";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
-import { fetchRosterPaymentStatusMap } from "@/lib/roster-payment-status";
+import {
+  displayedRosterPaymentStatus,
+  fetchRosterPaymentStatusMap,
+  rememberRosterPaymentBadge,
+} from "@/lib/roster-payment-status";
 import { normalizedPaymentPaid } from "@/lib/student-payment-due";
 import { isBirthdayToday } from "@/lib/coach-birthday-reminders";
 
@@ -58,15 +62,35 @@ export default function StudentsPage() {
 
   // Fetch latest payment status for each roster student
   const [paymentStatusMap, setPaymentStatusMap] = useState<Record<string, { status: string; period: string }>>({});
+  const rosterIdsKey = useMemo(
+    () =>
+      (rosterStudents ?? [])
+        .map((s: { id?: string }) => s.id)
+        .filter((id): id is string => Boolean(id))
+        .sort()
+        .join("\n"),
+    [rosterStudents]
+  );
+  const rosterStudentsRef = useRef(rosterStudents);
+  rosterStudentsRef.current = rosterStudents;
   const fetchPaymentStatuses = useCallback(async () => {
-    if (!db || !user || !rosterStudents || rosterStudents.length === 0) {
+    if (!db || !user || !rosterIdsKey) {
       setPaymentStatusMap({});
       return;
     }
-    const ids = rosterStudents.map((s: any) => s.id).filter((id: string) => Boolean(id));
-    const map = await fetchRosterPaymentStatusMap(db, user.uid, ids);
-    setPaymentStatusMap(map);
-  }, [db, user, rosterStudents]);
+    const ids = rosterIdsKey.split("\n");
+    await fetchRosterPaymentStatusMap(db, user.uid, ids, (id, status) => {
+      setPaymentStatusMap((prev) => {
+        const cur = prev[id];
+        if (cur?.status === status.status && cur.period === status.period) return prev;
+        return { ...prev, [id]: status };
+      });
+      const row = (rosterStudentsRef.current ?? []).find((s: { id?: string }) => s.id === id) as
+        | { latestPaymentStatus?: unknown; latestPaymentPeriod?: unknown }
+        | undefined;
+      rememberRosterPaymentBadge(db, user.uid, id, status, row);
+    });
+  }, [db, user, rosterIdsKey]);
 
   useEffect(() => {
     fetchPaymentStatuses();
@@ -104,10 +128,6 @@ export default function StudentsPage() {
   return (
     <Navigation>
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h2 className="text-3xl font-bold font-headline">{t("allStudents")}</h2>
-        </div>
-
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
             <div className="relative w-full sm:w-96">
@@ -135,7 +155,8 @@ export default function StudentsPage() {
                 const privateNote =
                   typeof rosterRow?.coachingNotes === "string" ? rosterRow.coachingNotes.trim() : "";
                 const isBlocked = rosterRow?.blocked === true;
-                const paymentInfo = paymentStatusMap[student.id];
+                const paymentInfo =
+                  paymentStatusMap[student.id] ?? displayedRosterPaymentStatus(rosterRow);
                 const initial =
                   (displayName !== t("unnamed") ? displayName[0] : undefined) ||
                   email[0]?.toUpperCase() ||

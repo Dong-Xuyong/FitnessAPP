@@ -100,10 +100,6 @@ export default function StudentExerciseHistoryPage() {
 
   return (
       <div className="space-y-6">
-        <header>
-          <h1 className="text-3xl font-bold font-headline">{t("exerciseHistory")}</h1>
-        </header>
-
         <Card>
           <CardHeader>
             <CardTitle>{t("searchExercisesTitle")}</CardTitle>
