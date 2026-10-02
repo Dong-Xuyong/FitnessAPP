@@ -120,6 +120,9 @@ export default function CoachRevenuePage() {
             rate60Min: row.rate60Min,
             sessionDurationMin: row.sessionDurationMin,
             sessionsPerWeek: row.sessionsPerWeek,
+            loyaltyDiscountPercent: row.loyaltyDiscountPercent,
+            coachingStartedOn: row.coachingStartedOn,
+            socioFee: row.socioFee,
           },
           payments: paymentsSnap.docs.map((d) => paymentFromDoc(d.id, d.data() as Record<string, unknown>)),
         };

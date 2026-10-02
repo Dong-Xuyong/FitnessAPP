@@ -59,6 +59,7 @@ import {
   deleteDoc,
   query,
   where,
+  getDoc,
   getDocs,
   limit,
   writeBatch,
@@ -130,8 +131,14 @@ import {
   normalizedPaymentPending,
 } from "@/lib/student-payment-due";
 import {
+  applyLoyaltyDiscount,
+  applyStoredLoyaltyDiscount,
   buildPaymentAmounts,
   buildShopBillingPeriodContextFromPayments,
+  clampLoyaltyDiscountPercent,
+  clampSocioFee,
+  coachingTenure,
+  loyaltyDiscountEligible,
   catalogMapFromItems,
   collectShopLinesForPaymentPeriod,
   collectShopLinesPaidByPaymentId,
@@ -254,6 +261,9 @@ function BillingTab({
   const [trainingAccessMode, setTrainingAccessMode] = useState<TrainingAccessMode>("scheduled");
   const [paymentMethod, setPaymentMethod] = useState("mbway");
   const [paymentDetails, setPaymentDetails] = useState("");
+  const [coachingStartedOn, setCoachingStartedOn] = useState("");
+  const [loyaltyDiscountPercent, setLoyaltyDiscountPercent] = useState("");
+  const [socioFee, setSocioFee] = useState("");
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [newPayment, setNewPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid" });
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
@@ -275,6 +285,13 @@ function BillingTab({
     if (selectedRate <= 0 || weekly <= 0) return 0;
     return Number((selectedRate * weekly * 4).toFixed(2));
   }, [rate30Min, rate60Min, sessionDurationMin, sessionsPerWeek]);
+
+  const loyaltyPercent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
+  const listMonthly = Number(monthlyRate) || calculatedMonthlyRate || 0;
+  const loyaltyActive = loyaltyDiscountEligible(coachingStartedOn);
+  const discountedMonthly = applyStoredLoyaltyDiscount(listMonthly, loyaltyPercent, coachingStartedOn);
+  const socioAmount = clampSocioFee(socioFee);
+  const tenure = coachingTenure(coachingStartedOn);
 
   // Read billing config from roster doc
   const billingRef = useMemoFirebase(() => {
@@ -352,7 +369,8 @@ function BillingTab({
     ).sort();
     return buildSuggestedRecordPayment({
       payments: sortedPayments || [],
-      monthlyRate: Number(monthlyRate) || calculatedMonthlyRate || 0,
+      monthlyRate: discountedMonthly,
+      socioFee: socioAmount,
       unpaidTargetPeriods,
       unpaidShopForPeriod: (period) =>
         computeUnpaidShopForPaymentPeriod(
@@ -364,8 +382,8 @@ function BillingTab({
     });
   }, [
     sortedPayments,
-    monthlyRate,
-    calculatedMonthlyRate,
+    discountedMonthly,
+    socioAmount,
     shopRegs,
     shopCatalogMap,
     shopPaymentTargetResolver,
@@ -374,19 +392,19 @@ function BillingTab({
   const activeRecordBreakdown = useMemo(() => {
     const period = newPayment.period.trim() || suggestedRecordPayment.period;
     if (!/^\d{4}-\d{2}$/.test(period)) return suggestedRecordPayment;
-    const base = Number(monthlyRate) || calculatedMonthlyRate || 0;
+    const base = discountedMonthly;
     const shopAmount = computeUnpaidShopForPaymentPeriod(
       shopRegs,
       shopCatalogMap,
       period,
       shopPaymentTargetResolver
     );
-    return { period, ...buildPaymentAmounts(base, shopAmount) };
+    return { period, ...buildPaymentAmounts(base, shopAmount, socioAmount) };
   }, [
     newPayment.period,
     suggestedRecordPayment,
-    monthlyRate,
-    calculatedMonthlyRate,
+    discountedMonthly,
+    socioAmount,
     shopRegs,
     shopCatalogMap,
     shopPaymentTargetResolver,
@@ -405,8 +423,27 @@ function BillingTab({
       );
       setPaymentMethod((rosterData as any).paymentMethod || "mbway");
       setPaymentDetails((rosterData as any).paymentDetails || "");
+      const storedPercent = (rosterData as Record<string, unknown>).loyaltyDiscountPercent;
+      setLoyaltyDiscountPercent(
+        storedPercent == null || storedPercent === "" ? "" : String(storedPercent)
+      );
+      const storedSocio = (rosterData as Record<string, unknown>).socioFee;
+      setSocioFee(storedSocio == null || storedSocio === "" ? "" : String(storedSocio));
+      const started = String((rosterData as Record<string, unknown>).coachingStartedOn || "")
+        .trim()
+        .slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(started)) {
+        setCoachingStartedOn(started);
+      } else if (db && globalStudentUid) {
+        void getDoc(doc(db, "students", globalStudentUid)).then((snap) => {
+          const joined = String(snap.data()?.joinedAt || "").trim().slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(joined)) {
+            setCoachingStartedOn((prev) => prev || joined);
+          }
+        });
+      }
     }
-  }, [rosterData]);
+  }, [rosterData, db, globalStudentUid]);
 
   useEffect(() => {
     if (calculatedMonthlyRate > 0) {
@@ -421,11 +458,13 @@ function BillingTab({
         ? `${sessionsPerWeek}× ${t("perWeek")}`
         : "—";
     const monthly =
-      Number(monthlyRate) > 0
-        ? `€${Number(monthlyRate).toFixed(2)}`
-        : calculatedMonthlyRate > 0
-          ? `€${calculatedMonthlyRate.toFixed(2)}`
-          : "—";
+      listMonthly > 0
+        ? loyaltyActive && loyaltyPercent > 0
+          ? `€${discountedMonthly.toFixed(2)} (−${loyaltyPercent}%)`
+          : `€${listMonthly.toFixed(2)}`
+        : "—";
+    const socioBit = socioAmount > 0 ? ` + €${socioAmount.toFixed(2)} ${t("socioFeeShort")}` : "";
+    const monthlyLabeled = monthly === "—" ? monthly : `${monthly}${socioBit}`;
     const methodLabel =
       paymentMethod === "mbway"
         ? "MB WAY"
@@ -438,12 +477,15 @@ function BillingTab({
       trainingAccessMode === "open"
         ? t("trainingAccessModeOpen")
         : t("trainingAccessModeScheduled");
-    return `${durationLabel} · ${weekly} · ${monthly} · ${methodLabel} · ${accessLabel}`;
+    return `${durationLabel} · ${weekly} · ${monthlyLabeled} · ${methodLabel} · ${accessLabel}`;
   }, [
     sessionDurationMin,
     sessionsPerWeek,
-    monthlyRate,
-    calculatedMonthlyRate,
+    listMonthly,
+    discountedMonthly,
+    loyaltyPercent,
+    loyaltyActive,
+    socioAmount,
     paymentMethod,
     trainingAccessMode,
     t,
@@ -537,6 +579,12 @@ function BillingTab({
     const safeRate30 = Math.max(0, Number(rate30Min) || 0);
     const safeRate60 = Math.max(0, Number(rate60Min) || 0);
     const mode = normalizeTrainingAccessMode(trainingAccessMode);
+    const started = coachingStartedOn.trim().slice(0, 10);
+    const percent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
+    const listRate = Number(monthlyRate) || calculatedMonthlyRate || 0;
+    const membership = applyStoredLoyaltyDiscount(listRate, percent, started);
+    const socio = clampSocioFee(socioFee);
+    const registrationDate = /^\d{4}-\d{2}-\d{2}$/.test(started) ? started : "";
     updateDocumentNonBlocking(doc(db, "personalTrainers", user.uid, "students", studentId), {
       billingModel: "session_based",
       sessionDurationMin: safeDuration,
@@ -544,15 +592,38 @@ function BillingTab({
       trainingAccessMode: mode,
       rate30Min: safeRate30,
       rate60Min: safeRate60,
-      monthlyRate: Number(monthlyRate) || calculatedMonthlyRate || 0,
+      monthlyRate: listRate,
+      socioFee: socio,
+      coachingStartedOn: registrationDate,
+      loyaltyDiscountPercent: percent,
       paymentMethod,
       paymentDetails,
       billingStatus: "active",
     });
+    for (const payment of sortedPayments || []) {
+      const status = String(payment.status ?? "");
+      if (normalizedPaymentPaid(status)) continue;
+      if (status.trim() && !normalizedPaymentPending(status)) continue;
+      if (!payment.id) continue;
+      const shop = Math.max(0, Number(payment.shopAmount) || 0);
+      const amounts = buildPaymentAmounts(membership, shop, socio);
+      updateDocumentNonBlocking(
+        doc(db, "personalTrainers", user.uid, "students", studentId, "payments", payment.id),
+        {
+          baseAmount: amounts.baseAmount,
+          shopAmount: amounts.shopAmount,
+          socioAmount: amounts.socioAmount,
+          amount: amounts.amount,
+        }
+      );
+    }
     if (globalStudentUid) {
       setDocumentNonBlocking(
         doc(db, "students", globalStudentUid),
-        { trainingAccessMode: mode },
+        {
+          trainingAccessMode: mode,
+          ...(registrationDate ? { joinedAt: `${registrationDate}T12:00:00` } : {}),
+        },
         { merge: true }
       );
     }
@@ -564,20 +635,21 @@ function BillingTab({
     if (!db || !user || !newPayment.period) return;
     try {
       const period = newPayment.period.trim();
-      const base = Number(monthlyRate) || calculatedMonthlyRate || 0;
+      const base = discountedMonthly;
       const shopAmount = computeUnpaidShopForPaymentPeriod(
         shopRegs,
         shopCatalogMap,
         period,
         shopPaymentTargetResolver
       );
-      const amounts = buildPaymentAmounts(base, shopAmount);
+      const amounts = buildPaymentAmounts(base, shopAmount, socioAmount);
       const amount = Number(newPayment.amount) || amounts.amount;
       const payload = {
         period,
         amount,
         baseAmount: amounts.baseAmount,
         shopAmount: amounts.shopAmount,
+        socioAmount: amounts.socioAmount,
         method: newPayment.method,
         status: newPayment.status,
         paidAt: normalizedPaymentPaid(newPayment.status) ? new Date().toISOString() : null,
@@ -798,6 +870,60 @@ function BillingTab({
               />
             </div>
             <div className="space-y-2">
+              <Label>{t("coachingStartedOn")}</Label>
+              <Input
+                type="date"
+                value={coachingStartedOn}
+                onChange={(e) => setCoachingStartedOn(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("socioFee")}</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0"
+                value={socioFee}
+                onChange={(e) => setSocioFee(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("loyaltyDiscountPercent")}</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                placeholder="0"
+                value={loyaltyDiscountPercent}
+                onChange={(e) => setLoyaltyDiscountPercent(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              {t("loyaltyDiscountRule")}
+              {tenure
+                ? ` · ${t("loyaltyTenure")
+                    .replace("{years}", String(tenure.years))
+                    .replace("{months}", String(tenure.months))}`
+                : ""}
+              {loyaltyPercent > 0
+                ? ` · ${
+                    loyaltyActive
+                      ? t("loyaltyDiscountPreview")
+                          .replace("{list}", listMonthly.toFixed(2))
+                          .replace("{percent}", String(loyaltyPercent))
+                          .replace("{due}", discountedMonthly.toFixed(2))
+                      : t("loyaltyDiscountWaiting")
+                          .replace("{list}", listMonthly.toFixed(2))
+                          .replace("{due}", applyLoyaltyDiscount(listMonthly, loyaltyPercent).toFixed(2))
+                  }`
+                : ""}
+              {socioAmount > 0
+                ? ` + €${socioAmount.toFixed(2)} ${t("socioFeeShort")} = €${(discountedMonthly + socioAmount).toFixed(2)}`
+                : ""}
+            </p>
+            <div className="space-y-2">
               <Label>{t("paymentMethod")}</Label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                 <SelectTrigger>
@@ -882,6 +1008,9 @@ function BillingTab({
               {suggestedRecordPayment.amount > 0 ? (
                 <p className="text-xs text-muted-foreground sm:text-right sm:max-w-[220px]">
                   {t("shopBillingMembership")}: €{suggestedRecordPayment.baseAmount.toFixed(2)} ·{" "}
+                  {suggestedRecordPayment.socioAmount > 0
+                    ? `${t("socioFeeShort")}: €${suggestedRecordPayment.socioAmount.toFixed(2)} · `
+                    : ""}
                   {t("shopBillingShop")}: €{suggestedRecordPayment.shopAmount.toFixed(2)} ·{" "}
                   {t("shopBillingTotal")}: €{suggestedRecordPayment.amount.toFixed(2)}
                 </p>
@@ -931,9 +1060,14 @@ function BillingTab({
                     value={newPayment.amount}
                     onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
                   />
-                  {activeRecordBreakdown.baseAmount > 0 || activeRecordBreakdown.shopAmount > 0 ? (
+                  {activeRecordBreakdown.baseAmount > 0 ||
+                  activeRecordBreakdown.shopAmount > 0 ||
+                  activeRecordBreakdown.socioAmount > 0 ? (
                     <p className="text-xs text-muted-foreground">
                       {t("shopBillingMembership")}: €{activeRecordBreakdown.baseAmount.toFixed(2)} ·{" "}
+                      {activeRecordBreakdown.socioAmount > 0
+                        ? `${t("socioFeeShort")}: €${activeRecordBreakdown.socioAmount.toFixed(2)} · `
+                        : ""}
                       {t("shopBillingShop")}: €{activeRecordBreakdown.shopAmount.toFixed(2)} ·{" "}
                       {t("shopBillingTotal")}: €{activeRecordBreakdown.amount.toFixed(2)}
                     </p>
@@ -1133,6 +1267,9 @@ function BillingTab({
                               <div className="text-xs text-muted-foreground space-y-0.5 mt-0.5">
                                 <p>
                                   {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)} ·{" "}
+                                  {Number(p.socioAmount ?? 0) > 0
+                                    ? `${t("socioFeeShort")}: €${Number(p.socioAmount).toFixed(2)} · `
+                                    : ""}
                                   {t("shopBillingShop")}: €{shopCharge.toFixed(2)}
                                 </p>
                                 {purchaseLines.length > 0 ? (

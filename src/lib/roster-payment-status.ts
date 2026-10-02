@@ -9,7 +9,12 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { buildPaymentAmounts, resolveMonthlyRate } from "@/lib/shop-billing";
+import {
+  applyStoredLoyaltyDiscount,
+  buildPaymentAmounts,
+  clampSocioFee,
+  resolveMonthlyRate,
+} from "@/lib/shop-billing";
 
 export type RosterPaymentStatus = { status: string; period: string };
 
@@ -66,8 +71,12 @@ export async function ensurePendingPaymentForCurrentPeriod(
   const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
   if (!existing.empty) return false;
 
-  const monthlyRate = resolveMonthlyRate(roster);
-  const amounts = buildPaymentAmounts(monthlyRate, 0);
+  const monthlyRate = applyStoredLoyaltyDiscount(
+    resolveMonthlyRate(roster),
+    roster.loyaltyDiscountPercent,
+    roster.coachingStartedOn
+  );
+  const amounts = buildPaymentAmounts(monthlyRate, 0, clampSocioFee(roster.socioFee));
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
   const nowIso = new Date().toISOString();
 
@@ -76,6 +85,7 @@ export async function ensurePendingPaymentForCurrentPeriod(
     amount: amounts.amount,
     baseAmount: amounts.baseAmount,
     shopAmount: amounts.shopAmount,
+    socioAmount: amounts.socioAmount,
     method,
     status: "pending",
     paidAt: null,
@@ -106,15 +116,20 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
   if (String(roster.billingStatus ?? "").trim().toLowerCase() !== "active") {
     return false;
   }
-  const monthlyRate = resolveMonthlyRate(roster);
-  if (!Number.isFinite(monthlyRate) || monthlyRate <= 0) return false;
+  const monthlyRate = applyStoredLoyaltyDiscount(
+    resolveMonthlyRate(roster),
+    roster.loyaltyDiscountPercent,
+    roster.coachingStartedOn
+  );
+  const socioFee = clampSocioFee(roster.socioFee);
+  if ((!Number.isFinite(monthlyRate) || monthlyRate <= 0) && socioFee <= 0) return false;
 
   const period = nextBillingPeriod(now);
   const paymentsCol = collection(db, "personalTrainers", trainerUid, "students", rosterStudentId, "payments");
   const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
   if (!existing.empty) return false;
 
-  const amounts = buildPaymentAmounts(monthlyRate, 0);
+  const amounts = buildPaymentAmounts(monthlyRate, 0, socioFee);
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
   const nowIso = now.toISOString();
 
@@ -123,6 +138,7 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
     amount: amounts.amount,
     baseAmount: amounts.baseAmount,
     shopAmount: amounts.shopAmount,
+    socioAmount: amounts.socioAmount,
     method,
     status: "pending",
     paidAt: null,
