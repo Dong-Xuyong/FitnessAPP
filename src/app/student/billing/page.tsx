@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
+import { Loader2, CreditCard } from "lucide-react";
 import { useUser, useFirestore } from "@/firebase";
 import { useI18n } from "@/lib/i18n";
 import { useStudentBillingData } from "@/hooks/use-student-billing-data";
@@ -32,6 +32,13 @@ export default function StudentBillingPage() {
 
   return (
     <div className="space-y-6 w-full min-w-0 max-w-2xl">
+      <header>
+        <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
+          <CreditCard className="h-8 w-8 text-primary" aria-hidden />
+          {t("billing")}
+        </h1>
+      </header>
+
       {plan ? <StudentCurrentPlanCard plan={plan} /> : null}
 
       {currentPeriodPending ? (

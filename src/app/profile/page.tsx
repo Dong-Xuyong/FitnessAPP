@@ -183,6 +183,10 @@ export default function TrainerProfilePage() {
   return (
     <Navigation>
       <div className="max-w-2xl mx-auto space-y-6">
+        <header>
+          <h1 className="text-3xl font-bold font-headline">{t("coachProfile")}</h1>
+        </header>
+
         <form onSubmit={handleSave}>
           <Card className="border-2 overflow-hidden">
             <CardHeader className="bg-muted/30 pb-12">

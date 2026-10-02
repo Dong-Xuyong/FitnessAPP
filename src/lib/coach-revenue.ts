@@ -1,4 +1,4 @@
-import { applyStoredLoyaltyDiscount, resolveMonthlyRate, roundMoney } from "@/lib/shop-billing";
+import { resolveMonthlyRate, roundMoney } from "@/lib/shop-billing";
 import {
   currentBillingPeriod,
   nextBillingPeriod,
@@ -20,7 +20,6 @@ export type CoachRevenuePayment = {
   paidAt?: string | null;
   baseAmount?: number;
   shopAmount?: number;
-  socioAmount?: number;
 };
 
 export type CoachRevenueRosterFields = {
@@ -30,9 +29,6 @@ export type CoachRevenueRosterFields = {
   rate60Min?: unknown;
   sessionDurationMin?: unknown;
   sessionsPerWeek?: unknown;
-  loyaltyDiscountPercent?: unknown;
-  coachingStartedOn?: unknown;
-  socioFee?: unknown;
 };
 
 export type CoachRevenueStudent = {
@@ -46,7 +42,6 @@ export type PaymentAmountSplit = {
   total: number;
   membership: number;
   shop: number;
-  socio: number;
 };
 
 export type MonthlyRevenueRow = {
@@ -116,31 +111,22 @@ export function paymentFromDoc(id: string, data: Record<string, unknown>): Coach
     paidAt: data.paidAt != null ? String(data.paidAt) : null,
     baseAmount: Number(data.baseAmount),
     shopAmount: Number(data.shopAmount),
-    socioAmount: Number(data.socioAmount),
   };
 }
 
 export function splitPaymentAmounts(p: CoachRevenuePayment): PaymentAmountSplit {
   const base = Number(p.baseAmount);
   const shop = Number(p.shopAmount);
-  const socio = Number(p.socioAmount);
   const hasBase = Number.isFinite(base) && base > 0;
   const hasShop = Number.isFinite(shop) && shop > 0;
-  const hasSocio = Number.isFinite(socio) && socio > 0;
-  if (hasBase || hasShop || hasSocio) {
-    const membership = hasBase ? roundMoney(base) : 0;
-    const shopAmt = hasShop ? roundMoney(shop) : 0;
-    const socioAmt = hasSocio ? roundMoney(socio) : 0;
-    return {
-      total: roundMoney(membership + shopAmt + socioAmt),
-      membership,
-      shop: shopAmt,
-      socio: socioAmt,
-    };
+  if (hasBase || hasShop) {
+    const membership = Number.isFinite(base) && base > 0 ? roundMoney(base) : 0;
+    const shopAmt = Number.isFinite(shop) && shop > 0 ? roundMoney(shop) : 0;
+    return { total: roundMoney(membership + shopAmt), membership, shop: shopAmt };
   }
   const amount = Number(p.amount);
   const total = Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : 0;
-  return { total, membership: total, shop: 0, socio: 0 };
+  return { total, membership: total, shop: 0 };
 }
 
 export function shiftBillingPeriod(period: string, monthsDelta: number): string | null {
@@ -204,7 +190,7 @@ function accumulateMonthFromStudents(
       const split = splitPaymentAmounts(payment);
       if (normalizedPaymentPaid(payment.status)) {
         row.collected = roundMoney(row.collected + split.total);
-        row.membershipCollected = roundMoney(row.membershipCollected + split.membership + split.socio);
+        row.membershipCollected = roundMoney(row.membershipCollected + split.membership);
         row.shopCollected = roundMoney(row.shopCollected + split.shop);
         paidIds.add(student.id);
       } else if (normalizedPaymentPending(payment.status) || !normalizedPaymentPaid(payment.status)) {
@@ -243,13 +229,7 @@ export function forecastStudentAmount(
   }
 
   if (!isBillingActive(student.roster)) return null;
-  const rate = roundMoney(
-    applyStoredLoyaltyDiscount(
-      resolveMonthlyRate(student.roster),
-      student.roster.loyaltyDiscountPercent,
-      student.roster.coachingStartedOn
-    ) + roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
-  );
+  const rate = resolveMonthlyRate(student.roster);
   if (!Number.isFinite(rate) || rate <= 0) return null;
   return {
     studentId: student.id,
@@ -297,14 +277,7 @@ function currentPeriodMixFromStudents(
     }
 
     if (!isBillingActive(student.roster)) continue;
-    const rate = roundMoney(
-      applyStoredLoyaltyDiscount(
-        resolveMonthlyRate(student.roster),
-        student.roster.loyaltyDiscountPercent,
-        student.roster.coachingStartedOn,
-        now
-      ) + roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
-    );
+    const rate = resolveMonthlyRate(student.roster);
     if (rate <= 0) continue;
     if (overdueNow) {
       mix.overdue = roundMoney(mix.overdue + rate);

@@ -5,13 +5,7 @@ import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 
-export function ThemeToggle({
-  variant = "outline",
-  className,
-}: {
-  variant?: "outline" | "ghost";
-  className?: string;
-}) {
+export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -19,7 +13,7 @@ export function ThemeToggle({
 
   if (!mounted) {
     return (
-      <Button variant={variant} size="icon" className={className} disabled aria-label="Toggle dark mode">
+      <Button variant="outline" size="icon" disabled aria-label="Toggle dark mode">
         <Sun className="h-4 w-4" />
       </Button>
     );
@@ -27,9 +21,8 @@ export function ThemeToggle({
 
   return (
     <Button
-      variant={variant}
+      variant="outline"
       size="icon"
-      className={className}
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
       aria-label="Toggle dark mode"
     >

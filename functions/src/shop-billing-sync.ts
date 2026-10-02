@@ -3,9 +3,7 @@ import { logger } from "firebase-functions";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import {
-  applyStoredLoyaltyDiscount,
   buildPaymentAmounts,
-  clampSocioFee,
   buildShopBillingPeriodContextForMarkPaid,
   buildShopBillingPeriodContextFromPayments,
   collectTargetPaymentPeriodsFromRegistrations,
@@ -207,11 +205,7 @@ export async function syncShopPaymentForPeriod(
   const roster = rosterSnap.data() as Record<string, unknown>;
   if (String(roster.billingStatus ?? "").trim().toLowerCase() !== "active") return;
 
-  const monthlyRate = applyStoredLoyaltyDiscount(
-    resolveMonthlyRate(roster),
-    roster.loyaltyDiscountPercent,
-    roster.coachingStartedOn
-  );
+  const monthlyRate = resolveMonthlyRate(roster);
   const paymentsCol = rosterRef.collection("payments");
   const registrations = await loadStudentPurchases(trainerId, authStudentId);
 
@@ -230,10 +224,9 @@ export async function syncShopPaymentForPeriod(
     defaultTargetByRegDate
   );
 
-  const socioFee = clampSocioFee(roster.socioFee);
-  if (monthlyRate <= 0 && shopTotal <= 0 && socioFee <= 0) return;
+  if (monthlyRate <= 0 && shopTotal <= 0) return;
 
-  const amounts = buildPaymentAmounts(monthlyRate, shopTotal, socioFee);
+  const amounts = buildPaymentAmounts(monthlyRate, shopTotal);
   const nowIso = new Date().toISOString();
 
   const periodSnap = await paymentsCol.where("period", "==", paymentPeriod).get();
@@ -263,7 +256,6 @@ export async function syncShopPaymentForPeriod(
     amount: amounts.amount,
     baseAmount: amounts.baseAmount,
     shopAmount: amounts.shopAmount,
-    socioAmount: amounts.socioAmount,
     method: String(roster.paymentMethod ?? "mbway") || "mbway",
     status: "pending",
     paidAt: null,

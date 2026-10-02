@@ -20,7 +20,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -30,12 +29,16 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
@@ -149,9 +152,9 @@ function TrainerSidebarIdentity({
             href="/dashboard"
             onClick={onNavigate}
             aria-label={displayName}
-            className="flex items-center justify-center rounded-lg transition-colors hover:bg-sidebar-accent"
+            className="flex justify-center rounded-lg p-2 -m-2 transition-colors hover:bg-sidebar-accent"
           >
-            <Avatar className="h-9 w-9 shrink-0 ring-2 ring-primary/10">
+            <Avatar className="h-10 w-10 shrink-0 ring-2 ring-primary/10">
               <AvatarImage src={avatarSrc} alt="" />
               <AvatarFallback className="text-sm">{fallback}</AvatarFallback>
             </Avatar>
@@ -215,7 +218,7 @@ function TrainerLocaleToggle({
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground">
+          <Button variant="outline" size="icon" className="w-full shrink-0">
             <Globe className="h-4 w-4" />
             <span className="sr-only">Language</span>
           </Button>
@@ -250,7 +253,14 @@ function TrainerSidebarUtilityControls({
   if (collapsed) {
     return (
       <div className="flex flex-col items-center gap-1">
-        <ThemeToggle variant="ghost" className="h-8 w-8 text-muted-foreground" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <ThemeToggle />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">Toggle dark mode</TooltipContent>
+        </Tooltip>
         <TrainerLocaleToggle locale={locale} setLocale={setLocale} collapsed />
       </div>
     );
@@ -264,65 +274,82 @@ function TrainerSidebarUtilityControls({
   );
 }
 
-function CoachBirthdaysButton({
+function CoachBirthdaysSidebarSection({
   upcomingBirthdays,
+  collapsed,
   t,
   onNavigate,
 }: {
   upcomingBirthdays: UpcomingBirthdayStudent[];
+  collapsed: boolean;
   t: SidebarTranslate;
   onNavigate: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const count = upcomingBirthdays.length;
-  const today = upcomingBirthdays.some((b) => b.daysUntil === 0);
+  if (collapsed) {
+    const first = upcomingBirthdays[0];
+    const tooltip =
+      upcomingBirthdays.length === 0
+        ? t("coachBirthdaysNavEmpty")
+        : upcomingBirthdays
+            .slice(0, 5)
+            .map((b) => `${b.name} · ${formatBirthdayWhenLabel(b.daysUntil, t)}`)
+            .join("\n");
+
+    return (
+      <SidebarGroup className="mt-auto">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              tooltip={tooltip}
+              size="lg"
+              className={cn(upcomingBirthdays.some((b) => b.daysUntil === 0) && "text-rose-600")}
+            >
+              <Link href={first ? `/students/${first.id}` : "/students"} onClick={onNavigate}>
+                <Cake className="h-5 w-5" />
+                <span>{t("coachBirthdaysNavTitle")}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+    );
+  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <SidebarMenuButton
-          aria-label={t("coachBirthdaysNavTitle")}
-          className={cn("relative h-8 w-8 justify-center", today && "text-rose-600")}
-        >
-          <Cake className="h-5 w-5" />
-          {count > 0 ? (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-medium leading-none text-white">
-              {count}
-            </span>
-          ) : null}
-        </SidebarMenuButton>
-      </PopoverTrigger>
-      <PopoverContent side="right" align="end" className="w-64 p-2">
-        <p className="px-2 py-1 text-sm font-medium">{t("coachBirthdaysNavTitle")}</p>
-        {count === 0 ? (
-          <p className="px-2 pb-1 text-xs text-muted-foreground">{t("coachBirthdaysNavEmpty")}</p>
+    <SidebarGroup className="mt-auto">
+      <SidebarGroupLabel className="gap-1.5">
+        <Cake className="h-3.5 w-3.5" />
+        {t("coachBirthdaysNavTitle")}
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        {upcomingBirthdays.length === 0 ? (
+          <p className="px-2 py-1.5 text-xs text-sidebar-foreground/60 leading-snug">
+            {t("coachBirthdaysNavEmpty")}
+          </p>
         ) : (
-          <div className="flex max-h-72 flex-col">
+          <SidebarMenu>
             {upcomingBirthdays.map((b) => (
-              <Link
-                key={b.id}
-                href={`/students/${b.id}`}
-                onClick={() => {
-                  setOpen(false);
-                  onNavigate();
-                }}
-                className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-              >
-                <span className="truncate">{b.name}</span>
-                <span
-                  className={cn(
-                    "shrink-0 text-xs tabular-nums",
-                    b.daysUntil === 0 ? "font-medium text-rose-600" : "text-muted-foreground"
-                  )}
-                >
-                  {formatBirthdayWhenLabel(b.daysUntil, t)}
-                </span>
-              </Link>
+              <SidebarMenuItem key={b.id}>
+                <SidebarMenuButton asChild size="sm" tooltip={b.name}>
+                  <Link href={`/students/${b.id}`} onClick={onNavigate}>
+                    <span className="truncate font-medium">{b.name}</span>
+                    <span
+                      className={cn(
+                        "ml-auto shrink-0 text-[10px] font-medium tabular-nums",
+                        b.daysUntil === 0 ? "text-rose-600" : "text-sidebar-foreground/60"
+                      )}
+                    >
+                      {formatBirthdayWhenLabel(b.daysUntil, t)}
+                    </span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             ))}
-          </div>
+          </SidebarMenu>
         )}
-      </PopoverContent>
-    </Popover>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 
@@ -346,7 +373,7 @@ function AppSidebar({
   upcomingBirthdays: UpcomingBirthdayStudent[];
 }) {
   const { state, isMobile, setOpenMobile } = useSidebar();
-  const collapsed = state === "collapsed";
+  const collapsed = state === "collapsed" && !isMobile;
 
   const handleNavClick = () => {
     if (isMobile) setOpenMobile(false);
@@ -361,8 +388,8 @@ function AppSidebar({
     <Sidebar collapsible="icon" className="border-sidebar-border">
       <SidebarHeader
         className={cn(
-          "w-full min-w-0 items-center",
-          collapsed ? "px-0 py-3" : isMobile ? "p-4 pr-14" : "border-b border-sidebar-border p-4 pb-4"
+          "border-b border-sidebar-border",
+          isMobile ? "p-4 pr-14" : collapsed ? "p-2" : "p-4 pb-4"
         )}
       >
         <TrainerSidebarIdentity
@@ -374,70 +401,58 @@ function AppSidebar({
         />
       </SidebarHeader>
 
-      <SidebarContent className="gap-0">
+      <SidebarContent>
         <nav aria-label={t("sidebarNavigation")}>
-          <SidebarMenu className="items-center gap-1 px-0 py-1">
-            {coachNavItems
-              .filter((item) => item.key !== "myProfile")
-              .map((item) => {
-                const isActive = isNavItemActive(pathname, item.href);
-                return (
-                  <SidebarMenuItem key={item.key}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive}
-                      tooltip={t(item.key)}
-                      className="h-8 w-8 justify-center"
-                    >
-                      <Link
-                        href={item.href}
-                        onClick={handleNavClick}
-                        aria-label={t(item.key)}
-                        aria-current={isActive ? "page" : undefined}
-                      >
-                        <item.icon className="h-5 w-5" />
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-          </SidebarMenu>
+          {coachNavGroups.map((group) => (
+            <SidebarGroup key={group.key}>
+              <SidebarGroupLabel aria-hidden={collapsed}>{t(group.key)}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => {
+                    const isActive = isNavItemActive(pathname, item.href);
+                    return (
+                      <SidebarMenuItem key={item.key}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive}
+                          tooltip={t(item.key)}
+                          size="lg"
+                        >
+                          <Link
+                            href={item.href}
+                            onClick={handleNavClick}
+                            aria-current={isActive ? "page" : undefined}
+                          >
+                            <item.icon className="h-5 w-5" />
+                            <span>{t(item.key)}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
         </nav>
+
+        <CoachBirthdaysSidebarSection
+          upcomingBirthdays={upcomingBirthdays}
+          collapsed={collapsed}
+          t={t}
+          onNavigate={handleNavClick}
+        />
       </SidebarContent>
 
-      <SidebarFooter className="items-center gap-1 border-t border-sidebar-border p-1.5">
-        <SidebarMenu className="items-center">
-          <SidebarMenuItem>
-            <CoachBirthdaysButton
-              upcomingBirthdays={upcomingBirthdays}
-              t={t}
-              onNavigate={handleNavClick}
-            />
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              asChild
-              isActive={isNavItemActive(pathname, "/profile")}
-              tooltip={t("myProfile")}
-              className="h-8 w-8 justify-center"
-            >
-              <Link
-                href="/profile"
-                onClick={handleNavClick}
-                aria-label={t("myProfile")}
-                aria-current={isNavItemActive(pathname, "/profile") ? "page" : undefined}
-              >
-                <User className="h-5 w-5" />
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarFooter
+        className={cn("border-t border-sidebar-border space-y-2", collapsed ? "p-2" : "p-4")}
+      >
         <TrainerSidebarUtilityControls locale={locale} setLocale={setLocale} collapsed={collapsed} />
         {collapsed ? (
           <SidebarMenuButton
             tooltip={t("logout")}
             aria-label={t("logout")}
-            className="h-8 w-8 justify-center text-muted-foreground"
+            className="text-muted-foreground"
             onClick={handleSignOut}
           >
             <LogOut className="h-5 w-5" />
@@ -454,24 +469,8 @@ function AppSidebar({
         )}
       </SidebarFooter>
 
+      <SidebarRail />
     </Sidebar>
-  );
-}
-
-function CoachTopBar() {
-  const pathname = usePathname();
-  const { t } = useI18n();
-  const { openMobile } = useSidebar();
-  const activeNavItem = coachNavItems.find((item) => isNavItemActive(pathname, item.href));
-  if (openMobile) return null;
-
-  return (
-    <header className="sticky top-0 z-40 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 bg-background px-2 pt-[env(safe-area-inset-top)] md:hidden">
-      <SidebarTrigger className="-ml-1 shadow-sm" />
-      <span className="truncate text-sm font-semibold">
-        {t(activeNavItem?.key ?? "dashboard")}
-      </span>
-    </header>
   );
 }
 
@@ -517,9 +516,10 @@ export function Navigation({ children }: { children: React.ReactNode }) {
     birthdays.length === 1 ? `/students/${birthdays[0].id}` : "/students";
   const birthdayCta =
     birthdays.length === 1 ? t("coachBirthdayCta") : t("coachBirthdayCtaList");
+  const activeNavItem = coachNavItems.find((item) => isNavItemActive(pathname, item.href));
 
   return (
-    <SidebarProvider open={false}>
+    <SidebarProvider>
       <a
         href="#main-content"
         className="fixed left-4 top-[calc(1rem+env(safe-area-inset-top))] z-[100] -translate-y-[200%] rounded-md bg-background px-4 py-3 font-medium shadow-lg transition-transform focus:translate-y-0"
@@ -537,7 +537,12 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         upcomingBirthdays={upcomingBirthdays}
       />
       <SidebarInset>
-        <CoachTopBar />
+        <header className="sticky top-0 z-50 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur md:hidden">
+          <SidebarTrigger className="-ml-1 shadow-sm" />
+          <span className="truncate text-sm font-semibold">
+            {t(activeNavItem?.key ?? "dashboard")}
+          </span>
+        </header>
         <div
           id="main-content"
           tabIndex={-1}

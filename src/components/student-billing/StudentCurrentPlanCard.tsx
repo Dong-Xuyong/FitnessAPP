@@ -20,12 +20,8 @@ export function StudentCurrentPlanCard({ plan }: Props) {
     plan.sessionsPerWeek > 0
       ? `${plan.sessionsPerWeek} ${t("perWeek")}`
       : t("notSet");
-  const showDiscount =
-    plan.loyaltyDiscountActive && plan.loyaltyDiscountPercent > 0 && plan.listMonthlyRate > 0;
-  const showWaiting =
-    !plan.loyaltyDiscountActive && plan.loyaltyDiscountPercent > 0 && plan.listMonthlyRate > 0;
   const monthlyLabel =
-    plan.monthlyRate > 0 || showDiscount ? `€${plan.monthlyRate.toFixed(2)}` : t("notSet");
+    plan.monthlyRate > 0 ? `€${plan.monthlyRate.toFixed(2)}` : t("notSet");
 
   return (
     <Card>
@@ -58,23 +54,6 @@ export function StudentCurrentPlanCard({ plan }: Props) {
             <div>
               <p className="text-xs text-muted-foreground">{t("monthlyRate")}</p>
               <p className="font-semibold tabular-nums">{monthlyLabel}</p>
-              {showDiscount ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("loyaltyDiscountApplied")
-                    .replace("{list}", plan.listMonthlyRate.toFixed(2))
-                    .replace("{percent}", String(plan.loyaltyDiscountPercent))}
-                </p>
-              ) : null}
-              {showWaiting ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("loyaltyDiscountPending").replace("{percent}", String(plan.loyaltyDiscountPercent))}
-                </p>
-              ) : null}
-              {plan.socioFee > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("socioFeeShort")}: €{plan.socioFee.toFixed(2)}
-                </p>
-              ) : null}
             </div>
           </li>
           <li className="flex items-start gap-2 rounded-lg border bg-muted/20 p-3">

@@ -186,32 +186,21 @@ const Sidebar = React.forwardRef<
     }
 
     if (isMobile) {
-      const iconOnly = state === "collapsed" && collapsible === "icon"
       return (
         <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            className={cn(
-              "bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-sidebar-foreground",
-              iconOnly ? "w-[--sidebar-width-icon] overflow-hidden [&>button]:hidden" : "w-[--sidebar-width]"
-            )}
+            className="w-[--sidebar-width] bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-sidebar-foreground"
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
-                "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
               } as React.CSSProperties
             }
             side={side}
           >
             <SheetTitle className="sr-only">Sidebar navigation</SheetTitle>
-            <div
-              className="group flex h-full w-full flex-col"
-              data-collapsible={iconOnly ? "icon" : ""}
-              data-state={state}
-            >
-              {children}
-            </div>
+            <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
         </Sheet>
       )

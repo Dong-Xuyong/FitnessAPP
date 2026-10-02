@@ -58,14 +58,6 @@ export function StudentPendingPaymentCard({
                   {t("shopBillingMembership")}: €{Number(payment.baseAmount ?? 0).toFixed(2)}
                 </span>
               </li>
-              {Number(payment.socioAmount ?? 0) > 0 ? (
-                <li className="flex items-center gap-2 text-muted-foreground">
-                  <Banknote className="h-4 w-4 shrink-0 text-primary" />
-                  <span>
-                    {t("socioFeeShort")}: €{Number(payment.socioAmount).toFixed(2)}
-                  </span>
-                </li>
-              ) : null}
               <li className="flex items-center gap-2 text-muted-foreground">
                 <ShoppingBag className="h-4 w-4 shrink-0 text-primary" />
                 <span>

@@ -125,7 +125,6 @@ export type SuggestedRecordPayment = {
   amount: number;
   baseAmount: number;
   shopAmount: number;
-  socioAmount: number;
 };
 
 /**
@@ -139,10 +138,8 @@ export function buildSuggestedRecordPayment(args: {
     amount?: number;
     baseAmount?: number;
     shopAmount?: number;
-    socioAmount?: number;
   }>;
   monthlyRate: number;
-  socioFee?: number;
   unpaidTargetPeriods: string[];
   unpaidShopForPeriod: (period: string) => number;
   now?: Date;
@@ -173,15 +170,13 @@ export function buildSuggestedRecordPayment(args: {
       : args.unpaidShopForPeriod(period);
   const chargeMembership = Boolean(pendingRow) || !isPeriodPaid(args.payments, period);
   const base = chargeMembership && Number.isFinite(args.monthlyRate) ? Math.max(0, args.monthlyRate) : 0;
-  const socio = chargeMembership ? Math.max(0, Number(args.socioFee) || 0) : 0;
-  const amounts = buildPaymentAmounts(base, shop, socio);
+  const amounts = buildPaymentAmounts(base, shop);
   const pendingAmount = Number(pendingRow?.amount);
   return {
     period,
     amount: pendingRow && Number.isFinite(pendingAmount) && pendingAmount > 0 ? pendingAmount : amounts.amount,
     baseAmount: amounts.baseAmount,
     shopAmount: amounts.shopAmount,
-    socioAmount: amounts.socioAmount,
   };
 }
 

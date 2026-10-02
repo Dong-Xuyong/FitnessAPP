@@ -8,23 +8,13 @@ import {
   normalizedPaymentPaid,
   selectDashboardPendingPayment,
 } from "@/lib/student-payment-due";
-import {
-  applyStoredLoyaltyDiscount,
-  clampLoyaltyDiscountPercent,
-  clampSocioFee,
-  loyaltyDiscountEligible,
-  resolveMonthlyRate,
-} from "@/lib/shop-billing";
+import { resolveMonthlyRate } from "@/lib/shop-billing";
 
 export type StudentBillingPlan = {
   billingStatus: string;
   sessionsPerWeek: number;
   sessionDurationMin: number;
   monthlyRate: number;
-  listMonthlyRate: number;
-  loyaltyDiscountPercent: number;
-  loyaltyDiscountActive: boolean;
-  socioFee: number;
   paymentMethod: string;
 };
 
@@ -37,7 +27,6 @@ export type StudentPaymentRecord = {
   paidAt?: string | null;
   baseAmount?: number;
   shopAmount?: number;
-  socioAmount?: number;
 };
 
 export type StudentBillingData = {
@@ -52,29 +41,18 @@ export type StudentBillingData = {
 
 function planFromRoster(roster: Record<string, unknown>): StudentBillingPlan {
   const sessionDurationMin = Number(roster.sessionDurationMin ?? 60);
-  const listMonthlyRate = resolveMonthlyRate({
-    monthlyRate: roster.monthlyRate,
-    rate30Min: roster.rate30Min,
-    rate60Min: roster.rate60Min,
-    sessionDurationMin: roster.sessionDurationMin,
-    sessionsPerWeek: roster.sessionsPerWeek,
-  });
-  const loyaltyDiscountPercent = clampLoyaltyDiscountPercent(roster.loyaltyDiscountPercent);
-  const loyaltyDiscountActive = loyaltyDiscountEligible(roster.coachingStartedOn);
   return {
     billingStatus: String(roster.billingStatus ?? "inactive").trim() || "inactive",
     sessionsPerWeek: Number(roster.sessionsPerWeek ?? 0),
     sessionDurationMin:
       Number.isFinite(sessionDurationMin) && sessionDurationMin > 0 ? sessionDurationMin : 60,
-    listMonthlyRate,
-    loyaltyDiscountPercent,
-    loyaltyDiscountActive,
-    socioFee: clampSocioFee(roster.socioFee),
-    monthlyRate: applyStoredLoyaltyDiscount(
-      listMonthlyRate,
-      loyaltyDiscountPercent,
-      roster.coachingStartedOn
-    ),
+    monthlyRate: resolveMonthlyRate({
+      monthlyRate: roster.monthlyRate,
+      rate30Min: roster.rate30Min,
+      rate60Min: roster.rate60Min,
+      sessionDurationMin: roster.sessionDurationMin,
+      sessionsPerWeek: roster.sessionsPerWeek,
+    }),
     paymentMethod: String(roster.paymentMethod ?? "mbway").trim() || "mbway",
   };
 }
@@ -159,7 +137,6 @@ export function useStudentBillingData(
             paidAt: data.paidAt != null ? String(data.paidAt) : null,
             baseAmount: Number(data.baseAmount),
             shopAmount: Number(data.shopAmount),
-            socioAmount: Number(data.socioAmount),
           };
         });
 

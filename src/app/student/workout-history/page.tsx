@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useUser, useFirestore } from "@/firebase";
 import { cn } from "@/lib/utils";
 import { parseSessionCompletedAtMs } from "@/lib/student-monthly-workout-completion";
-import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -155,7 +154,6 @@ export default function StudentWorkoutHistoryPage() {
 
       const completedSessions = sessionsSnap.docs
         .map((d) => ({ id: d.id, ...d.data() } as WorkoutSession))
-        .filter((s) => !isCoachBodyMetricSession(s as unknown as Record<string, unknown>))
         .filter((s) => parseSessionCompletedAtMs(s.completedAt as unknown) != null)
         .sort(
           (a, b) =>
@@ -268,11 +266,17 @@ export default function StudentWorkoutHistoryPage() {
 
   return (
       <div className="space-y-6">
+        <header>
+          <h1 className="text-3xl font-bold font-headline">{t("workoutHistory")}</h1>
+          <p className="text-muted-foreground">{t("completedCount")}</p>
+        </header>
+
         {completedWorkouts.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("noWorkoutSessions")}</p>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">{t("workoutHistory")}</h2>
               <Badge variant="secondary">{completedWorkouts.length} {t("completedCount")}</Badge>
             </div>
             <div className="space-y-2">

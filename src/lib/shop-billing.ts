@@ -1218,89 +1218,17 @@ export function resolveMonthlyRate(roster: {
   return 0;
 }
 
-export function clampLoyaltyDiscountPercent(raw: unknown): number {
-  const n = Number(raw ?? 0);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(100, n);
-}
-
-/** Membership after the coach's loyalty percent. Shop totals stay full price. */
-export function applyLoyaltyDiscount(monthlyRate: number, percent: unknown): number {
-  const rate = roundMoney(Math.max(0, Number(monthlyRate) || 0));
-  const pct = clampLoyaltyDiscountPercent(percent);
-  if (pct <= 0) return rate;
-  return roundMoney(rate * (1 - pct / 100));
-}
-
-/** Whole years and leftover months since `YYYY-MM-DD`. Null if the date is invalid. */
-export function coachingTenure(
-  startedOn: string,
-  now = new Date()
-): { years: number; months: number } | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startedOn.trim());
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const start = new Date(year, month - 1, day);
-  if (start.getFullYear() !== year || start.getMonth() !== month - 1 || start.getDate() !== day) {
-    return null;
-  }
-  let years = now.getFullYear() - start.getFullYear();
-  let months = now.getMonth() - start.getMonth();
-  if (now.getDate() < start.getDate()) months -= 1;
-  if (months < 0) {
-    years -= 1;
-    months += 12;
-  }
-  if (years < 0) return { years: 0, months: 0 };
-  return { years, months };
-}
-
-/** Discount applies once coaching has lasted this many whole years. */
-export const LOYALTY_DISCOUNT_AFTER_YEARS = 1;
-
-export function loyaltyDiscountEligible(
-  startedOn: unknown,
-  now = new Date(),
-  afterYears = LOYALTY_DISCOUNT_AFTER_YEARS
-): boolean {
-  const tenure = coachingTenure(String(startedOn ?? "").trim().slice(0, 10), now);
-  return tenure != null && tenure.years >= afterYears;
-}
-
-/** List price until the coaching start date is at least one year ago. */
-export function applyStoredLoyaltyDiscount(
-  monthlyRate: number,
-  percent: unknown,
-  startedOn: unknown,
-  now = new Date()
-): number {
-  const rate = roundMoney(Math.max(0, Number(monthlyRate) || 0));
-  if (!loyaltyDiscountEligible(startedOn, now)) return rate;
-  return applyLoyaltyDiscount(rate, percent);
-}
-
-export function clampSocioFee(raw: unknown): number {
-  const n = Number(raw ?? 0);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return roundMoney(n);
-}
-
-export function buildPaymentAmounts(monthlyRate: number, shopTotal: number, socioFee = 0): {
+export function buildPaymentAmounts(monthlyRate: number, shopTotal: number): {
   amount: number;
   baseAmount: number;
   shopAmount: number;
-  socioAmount: number;
 } {
   const baseAmount = roundMoney(Math.max(0, monthlyRate));
   const shopAmount = roundMoney(Math.max(0, shopTotal));
-  const socioAmount = clampSocioFee(socioFee);
   return {
-    amount: roundMoney(baseAmount + shopAmount + socioAmount),
+    amount: roundMoney(baseAmount + shopAmount),
     baseAmount,
     shopAmount,
-    socioAmount,
   };
 }
 
@@ -1317,16 +1245,10 @@ export function catalogMapFromItems(
 export function paymentHasShopBreakdown(p: {
   baseAmount?: unknown;
   shopAmount?: unknown;
-  socioAmount?: unknown;
 }): boolean {
   const shop = Number(p.shopAmount ?? 0);
   const base = Number(p.baseAmount ?? 0);
-  const socio = Number(p.socioAmount ?? 0);
-  return (
-    (Number.isFinite(shop) && shop > 0) ||
-    (Number.isFinite(base) && base > 0) ||
-    (Number.isFinite(socio) && socio > 0)
-  );
+  return (Number.isFinite(shop) && shop > 0) || (Number.isFinite(base) && base > 0);
 }
 
 export function formatShopLinesSummary(
