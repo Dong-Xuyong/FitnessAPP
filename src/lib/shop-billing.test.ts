@@ -27,6 +27,9 @@ import {
   localTimeHms,
   periodFromShopDate,
   resolveBillableShopPaymentPeriod,
+  applyLoyaltyDiscount,
+  applyStoredLoyaltyDiscount,
+  coachingTenure,
   resolveMonthlyRate,
   resolveTargetPaymentPeriodForNewPurchase,
   revertShopRegistrationLinesPaidForFuturePeriods,
@@ -353,6 +356,13 @@ describe("shop-billing", () => {
       amount: 112.5,
       baseAmount: 100,
       shopAmount: 12.5,
+      socioAmount: 0,
+    });
+    assert.deepEqual(buildPaymentAmounts(44.1, 0, 5), {
+      amount: 49.1,
+      baseAmount: 44.1,
+      shopAmount: 0,
+      socioAmount: 5,
     });
   });
 
@@ -382,6 +392,28 @@ describe("shop-billing", () => {
       }),
       120
     );
+  });
+
+  it("applyLoyaltyDiscount reduces membership only", () => {
+    assert.equal(applyLoyaltyDiscount(100, 5), 95);
+    assert.equal(applyLoyaltyDiscount(100, 0), 100);
+    assert.equal(applyLoyaltyDiscount(100, undefined), 100);
+    assert.equal(applyLoyaltyDiscount(100, 100), 0);
+    assert.equal(applyLoyaltyDiscount(100, 150), 0);
+    assert.equal(applyLoyaltyDiscount(100, -3), 100);
+  });
+
+  it("applyStoredLoyaltyDiscount waits one year from the coaching start date", () => {
+    const start = "2025-10-01";
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 8, 30)), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1)), 95);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, "", new Date(2026, 9, 1)), 100);
+  });
+
+  it("coachingTenure counts whole years and leftover months", () => {
+    assert.deepEqual(coachingTenure("2025-03-15", new Date(2026, 5, 15)), { years: 1, months: 3 });
+    assert.deepEqual(coachingTenure("2025-03-15", new Date(2026, 5, 14)), { years: 1, months: 2 });
+    assert.equal(coachingTenure("not-a-date"), null);
   });
 
   it("buildShopBillingPeriodContextForMarkPaid keeps May purchases on May when marking May", () => {

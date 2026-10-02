@@ -61,6 +61,12 @@ export function StudentPaymentHistoryList({ payments, defaultMethod }: Props) {
                     <Percent className="h-3.5 w-3.5 shrink-0" />
                     {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)}
                   </li>
+                  {Number(p.socioAmount ?? 0) > 0 ? (
+                    <li className="flex items-center gap-2">
+                      <Banknote className="h-3.5 w-3.5 shrink-0" />
+                      {t("socioFeeShort")}: €{Number(p.socioAmount).toFixed(2)}
+                    </li>
+                  ) : null}
                   <li className="flex items-center gap-2">
                     <ShoppingBag className="h-3.5 w-3.5 shrink-0" />
                     {t("shopBillingShop")}: €{Number(p.shopAmount ?? 0).toFixed(2)}

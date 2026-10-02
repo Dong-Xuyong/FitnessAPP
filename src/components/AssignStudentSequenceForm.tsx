@@ -244,7 +244,7 @@ export function AssignStudentSequenceForm({
       </div>
       <div className="space-y-2">
         <Label>{t("sequenceProgramsInOrder")}</Label>
-        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+        <div className="max-h-48 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1">
           {orderedProgramIds.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("sequenceAddProgram")}</p>
           ) : null}
@@ -258,7 +258,7 @@ export function AssignStudentSequenceForm({
             return (
               <div
                 key={`${pid}-${idx}`}
-                className="flex items-center gap-2 border rounded-md p-2 bg-background"
+                className="flex items-center gap-1 border rounded-md p-2 bg-background min-w-0 sm:gap-2"
               >
                 <span className="text-xs font-semibold tabular-nums w-6 shrink-0">
                   {sequenceStepLabel(idx)}
@@ -317,7 +317,7 @@ export function AssignStudentSequenceForm({
                 onValueChange={setAddPick}
                 disabled={disabled || isAssigning || isSavingTemplate || isSavingDefault}
               >
-                <SelectTrigger className="flex-1 min-w-[12rem]">
+                <SelectTrigger className="w-auto min-w-0 flex-1">
                   <SelectValue placeholder={t("sequenceAddProgram")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -366,7 +366,7 @@ export function AssignStudentSequenceForm({
           variant="secondary"
           onClick={() => void handleSaveTemplateClick()}
           disabled={saveTemplateDisabled}
-          className="gap-2"
+          className="h-auto min-h-10 w-full whitespace-normal py-2 text-center sm:w-auto"
         >
           {isSavingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {t("sequenceSaveTemplate")}
@@ -377,7 +377,7 @@ export function AssignStudentSequenceForm({
           type="button"
           onClick={() => void handleSaveDefaultClick()}
           disabled={saveDefaultDisabled}
-          className="gap-2"
+          className="h-auto min-h-10 w-full whitespace-normal py-2 text-center sm:w-auto"
         >
           {isSavingDefault ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {t("saveDefaultStudentSequence")}
@@ -397,7 +397,7 @@ export function AssignStudentSequenceForm({
           variant="secondary"
           onClick={() => void handleSaveTemplateClick()}
           disabled={saveTemplateDisabled}
-          className="gap-2"
+          className="h-auto min-h-10 w-full whitespace-normal py-2 text-center sm:w-auto"
         >
           {isSavingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {t("sequenceSaveTemplate")}
