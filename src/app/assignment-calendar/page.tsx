@@ -3178,6 +3178,10 @@ export default function AssignmentCalendarPage() {
   return (
     <Navigation>
       <div className="space-y-6">
+        <header>
+          <h2 className="text-3xl font-bold font-headline">{t("assignmentCalendar")}</h2>
+        </header>
+
         {/* ── Assign to week dialog ─────────────────────────────────────────── */}
         <Dialog open={assignWeekOpen} onOpenChange={(o) => {
           setAssignWeekOpen(o);
@@ -3909,12 +3913,12 @@ export default function AssignmentCalendarPage() {
 
           {/* Left: Calendar + settings */}
           <Card className="lg:col-span-2">
-            <CardHeader className="hidden md:flex">
+            <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CalendarDays className="h-4 w-4 text-primary" aria-hidden /> Calendário
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4 pt-6 md:pt-0">
+            <CardContent className="space-y-4">
               {/* Student filter */}
               <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">

@@ -47,40 +47,6 @@ function computeEpleyOneRm(weight: number, reps: number): number {
   return weight * (1 + reps / 30);
 }
 
-const METRICS_CACHE_PREFIX = "coach-progress-metrics:";
-
-type CachedProgressMetrics = {
-  growth: number;
-  top: {
-    studentId: string;
-    name: string;
-    firstName?: string;
-    lastName?: string;
-    photoUrl?: string;
-    dynamicStreak: number;
-  } | null;
-};
-
-function readMetricsCache(trainerUid: string): CachedProgressMetrics | null {
-  try {
-    const raw = localStorage.getItem(METRICS_CACHE_PREFIX + trainerUid);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedProgressMetrics;
-    if (!parsed || typeof parsed.growth !== "number") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writeMetricsCache(trainerUid: string, value: CachedProgressMetrics) {
-  try {
-    localStorage.setItem(METRICS_CACHE_PREFIX + trainerUid, JSON.stringify(value));
-  } catch {
-    /* quota / private mode */
-  }
-}
-
 async function mapPool<T, R>(
   items: readonly T[],
   concurrency: number,
@@ -128,8 +94,8 @@ function ProgressPageContent() {
   const [growthMetric, setGrowthMetric] = useState(0);
   const [topPerformer, setTopPerformer] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [metricsShown, setMetricsShown] = useState(false);
-  const metricsRosterKeyRef = useRef<string | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsReady, setMetricsReady] = useState(false);
   const [metricsLoadFailed, setMetricsLoadFailed] = useState(false);
   const [presenceLoadFailed, setPresenceLoadFailed] = useState(false);
   /** Global `students/{docId}` display names for milestone.studentId / roster id fallbacks */
@@ -298,7 +264,7 @@ function ProgressPageContent() {
   useEffect(() => {
     if (!db || !user || isUserLoading) return;
     if (activeCoachTab !== "progress") return;
-    if (metricsRosterKeyRef.current === rosterIdsKey) return;
+    if (metricsReady) return;
     if (!rosterLoaded) return;
 
     const fs = db;
@@ -309,12 +275,7 @@ function ProgressPageContent() {
     let cancelled = false;
 
     async function loadProgressMetrics() {
-      const cached = readMetricsCache(trainerUid);
-      if (cached && (cached.growth > 0 || cached.top)) {
-        setGrowthMetric(cached.growth);
-        setTopPerformer(cached.top);
-        setMetricsShown(true);
-      }
+      setMetricsLoading(true);
       setMetricsLoadFailed(false);
       try {
         type StudentMetric = {
@@ -329,68 +290,24 @@ function ProgressPageContent() {
           } | null;
         };
 
-        if (rosterRows.length === 0) {
-          setGrowthMetric(0);
-          setTopPerformer(null);
-          setMetricsShown(true);
-          metricsRosterKeyRef.current = rosterIdsKey;
-          return;
-        }
-
-        let maxGrowth = 0;
-        let topStudent: StudentMetric["topCandidate"] = null;
-        const concurrency = 12;
-
-        const applyChunk = (part: StudentMetric[]) => {
-          for (const row of part) {
-            if (row.growth > maxGrowth) maxGrowth = row.growth;
-            if (
-              row.topCandidate &&
-              (!topStudent || row.topCandidate.dynamicStreak > (topStudent.dynamicStreak || 0))
-            ) {
-              topStudent = row.topCandidate;
-            }
-          }
-          const shownGrowth = cached ? Math.max(maxGrowth, cached.growth) : maxGrowth;
-          const shownTop =
-            cached?.top &&
-            (!topStudent || (cached.top.dynamicStreak || 0) > (topStudent.dynamicStreak || 0))
-              ? cached.top
-              : topStudent;
-          setGrowthMetric(Number(shownGrowth.toFixed(1)));
-          setTopPerformer(shownTop);
-          setMetricsShown(true);
-        };
-
-        for (let i = 0; i < rosterRows.length; i += concurrency) {
-          if (cancelled) return;
-          const part = await mapPool(
-            rosterRows.slice(i, i + concurrency),
-            concurrency,
-            async (student): Promise<StudentMetric> => {
+        const perStudent = await mapPool(rosterRows, 5, async (student): Promise<StudentMetric> => {
           const studentId = student.id;
-          const monthStart = new Date();
-          monthStart.setDate(1);
-          monthStart.setHours(0, 0, 0, 0);
           const [plansSnap, sessionsSnap] = await Promise.all([
             getDocs(collection(fs, "personalTrainers", trainerUid, "students", studentId, "workoutPlans")),
             getDocs(
-              query(
-                collection(fs, "personalTrainers", trainerUid, "students", studentId, "workoutSessions"),
-                where("completedAt", ">=", monthStart.toISOString())
-              )
+              collection(fs, "personalTrainers", trainerUid, "students", studentId, "workoutSessions")
             ),
           ]);
 
+          const completedPlanIds = new Set<string>();
           let studentGrowth = 0;
-          const month = monthStart.getMonth();
-          const year = monthStart.getFullYear();
+
           sessionsSnap.forEach((sessDoc) => {
             const data = sessDoc.data() as Record<string, unknown>;
-            const completedMs = Date.parse(String(data.completedAt || ""));
-            if (!Number.isFinite(completedMs)) return;
-            const completed = new Date(completedMs);
-            if (completed.getMonth() !== month || completed.getFullYear() !== year) return;
+            if (!data.completedAt) return;
+            if (typeof data.workoutPlanId === "string") {
+              completedPlanIds.add(data.workoutPlanId);
+            }
             const exercises = Array.isArray(data.exercises) ? data.exercises : [];
             for (const exercise of exercises) {
               const sets = Array.isArray((exercise as { sets?: unknown }).sets)
@@ -411,17 +328,14 @@ function ProgressPageContent() {
             "Unknown";
 
           const sortedPlans = plansSnap.docs
-            .map((d) => {
-              const data = d.data() as Record<string, unknown>;
-              return {
-                assignedAt: String(data.assignedAt || data.createdAt || ""),
-                done: data.status === "completed" || Boolean(data.completedAt),
-              };
-            })
+            .map((d) => ({
+              id: d.id,
+              assignedAt: String(d.data().assignedAt || d.data().createdAt || ""),
+            }))
             .sort((a, b) => (b.assignedAt || "").localeCompare(a.assignedAt || ""));
           let dynamicStreak = 0;
           for (const plan of sortedPlans) {
-            if (plan.done) dynamicStreak += 1;
+            if (completedPlanIds.has(plan.id)) dynamicStreak += 1;
             else break;
           }
 
@@ -436,26 +350,30 @@ function ProgressPageContent() {
               dynamicStreak,
             },
           };
-            }
-          );
-          if (cancelled) return;
-          applyChunk(part);
-        }
+        });
 
         if (cancelled) return;
+
+        let maxGrowth = 0;
+        let topStudent: StudentMetric["topCandidate"] = null;
+        for (const row of perStudent) {
+          if (row.growth > maxGrowth) maxGrowth = row.growth;
+          if (
+            row.topCandidate &&
+            (!topStudent || row.topCandidate.dynamicStreak > (topStudent.dynamicStreak || 0))
+          ) {
+            topStudent = row.topCandidate;
+          }
+        }
+
         setGrowthMetric(Number(maxGrowth.toFixed(1)));
         setTopPerformer(topStudent);
-        setMetricsShown(true);
-        metricsRosterKeyRef.current = rosterIdsKey;
-        writeMetricsCache(trainerUid, { growth: Number(maxGrowth.toFixed(1)), top: topStudent });
+        setMetricsReady(true);
       } catch (error) {
         console.error("Error calculating progress metrics", error);
-        if (!cancelled) {
-          setMetricsLoadFailed(true);
-          setMetricsShown(true);
-        }
+        if (!cancelled) setMetricsLoadFailed(true);
       } finally {
-        if (!cancelled) setMetricsShown(true);
+        if (!cancelled) setMetricsLoading(false);
       }
     }
 
@@ -464,7 +382,7 @@ function ProgressPageContent() {
       cancelled = true;
     };
     // rosterIdsKey avoids restarting when useCollection emits a new array for the same roster.
-  }, [db, user, isUserLoading, activeCoachTab, rosterLoaded, rosterIdsKey]);
+  }, [db, user, isUserLoading, activeCoachTab, rosterLoaded, rosterIdsKey, metricsReady]);
 
   /** Attendance show-up rate from calendar sessions; falls back to roster fill vs monthly limit. */
   const teamPresenceMetric = useMemo(() => {
@@ -704,7 +622,7 @@ function ProgressPageContent() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {!metricsShown && !metricsLoadFailed ? (
+                  {metricsLoading || (!metricsReady && !metricsLoadFailed) ? (
                     <Loader2 className="h-8 w-8 animate-spin mb-2" />
                   ) : (
                     <div className="text-4xl font-bold mb-2">+{growthMetric}kg</div>
@@ -721,7 +639,7 @@ function ProgressPageContent() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex items-center gap-4">
-                  {!metricsShown && !metricsLoadFailed ? (
+                  {metricsLoading || (!metricsReady && !metricsLoadFailed) ? (
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   ) : topPerformer ? (
                     <>
