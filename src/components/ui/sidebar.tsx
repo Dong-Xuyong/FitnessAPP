@@ -186,21 +186,32 @@ const Sidebar = React.forwardRef<
     }
 
     if (isMobile) {
+      const iconOnly = state === "collapsed" && collapsible === "icon"
       return (
         <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            className="w-[--sidebar-width] bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-sidebar-foreground"
+            className={cn(
+              "bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-sidebar-foreground",
+              iconOnly ? "w-[--sidebar-width-icon] overflow-hidden [&>button]:hidden" : "w-[--sidebar-width]"
+            )}
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+                "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
               } as React.CSSProperties
             }
             side={side}
           >
             <SheetTitle className="sr-only">Sidebar navigation</SheetTitle>
-            <div className="flex h-full w-full flex-col">{children}</div>
+            <div
+              className="group flex h-full w-full flex-col"
+              data-collapsible={iconOnly ? "icon" : ""}
+              data-state={state}
+            >
+              {children}
+            </div>
           </SheetContent>
         </Sheet>
       )
@@ -314,7 +325,7 @@ const SidebarInset = React.forwardRef<
     <main
       ref={ref}
       className={cn(
-        "relative flex min-h-svh flex-1 flex-col bg-background",
+        "relative flex min-h-svh min-w-0 flex-1 flex-col bg-background",
         "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
         className
       )}

@@ -924,13 +924,8 @@ export default function StudentWorkoutsPage() {
   return (
     <div className="space-y-6">
 
-      {/* ── Page header ─────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold font-headline">{t("myWorkouts")}</h1>
-        </div>
-        {!isOpenAccess && sessionsPerWeek != null && (
-          <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-2.5 shadow-sm shrink-0">
+      {!isOpenAccess && sessionsPerWeek != null && (
+          <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-2.5 shadow-sm w-fit">
             <div className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${
               weeklyBookedCount >= weeklyAllowance
                 ? "bg-destructive/10 text-destructive"
@@ -955,7 +950,6 @@ export default function StudentWorkoutsPage() {
             )}
           </div>
         )}
-      </div>
 
       {isOpenAccess ? null : (
         <div className="grid lg:grid-cols-5 gap-5 items-start">

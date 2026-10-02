@@ -6,10 +6,17 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   query,
+  updateDoc,
   where,
 } from "firebase/firestore";
-import { buildPaymentAmounts, resolveMonthlyRate } from "@/lib/shop-billing";
+import {
+  applyStoredLoyaltyDiscount,
+  buildPaymentAmounts,
+  clampSocioFee,
+  resolveMonthlyRate,
+} from "@/lib/shop-billing";
 
 export type RosterPaymentStatus = { status: string; period: string };
 
@@ -66,8 +73,12 @@ export async function ensurePendingPaymentForCurrentPeriod(
   const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
   if (!existing.empty) return false;
 
-  const monthlyRate = resolveMonthlyRate(roster);
-  const amounts = buildPaymentAmounts(monthlyRate, 0);
+  const monthlyRate = applyStoredLoyaltyDiscount(
+    resolveMonthlyRate(roster),
+    roster.loyaltyDiscountPercent,
+    roster.coachingStartedOn
+  );
+  const amounts = buildPaymentAmounts(monthlyRate, 0, clampSocioFee(roster.socioFee));
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
   const nowIso = new Date().toISOString();
 
@@ -76,6 +87,7 @@ export async function ensurePendingPaymentForCurrentPeriod(
     amount: amounts.amount,
     baseAmount: amounts.baseAmount,
     shopAmount: amounts.shopAmount,
+    socioAmount: amounts.socioAmount,
     method,
     status: "pending",
     paidAt: null,
@@ -106,15 +118,20 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
   if (String(roster.billingStatus ?? "").trim().toLowerCase() !== "active") {
     return false;
   }
-  const monthlyRate = resolveMonthlyRate(roster);
-  if (!Number.isFinite(monthlyRate) || monthlyRate <= 0) return false;
+  const monthlyRate = applyStoredLoyaltyDiscount(
+    resolveMonthlyRate(roster),
+    roster.loyaltyDiscountPercent,
+    roster.coachingStartedOn
+  );
+  const socioFee = clampSocioFee(roster.socioFee);
+  if ((!Number.isFinite(monthlyRate) || monthlyRate <= 0) && socioFee <= 0) return false;
 
   const period = nextBillingPeriod(now);
   const paymentsCol = collection(db, "personalTrainers", trainerUid, "students", rosterStudentId, "payments");
   const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
   if (!existing.empty) return false;
 
-  const amounts = buildPaymentAmounts(monthlyRate, 0);
+  const amounts = buildPaymentAmounts(monthlyRate, 0, socioFee);
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
   const nowIso = now.toISOString();
 
@@ -123,6 +140,7 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
     amount: amounts.amount,
     baseAmount: amounts.baseAmount,
     shopAmount: amounts.shopAmount,
+    socioAmount: amounts.socioAmount,
     method,
     status: "pending",
     paidAt: null,
@@ -157,38 +175,81 @@ export async function ensureRosterPendingNextPeriodIfWindow(
  * Latest payment-by-period per roster student id; aligns with [/students]
  * dashboard rules: if the latest recorded period does not cover the current month, status becomes pending for that period.
  */
+/** Badge already stored on the roster doc. Old periods count as pending for the current month. */
+export function displayedRosterPaymentStatus(
+  roster: { latestPaymentStatus?: unknown; latestPaymentPeriod?: unknown } | null | undefined,
+  now = new Date()
+): RosterPaymentStatus | null {
+  if (!roster) return null;
+  const period = String(roster.latestPaymentPeriod ?? "").trim();
+  const status = String(roster.latestPaymentStatus ?? "").trim();
+  if (!period || !status) return null;
+  const current = currentBillingPeriod(now);
+  if (period >= current) {
+    return { status: rosterPaymentStatusIsPaid(status) ? "paid" : status, period };
+  }
+  return { status: "pending", period: current };
+}
+
+export function rememberRosterPaymentBadge(
+  db: Firestore,
+  trainerUid: string,
+  rosterStudentId: string,
+  status: RosterPaymentStatus,
+  previous?: { latestPaymentStatus?: unknown; latestPaymentPeriod?: unknown } | null
+) {
+  if (
+    previous &&
+    previous.latestPaymentStatus === status.status &&
+    previous.latestPaymentPeriod === status.period
+  ) {
+    return;
+  }
+  void updateDoc(doc(db, "personalTrainers", trainerUid, "students", rosterStudentId), {
+    latestPaymentStatus: status.status,
+    latestPaymentPeriod: status.period,
+  }).catch(() => {});
+}
+
 export async function fetchRosterPaymentStatusMap(
   db: Firestore,
   trainerUid: string,
-  rosterStudentIds: string[]
+  rosterStudentIds: string[],
+  onItem?: (id: string, status: RosterPaymentStatus) => void
 ): Promise<Record<string, RosterPaymentStatus>> {
   const currentPeriod = currentBillingPeriod();
-  const map: Record<string, RosterPaymentStatus> = {};
-
-  for (const id of rosterStudentIds) {
-    try {
-      const paymentsSnap = await getDocs(
-        collection(db, "personalTrainers", trainerUid, "students", id, "payments")
-      );
-      const best = paymentsSnap.docs.reduce<RosterPaymentStatus | null>((acc, docSnap) => {
+  const entries = await Promise.all(
+    rosterStudentIds.map(async (id) => {
+      try {
+        const paymentsSnap = await getDocs(
+          query(
+            collection(db, "personalTrainers", trainerUid, "students", id, "payments"),
+            orderBy("period", "desc"),
+            limit(1)
+          )
+        );
+        const docSnap = paymentsSnap.docs[0];
+        if (!docSnap) return null;
         const data = docSnap.data();
         const period = String(data.period ?? "");
         const st = String(data.status ?? "pending");
-        const candidate: RosterPaymentStatus = {
+        const best: RosterPaymentStatus = {
           status: rosterPaymentStatusIsPaid(st) ? "paid" : st,
           period,
         };
-        if (!acc || period > acc.period) return candidate;
-        return acc;
-      }, null);
-      if (best) {
-        map[id] =
+        const status =
           best.period >= currentPeriod ? best : { status: "pending", period: currentPeriod };
+        onItem?.(id, status);
+        return [id, status] as const;
+      } catch {
+        return null;
       }
-    } catch {
-      /* skip */
-    }
-  }
+    })
+  );
 
+  const map: Record<string, RosterPaymentStatus> = {};
+  for (const entry of entries) {
+    if (entry) map[entry[0]] = entry[1];
+  }
   return map;
 }

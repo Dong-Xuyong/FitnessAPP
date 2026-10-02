@@ -120,6 +120,9 @@ export default function CoachRevenuePage() {
             rate60Min: row.rate60Min,
             sessionDurationMin: row.sessionDurationMin,
             sessionsPerWeek: row.sessionsPerWeek,
+            loyaltyDiscountPercent: row.loyaltyDiscountPercent,
+            coachingStartedOn: row.coachingStartedOn,
+            socioFee: row.socioFee,
           },
           payments: paymentsSnap.docs.map((d) => paymentFromDoc(d.id, d.data() as Record<string, unknown>)),
         };
@@ -159,11 +162,6 @@ export default function CoachRevenuePage() {
   return (
     <Navigation>
       <div className="space-y-6 min-w-0">
-        <header className="space-y-1">
-          <h2 className="text-2xl sm:text-3xl font-bold font-headline">{t("revenuePageTitle")}</h2>
-          <p className="text-sm text-muted-foreground">{t("revenuePageDescription")}</p>
-        </header>
-
         {waitingForData ? (
           <div className="flex items-center justify-center h-[40vh]">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />

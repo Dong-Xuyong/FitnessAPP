@@ -21,7 +21,7 @@ describe("splitPaymentAmounts", () => {
   it("splits membership and shop when breakdown is present", () => {
     assert.deepEqual(
       splitPaymentAmounts({ amount: 130, baseAmount: 100, shopAmount: 30 }),
-      { total: 130, membership: 100, shop: 30 }
+      { total: 130, membership: 100, shop: 30, socio: 0 }
     );
   });
 
@@ -30,6 +30,7 @@ describe("splitPaymentAmounts", () => {
       total: 80,
       membership: 80,
       shop: 0,
+      socio: 0,
     });
   });
 
@@ -38,7 +39,15 @@ describe("splitPaymentAmounts", () => {
       total: 12,
       membership: 0,
       shop: 12,
+      socio: 0,
     });
+  });
+
+  it("adds sócio on top of membership without folding it into the shop", () => {
+    assert.deepEqual(
+      splitPaymentAmounts({ amount: 49.1, baseAmount: 44.1, shopAmount: 0, socioAmount: 5 }),
+      { total: 49.1, membership: 44.1, shop: 0, socio: 5 }
+    );
   });
 });
 
@@ -82,6 +91,25 @@ describe("forecastStudentAmount", () => {
       "2026-09"
     );
     assert.equal(row?.amount, 75);
+    assert.equal(row?.source, "monthly_rate");
+  });
+
+  it("applies loyalty discount when forecasting from the monthly rate", () => {
+    const row = forecastStudentAmount(
+      student({
+        id: "b2",
+        name: "Bruno",
+        roster: {
+          billingStatus: "active",
+          monthlyRate: 100,
+          loyaltyDiscountPercent: 5,
+          coachingStartedOn: "2020-01-01",
+        },
+        payments: [],
+      }),
+      "2026-09"
+    );
+    assert.equal(row?.amount, 95);
     assert.equal(row?.source, "monthly_rate");
   });
 
