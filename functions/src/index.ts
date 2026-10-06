@@ -6,6 +6,11 @@ import * as admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import {
+  applyStoredLoyaltyDiscount,
+  rebasePendingLoyaltyAmount,
+  resolveMonthlyRate,
+} from "./shop-billing";
 
 admin.initializeApp();
 const db = getFirestore();
@@ -146,6 +151,26 @@ export const enforcePaymentBlocking = onSchedule(
             needsBlock = true;
             break;
           }
+        }
+
+        const lisbonNow = new Date(lisbon.y, lisbon.m - 1, lisbon.d, 12, 0, 0);
+        const paymentRows = payDocs.map((p) => p.data());
+        const listRate = resolveMonthlyRate(roster);
+        const due = applyStoredLoyaltyDiscount(
+          listRate,
+          roster.loyaltyDiscountPercent,
+          roster.coachingStartedOn,
+          lisbonNow,
+          paymentRows
+        );
+        for (const p of payDocs) {
+          const next = rebasePendingLoyaltyAmount(
+            p.data(),
+            due,
+            listRate,
+            roster.loyaltyDiscountPercent
+          );
+          if (next) await enqueueSet(p.ref, next);
         }
 
         const rosterRef = db.collection("personalTrainers").doc(tid).collection("students").doc(sDoc.id);

@@ -207,12 +207,16 @@ export async function syncShopPaymentForPeriod(
   const roster = rosterSnap.data() as Record<string, unknown>;
   if (String(roster.billingStatus ?? "").trim().toLowerCase() !== "active") return;
 
+  const paymentsCol = rosterRef.collection("payments");
+  const allPaySnap = await paymentsCol.get();
+  const paymentRows = allPaySnap.docs.map((d) => d.data());
   const monthlyRate = applyStoredLoyaltyDiscount(
     resolveMonthlyRate(roster),
     roster.loyaltyDiscountPercent,
-    roster.coachingStartedOn
+    roster.coachingStartedOn,
+    new Date(),
+    paymentRows
   );
-  const paymentsCol = rosterRef.collection("payments");
   const registrations = await loadStudentPurchases(trainerId, authStudentId);
 
   const purchaseMonths = new Set<string>();
@@ -236,10 +240,10 @@ export async function syncShopPaymentForPeriod(
   const amounts = buildPaymentAmounts(monthlyRate, shopTotal, socioFee);
   const nowIso = new Date().toISOString();
 
-  const periodSnap = await paymentsCol.where("period", "==", paymentPeriod).get();
+  const periodDocs = allPaySnap.docs.filter((p) => String(p.data().period ?? "") === paymentPeriod);
 
-  const paidDocs = periodSnap.docs.filter((p) => isPaidStatus(p.data().status));
-  const pendingDocs = periodSnap.docs.filter(
+  const paidDocs = periodDocs.filter((p) => isPaidStatus(p.data().status));
+  const pendingDocs = periodDocs.filter(
     (p) => isPendingStatus(p.data().status) || !p.data().status
   );
 

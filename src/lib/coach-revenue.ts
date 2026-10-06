@@ -247,7 +247,9 @@ export function forecastStudentAmount(
     applyStoredLoyaltyDiscount(
       resolveMonthlyRate(student.roster),
       student.roster.loyaltyDiscountPercent,
-      student.roster.coachingStartedOn
+      student.roster.coachingStartedOn,
+      new Date(),
+      student.payments
     ) + roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
   );
   if (!Number.isFinite(rate) || rate <= 0) return null;
@@ -302,7 +304,8 @@ function currentPeriodMixFromStudents(
         resolveMonthlyRate(student.roster),
         student.roster.loyaltyDiscountPercent,
         student.roster.coachingStartedOn,
-        now
+        now,
+        student.payments
       ) + roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
     );
     if (rate <= 0) continue;

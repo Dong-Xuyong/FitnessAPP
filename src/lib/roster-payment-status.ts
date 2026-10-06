@@ -9,7 +9,6 @@ import {
   orderBy,
   query,
   updateDoc,
-  where,
 } from "firebase/firestore";
 import {
   applyStoredLoyaltyDiscount,
@@ -70,13 +69,16 @@ export async function ensurePendingPaymentForCurrentPeriod(
 
   const period = currentBillingPeriod();
   const paymentsCol = collection(db, "personalTrainers", trainerUid, "students", rosterStudentId, "payments");
-  const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
-  if (!existing.empty) return false;
+  const allPayments = await getDocs(paymentsCol);
+  const paymentRows = allPayments.docs.map((d) => d.data());
+  if (paymentRows.some((p) => String(p.period ?? "") === period)) return false;
 
   const monthlyRate = applyStoredLoyaltyDiscount(
     resolveMonthlyRate(roster),
     roster.loyaltyDiscountPercent,
-    roster.coachingStartedOn
+    roster.coachingStartedOn,
+    new Date(),
+    paymentRows
   );
   const amounts = buildPaymentAmounts(monthlyRate, 0, clampSocioFee(roster.socioFee));
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
@@ -118,18 +120,21 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
   if (String(roster.billingStatus ?? "").trim().toLowerCase() !== "active") {
     return false;
   }
+  const period = nextBillingPeriod(now);
+  const paymentsCol = collection(db, "personalTrainers", trainerUid, "students", rosterStudentId, "payments");
+  const allPayments = await getDocs(paymentsCol);
+  const paymentRows = allPayments.docs.map((d) => d.data());
+  if (paymentRows.some((p) => String(p.period ?? "") === period)) return false;
+
   const monthlyRate = applyStoredLoyaltyDiscount(
     resolveMonthlyRate(roster),
     roster.loyaltyDiscountPercent,
-    roster.coachingStartedOn
+    roster.coachingStartedOn,
+    now,
+    paymentRows
   );
   const socioFee = clampSocioFee(roster.socioFee);
   if ((!Number.isFinite(monthlyRate) || monthlyRate <= 0) && socioFee <= 0) return false;
-
-  const period = nextBillingPeriod(now);
-  const paymentsCol = collection(db, "personalTrainers", trainerUid, "students", rosterStudentId, "payments");
-  const existing = await getDocs(query(paymentsCol, where("period", "==", period), limit(1)));
-  if (!existing.empty) return false;
 
   const amounts = buildPaymentAmounts(monthlyRate, 0, socioFee);
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";

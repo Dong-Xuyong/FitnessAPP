@@ -30,6 +30,8 @@ import {
   applyLoyaltyDiscount,
   applyStoredLoyaltyDiscount,
   coachingTenure,
+  loyaltyRestartOn,
+  rebasePendingLoyaltyAmount,
   resolveMonthlyRate,
   resolveTargetPaymentPeriodForNewPurchase,
   revertShopRegistrationLinesPaidForFuturePeriods,
@@ -408,6 +410,57 @@ describe("shop-billing", () => {
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 8, 30)), 100);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1)), 95);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, "", new Date(2026, 9, 1)), 100);
+  });
+
+  it("a missed month restarts loyalty from the 7th", () => {
+    const start = "2020-01-01";
+    const now = new Date(2026, 9, 7);
+    const onTime = [{ period: "2026-09", status: "paid", paidAt: "2026-09-03T10:00:00" }];
+    assert.equal(loyaltyRestartOn(onTime, now), null);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, now, onTime), 95);
+
+    const unpaid = [{ period: "2026-10", status: "pending" }];
+    assert.equal(loyaltyRestartOn(unpaid, now), "2026-10-07");
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, now, unpaid), 100);
+    assert.equal(
+      applyStoredLoyaltyDiscount(100, 5, start, new Date(2027, 9, 7), unpaid),
+      95
+    );
+
+    const late = [{ period: "2026-08", status: "paid", paidAt: "2026-08-10T10:00:00" }];
+    assert.equal(loyaltyRestartOn(late, now), "2026-08-07");
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, now, late), 100);
+
+    const beforeGrace = [{ period: "2026-10", status: "pending" }];
+    assert.equal(loyaltyRestartOn(beforeGrace, new Date(2026, 9, 6, 12)), null);
+  });
+
+  it("rebasePendingLoyaltyAmount drops the discount on a missed pending row", () => {
+    const next = rebasePendingLoyaltyAmount(
+      { status: "pending", baseAmount: 95, shopAmount: 4, socioAmount: 1, amount: 100 },
+      100,
+      100,
+      5
+    );
+    assert.deepEqual(next, { amount: 105, baseAmount: 100, shopAmount: 4, socioAmount: 1 });
+    assert.equal(
+      rebasePendingLoyaltyAmount(
+        { status: "pending", baseAmount: 90, shopAmount: 0, socioAmount: 0, amount: 90 },
+        100,
+        100,
+        5
+      ),
+      null
+    );
+    assert.equal(
+      rebasePendingLoyaltyAmount(
+        { status: "paid", baseAmount: 95, amount: 95 },
+        100,
+        100,
+        5
+      ),
+      null
+    );
   });
 
   it("coachingTenure counts whole years and leftover months", () => {

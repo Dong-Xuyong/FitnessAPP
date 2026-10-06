@@ -138,6 +138,7 @@ import {
   clampLoyaltyDiscountPercent,
   clampSocioFee,
   coachingTenure,
+  effectiveLoyaltyStartedOn,
   loyaltyDiscountEligible,
   catalogMapFromItems,
   collectShopLinesForPaymentPeriod,
@@ -288,10 +289,7 @@ function BillingTab({
 
   const loyaltyPercent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
   const listMonthly = Number(monthlyRate) || calculatedMonthlyRate || 0;
-  const loyaltyActive = loyaltyDiscountEligible(coachingStartedOn);
-  const discountedMonthly = applyStoredLoyaltyDiscount(listMonthly, loyaltyPercent, coachingStartedOn);
   const socioAmount = clampSocioFee(socioFee);
-  const tenure = coachingTenure(coachingStartedOn);
 
   // Read billing config from roster doc
   const billingRef = useMemoFirebase(() => {
@@ -315,6 +313,10 @@ function BillingTab({
   const sortedPayments = (payments || []).sort(
     (a: any, b: any) => (b.period || "").localeCompare(a.period || "")
   );
+  const loyaltyStartedOn = effectiveLoyaltyStartedOn(coachingStartedOn, sortedPayments);
+  const loyaltyActive = loyaltyDiscountEligible(loyaltyStartedOn);
+  const discountedMonthly = applyStoredLoyaltyDiscount(listMonthly, loyaltyPercent, loyaltyStartedOn);
+  const tenure = coachingTenure(coachingStartedOn);
 
   const shopBillingContext = useMemo(
     () => buildShopBillingPeriodContextFromPayments(sortedPayments || []),
@@ -582,7 +584,11 @@ function BillingTab({
     const started = coachingStartedOn.trim().slice(0, 10);
     const percent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
     const listRate = Number(monthlyRate) || calculatedMonthlyRate || 0;
-    const membership = applyStoredLoyaltyDiscount(listRate, percent, started);
+    const membership = applyStoredLoyaltyDiscount(
+      listRate,
+      percent,
+      effectiveLoyaltyStartedOn(started, sortedPayments)
+    );
     const socio = clampSocioFee(socioFee);
     const registrationDate = /^\d{4}-\d{2}-\d{2}$/.test(started) ? started : "";
     updateDocumentNonBlocking(doc(db, "personalTrainers", user.uid, "students", studentId), {

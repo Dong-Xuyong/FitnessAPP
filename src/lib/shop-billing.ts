@@ -1260,25 +1260,142 @@ export function coachingTenure(
 /** Discount applies once coaching has lasted this many whole years. */
 export const LOYALTY_DISCOUNT_AFTER_YEARS = 1;
 
+export type LoyaltyPaymentRow = {
+  period?: unknown;
+  status?: unknown;
+  paidAt?: unknown;
+};
+
+function loyaltyPeriodYm(raw: unknown): { y: number; m: number } | null {
+  const match = /^(\d{4})-(\d{1,2})/.exec(String(raw ?? "").trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null;
+  return { y, m };
+}
+
+function loyaltyStatusPaid(status: unknown): boolean {
+  const t = String(status ?? "").trim().toLowerCase();
+  return t === "paid" || t === "pago";
+}
+
+/** End of day 6 of the payment month. Unpaid after this is a missed month. */
+function loyaltyGraceEnd(y: number, m: number): Date {
+  return new Date(y, m - 1, 6, 23, 59, 59, 999);
+}
+
+function loyaltyPaidLate(paidAt: unknown, y: number, m: number): boolean {
+  if (paidAt == null || paidAt === "") return false;
+  const t = Date.parse(String(paidAt));
+  if (!Number.isFinite(t)) return false;
+  return t > loyaltyGraceEnd(y, m).getTime();
+}
+
+/**
+ * `YYYY-MM-DD` (the 7th) of the latest missed month.
+ * A miss is unpaid after day 6, or paid after day 6. On-time months do not count.
+ */
+export function loyaltyRestartOn(
+  payments: LoyaltyPaymentRow[] | null | undefined,
+  now = new Date()
+): string | null {
+  if (!payments?.length) return null;
+  const nowMonth = now.getFullYear() * 12 + now.getMonth();
+  const byPeriod = new Map<string, { y: number; m: number; onTime: boolean; late: boolean; unpaid: boolean }>();
+  for (const payment of payments) {
+    const period = loyaltyPeriodYm(payment.period);
+    if (!period) continue;
+    if (period.y * 12 + (period.m - 1) > nowMonth) continue;
+    const key = `${period.y}-${String(period.m).padStart(2, "0")}`;
+    let row = byPeriod.get(key);
+    if (!row) {
+      row = { y: period.y, m: period.m, onTime: false, late: false, unpaid: false };
+      byPeriod.set(key, row);
+    }
+    if (loyaltyStatusPaid(payment.status)) {
+      if (loyaltyPaidLate(payment.paidAt, period.y, period.m)) row.late = true;
+      else row.onTime = true;
+    } else {
+      row.unpaid = true;
+    }
+  }
+
+  let latest: string | null = null;
+  for (const row of byPeriod.values()) {
+    if (row.onTime) continue;
+    const missed = row.late || (row.unpaid && now.getTime() > loyaltyGraceEnd(row.y, row.m).getTime());
+    if (!missed) continue;
+    const anchor = `${row.y}-${String(row.m).padStart(2, "0")}-07`;
+    if (!latest || anchor > latest) latest = anchor;
+  }
+  return latest;
+}
+
+/** Registration date, or the 7th of the latest missed month when that is later. */
+export function effectiveLoyaltyStartedOn(
+  startedOn: unknown,
+  payments?: LoyaltyPaymentRow[] | null,
+  now = new Date()
+): string {
+  const started = String(startedOn ?? "").trim().slice(0, 10);
+  const restart = loyaltyRestartOn(payments, now);
+  if (!restart) return started;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(started)) return restart;
+  return restart > started ? restart : started;
+}
+
 export function loyaltyDiscountEligible(
   startedOn: unknown,
   now = new Date(),
-  afterYears = LOYALTY_DISCOUNT_AFTER_YEARS
+  afterYears = LOYALTY_DISCOUNT_AFTER_YEARS,
+  payments?: LoyaltyPaymentRow[] | null
 ): boolean {
-  const tenure = coachingTenure(String(startedOn ?? "").trim().slice(0, 10), now);
+  const tenure = coachingTenure(effectiveLoyaltyStartedOn(startedOn, payments, now), now);
   return tenure != null && tenure.years >= afterYears;
 }
 
-/** List price until the coaching start date is at least one year ago. */
+/** List price until one uninterrupted year. A missed month restarts that year. */
 export function applyStoredLoyaltyDiscount(
   monthlyRate: number,
   percent: unknown,
   startedOn: unknown,
-  now = new Date()
+  now = new Date(),
+  payments?: LoyaltyPaymentRow[] | null
 ): number {
   const rate = roundMoney(Math.max(0, Number(monthlyRate) || 0));
-  if (!loyaltyDiscountEligible(startedOn, now)) return rate;
+  if (!loyaltyDiscountEligible(startedOn, now, LOYALTY_DISCOUNT_AFTER_YEARS, payments)) return rate;
   return applyLoyaltyDiscount(rate, percent);
+}
+
+/**
+ * Pending row still priced at the loyalty rate, after a miss made the discount ineligible.
+ * Returns null when the row should be left alone.
+ */
+export function rebasePendingLoyaltyAmount(
+  data: {
+    status?: unknown;
+    baseAmount?: unknown;
+    shopAmount?: unknown;
+    socioAmount?: unknown;
+    amount?: unknown;
+  },
+  dueMembership: number,
+  listRate: number,
+  percent: unknown
+): { amount: number; baseAmount: number; shopAmount: number; socioAmount: number } | null {
+  const status = String(data.status ?? "").trim().toLowerCase();
+  if (status === "paid" || status === "pago") return null;
+  if (status && status !== "pending" && status !== "pendente") return null;
+  const base = Number(data.baseAmount);
+  if (!Number.isFinite(base)) return null;
+  const discounted = applyLoyaltyDiscount(roundMoney(Math.max(0, listRate)), percent);
+  if (Math.abs(base - discounted) >= 0.001) return null;
+  const due = roundMoney(Math.max(0, dueMembership));
+  if (Math.abs(base - due) < 0.001) return null;
+  const shop = roundMoney(Math.max(0, Number(data.shopAmount) || 0));
+  const socio = roundMoney(Math.max(0, Number(data.socioAmount) || 0));
+  return buildPaymentAmounts(due, shop, socio);
 }
 
 export function clampSocioFee(raw: unknown): number {

@@ -12,6 +12,7 @@ import {
   applyStoredLoyaltyDiscount,
   clampLoyaltyDiscountPercent,
   clampSocioFee,
+  effectiveLoyaltyStartedOn,
   loyaltyDiscountEligible,
   resolveMonthlyRate,
 } from "@/lib/shop-billing";
@@ -50,7 +51,10 @@ export type StudentBillingData = {
   paidPayments: StudentPaymentRecord[];
 };
 
-function planFromRoster(roster: Record<string, unknown>): StudentBillingPlan {
+function planFromRoster(
+  roster: Record<string, unknown>,
+  payments: StudentPaymentRecord[]
+): StudentBillingPlan {
   const sessionDurationMin = Number(roster.sessionDurationMin ?? 60);
   const listMonthlyRate = resolveMonthlyRate({
     monthlyRate: roster.monthlyRate,
@@ -60,7 +64,8 @@ function planFromRoster(roster: Record<string, unknown>): StudentBillingPlan {
     sessionsPerWeek: roster.sessionsPerWeek,
   });
   const loyaltyDiscountPercent = clampLoyaltyDiscountPercent(roster.loyaltyDiscountPercent);
-  const loyaltyDiscountActive = loyaltyDiscountEligible(roster.coachingStartedOn);
+  const loyaltyStartedOn = effectiveLoyaltyStartedOn(roster.coachingStartedOn, payments);
+  const loyaltyDiscountActive = loyaltyDiscountEligible(loyaltyStartedOn);
   return {
     billingStatus: String(roster.billingStatus ?? "inactive").trim() || "inactive",
     sessionsPerWeek: Number(roster.sessionsPerWeek ?? 0),
@@ -73,7 +78,7 @@ function planFromRoster(roster: Record<string, unknown>): StudentBillingPlan {
     monthlyRate: applyStoredLoyaltyDiscount(
       listMonthlyRate,
       loyaltyDiscountPercent,
-      roster.coachingStartedOn
+      loyaltyStartedOn
     ),
     paymentMethod: String(roster.paymentMethod ?? "mbway").trim() || "mbway",
   };
@@ -141,9 +146,7 @@ export function useStudentBillingData(
         }
 
         const roster = rosterSnap.data() as Record<string, unknown>;
-        const rosterPlan = planFromRoster(roster);
         const instructions = String(roster.paymentDetails ?? "").trim();
-        const method = rosterPlan.paymentMethod;
 
         const paymentsSnap = await getDocs(
           collection(fs, "personalTrainers", trainerId, "students", rosterDocId, "payments")
@@ -164,8 +167,9 @@ export function useStudentBillingData(
         });
 
         if (cancelled) return;
+        const rosterPlan = planFromRoster(roster, rows);
         setPaymentInstructions(instructions);
-        setPaymentMethod(method);
+        setPaymentMethod(rosterPlan.paymentMethod);
         setPlan(rosterPlan);
         setPayments(rows);
       } catch {
