@@ -143,7 +143,9 @@ describe("forecastStudentAmount", () => {
     assert.equal(row?.amount, 95);
     assert.equal(row?.source, "monthly_rate");
 
-    const gapped = payments.slice(0, -1);
+    const gapped = payments.map((payment, index) =>
+      index === payments.length - 1 ? { ...payment, status: "pending" } : payment
+    );
     const withGap = forecastStudentAmount(
       student({ id: "b2", name: "Bruno", roster, payments: gapped }),
       nextPeriod

@@ -428,7 +428,7 @@ describe("shop-billing", () => {
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 8, 30), paid), 100);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), paid), 95);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, "", new Date(2026, 9, 1), paid), 100);
-    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), []), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), []), 95);
   });
 
   it("a gap restarts loyalty on the 1st of the next month", () => {
@@ -462,11 +462,26 @@ describe("shop-billing", () => {
       { period: "2026-06", status: "paid" },
       { period: "2026-08", status: "paid" },
     ];
-    assert.equal(loyaltyRestartOn(start, missingJuly, new Date(2026, 7, 20, 12)), "2026-08-01");
+    assert.equal(loyaltyRestartOn(start, missingJuly, new Date(2026, 7, 20, 12)), null);
+    assert.equal(effectiveLoyaltyStartedOn(start, missingJuly, new Date(2026, 7, 20, 12)), start);
   });
 
-  it("Xuyong's July gap restarts the counter on 12 Oct 2026", () => {
-    // Enrolment shown as 03/11/2026 in en-US is 2026-03-11, which is 0 yr, 7 mo if counted straight through.
+  it("Xuyong all existing rows Pago counts from 11 Mar 2026", () => {
+    const start = "2026-03-11";
+    const now = new Date(2026, 9, 12, 12, 0, 0);
+    const payments = [
+      { period: "2026-06", status: "paid" },
+      { period: "2026-07", status: "paid" },
+      { period: "2026-08", status: "Pago" },
+    ];
+    assert.equal(loyaltyRestartOn(start, payments, now), null);
+    const clock = effectiveLoyaltyStartedOn(start, payments, now);
+    assert.equal(clock, start);
+    assert.deepEqual(coachingTenure(clock, now), { years: 0, months: 7 });
+    assert.equal(applyStoredLoyaltyDiscount(10, 5, start, now, payments), 10);
+  });
+
+  it("a non-Pago row still restarts Xuyong, a missing month does not", () => {
     const start = "2026-03-11";
     const now = new Date(2026, 9, 12, 12, 0, 0);
     const payments = [
@@ -474,13 +489,19 @@ describe("shop-billing", () => {
       { period: "2026-07", status: "pending" },
       { period: "2026-08", status: "paid" },
     ];
-    assert.deepEqual(coachingTenure(start, now), { years: 0, months: 7 });
-    assert.equal(loyaltyRestartOn(start, payments, now), "2026-11-01");
-    const clock = effectiveLoyaltyStartedOn(start, payments, now);
-    assert.equal(clock, "2026-11-01");
-    assert.deepEqual(coachingTenure(clock, now), { years: 0, months: 0 });
-    assert.equal(loyaltyDiscountEligible(start, now, 1, payments), false);
-    assert.equal(applyStoredLoyaltyDiscount(10, 5, start, now, payments), 10);
+    assert.equal(loyaltyRestartOn(start, payments, now), "2026-08-01");
+    assert.deepEqual(coachingTenure(effectiveLoyaltyStartedOn(start, payments, now), now), {
+      years: 0,
+      months: 2,
+    });
+    const settled = payments.map((row) =>
+      row.period === "2026-07" ? { ...row, status: "paid" } : row
+    );
+    assert.equal(loyaltyRestartOn(start, settled, now), null);
+    assert.deepEqual(coachingTenure(effectiveLoyaltyStartedOn(start, settled, now), now), {
+      years: 0,
+      months: 7,
+    });
   });
 
   it("twelve full months after the restarted clock unlock the discount", () => {

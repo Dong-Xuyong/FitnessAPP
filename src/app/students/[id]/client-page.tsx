@@ -104,7 +104,7 @@ import {
 import { EditWorkoutSessionDialog } from "@/components/EditWorkoutSessionDialog";
 import { MilestonesTab } from "@/components/MilestonesTab";
 import { StudentWeeklySchedulingTab } from "@/components/student-weekly-scheduling/StudentWeeklySchedulingTab";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import type { Milestone, TrainingProgramDocument } from "@/lib/types";
 import { linkStudentProfileForTrainerAssignments } from "@/components/AssignStudentSequenceForm";
 import { getDefaultStudentSequenceProgram } from "@/lib/firestore/default-student-sequence";
@@ -131,7 +131,6 @@ import {
   normalizedPaymentPending,
 } from "@/lib/student-payment-due";
 import {
-  applyLoyaltyDiscount,
   applyStoredLoyaltyDiscount,
   buildPaymentAmounts,
   buildShopBillingPeriodContextFromPayments,
@@ -240,12 +239,21 @@ function adjustAssignedExercises(exercises: any[], weightDelta: number, repDelta
 }
 
 // ─── Billing Tab Component ───────────────────────────────────────
-function formatLoyaltyClockDate(ymd: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
-  if (!match) return ymd;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  if (Number.isNaN(date.getTime())) return ymd;
-  return date.toLocaleDateString();
+function formatLoyaltyCountLine(
+  tenure: { years: number; months: number } | null,
+  t: (key: TranslationKey) => string
+): string | null {
+  if (!tenure) return null;
+  const parts: string[] = [];
+  if (tenure.years > 0) {
+    parts.push(`${tenure.years} ${tenure.years === 1 ? t("loyaltyYearOne") : t("loyaltyYearMany")}`);
+  }
+  if (tenure.months > 0 || parts.length === 0) {
+    parts.push(
+      `${tenure.months} ${tenure.months === 1 ? t("loyaltyMonthOne") : t("loyaltyMonthMany")}`
+    );
+  }
+  return `${t("loyaltyShort")}: ${parts.join(", ")}`;
 }
 
 function BillingTab({
@@ -324,9 +332,7 @@ function BillingTab({
   const loyaltyStartedOn = effectiveLoyaltyStartedOn(coachingStartedOn, sortedPayments);
   const loyaltyActive = loyaltyDiscountEligible(loyaltyStartedOn);
   const discountedMonthly = applyStoredLoyaltyDiscount(listMonthly, loyaltyPercent, loyaltyStartedOn);
-  const tenure = coachingTenure(loyaltyStartedOn);
-  const loyaltyClockRestarted =
-    Boolean(loyaltyStartedOn) && loyaltyStartedOn !== coachingStartedOn.trim().slice(0, 10);
+  const loyaltyCountLine = formatLoyaltyCountLine(coachingTenure(loyaltyStartedOn), t);
 
   const shopBillingContext = useMemo(
     () => buildShopBillingPeriodContextFromPayments(sortedPayments || []),
@@ -871,7 +877,6 @@ function BillingTab({
                   <SelectItem value="open">{t("trainingAccessModeOpen")}</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">{t("trainingAccessModeOpenDesc")}</p>
             </div>
           </div>
 
@@ -892,11 +897,6 @@ function BillingTab({
                 value={coachingStartedOn}
                 onChange={(e) => setCoachingStartedOn(e.target.value)}
               />
-              {loyaltyClockRestarted ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("loyaltyClockRestarted").replace("{date}", formatLoyaltyClockDate(loyaltyStartedOn))}
-                </p>
-              ) : null}
             </div>
             <div className="space-y-2">
               <Label>{t("socioFee")}</Label>
@@ -920,33 +920,10 @@ function BillingTab({
                 value={loyaltyDiscountPercent}
                 onChange={(e) => setLoyaltyDiscountPercent(e.target.value)}
               />
+              {loyaltyCountLine ? (
+                <p className="text-xs text-muted-foreground">{loyaltyCountLine}</p>
+              ) : null}
             </div>
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              {t("loyaltyDiscountRule")}
-              {loyaltyStartedOn
-                ? ` · ${t("loyaltyClockFrom").replace("{date}", formatLoyaltyClockDate(loyaltyStartedOn))}`
-                : ""}
-              {tenure
-                ? ` · ${t("loyaltyTenure")
-                    .replace("{years}", String(tenure.years))
-                    .replace("{months}", String(tenure.months))}`
-                : ""}
-              {loyaltyPercent > 0
-                ? ` · ${
-                    loyaltyActive
-                      ? t("loyaltyDiscountPreview")
-                          .replace("{list}", listMonthly.toFixed(2))
-                          .replace("{percent}", String(loyaltyPercent))
-                          .replace("{due}", discountedMonthly.toFixed(2))
-                      : t("loyaltyDiscountWaiting")
-                          .replace("{list}", listMonthly.toFixed(2))
-                          .replace("{due}", applyLoyaltyDiscount(listMonthly, loyaltyPercent).toFixed(2))
-                  }`
-                : ""}
-              {socioAmount > 0
-                ? ` + €${socioAmount.toFixed(2)} ${t("socioFeeShort")} = €${(discountedMonthly + socioAmount).toFixed(2)}`
-                : ""}
-            </p>
             <div className="space-y-2">
               <Label>{t("paymentMethod")}</Label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>

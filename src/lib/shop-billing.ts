@@ -1304,34 +1304,27 @@ function parseLoyaltyStart(raw: unknown): { y: number; m: number } | null {
   return { y, m };
 }
 
-/** A month is Pago when any row for it is paid. `paidAt` does not matter. */
-function loyaltyPaidPeriodKeys(payments: LoyaltyPaymentRow[] | null | undefined): Set<string> {
-  const paid = new Set<string>();
-  for (const payment of payments ?? []) {
-    const period = loyaltyPeriodYm(payment.period);
-    if (!period || !loyaltyStatusPaid(payment.status)) continue;
-    paid.add(loyaltyYmKey(period.y, period.m));
-  }
-  return paid;
-}
-
 /**
- * Last month that must already be Pago.
- * Months that have ended always count. The still-open month counts only after
- * day 6, when this app treats it as overdue.
+ * Month index of a stored payment row that can reset the clock, or null when
+ * the row is not billable yet. The app only creates a row when a payment is
+ * recorded, when the current month opens, or in the last four days for next
+ * month — a month with no row is not a gap. The open month counts only after
+ * day 6. Future rows do not count.
  */
-function loyaltyRequiredEndIndex(now: Date): number {
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1;
-  const current = loyaltyMonthIndex(y, m);
-  if (now.getTime() > loyaltyGraceEnd(y, m).getTime()) return current;
-  return current - 1;
+function loyaltyBillableMonthIndex(period: unknown, now: Date): number | null {
+  const parsed = loyaltyPeriodYm(period);
+  if (!parsed) return null;
+  const index = loyaltyMonthIndex(parsed.y, parsed.m);
+  const current = loyaltyMonthIndex(now.getFullYear(), now.getMonth() + 1);
+  if (index > current) return null;
+  if (index === current && now.getTime() <= loyaltyGraceEnd(parsed.y, parsed.m).getTime()) return null;
+  return index;
 }
 
 /**
- * `YYYY-MM-01` of the month after the latest gap, or null when every required
- * month is Pago. Pending, missing, and any other non-Pago status are gaps.
- * Marking the month Pago removes the gap.
+ * `YYYY-MM-01` of the month after the latest non-Pago row, or null when every
+ * billable row is Pago (`paid` or `pago`). A month with no row does not reset
+ * the clock. Any paid row for that month clears it.
  */
 export function loyaltyRestartOn(
   startedOn: unknown,
@@ -1341,14 +1334,17 @@ export function loyaltyRestartOn(
   const start = parseLoyaltyStart(startedOn);
   if (!start || payments == null) return null;
   const startIndex = loyaltyMonthIndex(start.y, start.m);
-  const endIndex = loyaltyRequiredEndIndex(now);
-  if (endIndex < startIndex) return null;
-  const paid = loyaltyPaidPeriodKeys(payments);
+  const paid = new Set<number>();
+  const seen = new Set<number>();
+  for (const payment of payments) {
+    const index = loyaltyBillableMonthIndex(payment.period, now);
+    if (index == null || index < startIndex) continue;
+    seen.add(index);
+    if (loyaltyStatusPaid(payment.status)) paid.add(index);
+  }
   let latestGap = -1;
-  for (let index = startIndex; index <= endIndex; index += 1) {
-    const y = Math.floor(index / 12);
-    const m = (index % 12) + 1;
-    if (!paid.has(loyaltyYmKey(y, m))) latestGap = index;
+  for (const index of seen) {
+    if (!paid.has(index) && index > latestGap) latestGap = index;
   }
   if (latestGap < 0) return null;
   const next = latestGap + 1;
