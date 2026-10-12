@@ -39,14 +39,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -64,7 +56,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ChevronDown, ChevronUp, Loader2, Minus, Pencil, Plus, Store, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -121,6 +113,56 @@ type EnrichedPurchaseRow = ShopPurchaseLike & {
   lineTotal: number;
   summary: string;
 };
+
+function ShopPurchaseList({
+  rows,
+  nameByStudentId,
+  deletingId,
+  onDelete,
+  deleteLabel,
+}: {
+  rows: EnrichedPurchaseRow[];
+  nameByStudentId: Record<string, string>;
+  deletingId: string | null;
+  onDelete: (id: string) => void;
+  deleteLabel: string;
+}) {
+  return (
+    <ul className="divide-y rounded-md border">
+      {rows.map((row) => {
+        const sid = row.studentId || "";
+        const isDeleting = deletingId === row.id;
+        return (
+          <li key={row.id} className="flex items-center gap-2 px-3 py-2 min-w-0">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">
+                {nameByStudentId[sid] || sid.slice(0, 8) || "—"}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {row.date || "—"}
+                {row.time ? ` ${row.time}` : ""}
+                {" · "}
+                {row.summary}
+              </p>
+            </div>
+            <span className="shrink-0 text-sm font-medium tabular-nums">€{row.lineTotal.toFixed(2)}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+              disabled={isDeleting}
+              aria-label={deleteLabel}
+              onClick={() => onDelete(row.id)}
+            >
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            </Button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function flattenPurchaseRows(
   rows: ShopRegRow[],
@@ -558,18 +600,9 @@ export default function CoachShopPage() {
   return (
     <Navigation>
       <div className="space-y-6 w-full min-w-0 max-w-5xl mx-auto">
-        <header className="space-y-1">
-          <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
-            <Store className="h-8 w-8 text-primary shrink-0" aria-hidden />
-            {t("shop")}
-          </h1>
-        </header>
-
-        <Card>
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle>{t("shopCatalogTitle")}</CardTitle>
-            </div>
+        <Card className="min-w-0">
+          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 p-4">
+            <CardTitle className="text-base">{t("shopCatalogTitle")}</CardTitle>
             <Button
               type="button"
               size="icon"
@@ -581,7 +614,7 @@ export default function CoachShopPage() {
               <Plus className="h-4 w-4" aria-hidden />
             </Button>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 pb-4 pt-0">
             {catalogLoading ? (
               <div className="flex items-center gap-2 text-muted-foreground text-sm py-6 justify-center">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -590,52 +623,45 @@ export default function CoachShopPage() {
             ) : sortedItems.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">{t("shopCatalogEmpty")}</p>
             ) : (
-              <div className="rounded-md border overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("shopItemName")}</TableHead>
-                      <TableHead className="text-right">{t("shopItemPrice")}</TableHead>
-                      <TableHead>{t("status")}</TableHead>
-                      <TableHead className="w-[88px]" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedItems.map((item) => (
-                      <TableRow key={item.id} className={item.active === false ? "opacity-60" : undefined}>
-                        <TableCell className="font-medium">{item.name || "—"}</TableCell>
-                        <TableCell className="text-right">€{Number(item.price ?? 0).toFixed(2)}</TableCell>
-                        <TableCell>
-                          {item.active === false ? t("shopItemInactive") : t("shopItemActive")}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t("edit")}
-                            onClick={() => openEditItem(item)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          {item.active !== false && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive hover:text-destructive"
-                              aria-label={t("shopDeactivateItem")}
-                              onClick={() => setConfirmDeleteItemId(item.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <ul className="divide-y rounded-md border">
+                {sortedItems.map((item) => (
+                  <li
+                    key={item.id}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2 min-w-0",
+                      item.active === false && "opacity-60"
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-medium">{item.name || "—"}</span>
+                    <span className="shrink-0 text-sm tabular-nums">€{Number(item.price ?? 0).toFixed(2)}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {item.active === false ? t("shopItemInactive") : t("shopItemActive")}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0"
+                      aria-label={t("edit")}
+                      onClick={() => openEditItem(item)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    {item.active !== false && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-destructive hover:text-destructive"
+                        aria-label={t("shopDeactivateItem")}
+                        onClick={() => setConfirmDeleteItemId(item.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
             )}
           </CardContent>
         </Card>
@@ -862,59 +888,13 @@ export default function CoachShopPage() {
                     {unpaidRegRows.length === 0 ? (
                       <p className="text-sm text-muted-foreground px-1 py-2">{t("shopCoachNoUnpaidRegs")}</p>
                     ) : (
-                      <div className="rounded-md border overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>{t("date")}</TableHead>
-                              <TableHead>{t("shopTableStudent")}</TableHead>
-                              <TableHead>{t("shopTableItems")}</TableHead>
-                              <TableHead className="text-right">{t("shopDayTotal")}</TableHead>
-                              <TableHead className="w-[72px]" />
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {unpaidRegRows.map((row) => {
-                              const sid = row.studentId || "";
-                              const isDeleting = deletingId === row.id;
-                              return (
-                                <TableRow key={`${row.id}-unpaid`}>
-                                  <TableCell className="font-medium whitespace-nowrap">
-                                    {row.date || "—"}
-                                    {row.time ? (
-                                      <span className="block text-xs text-muted-foreground">{row.time}</span>
-                                    ) : null}
-                                  </TableCell>
-                                  <TableCell>{nameByStudentId[sid] || sid.slice(0, 8) || "—"}</TableCell>
-                                  <TableCell className="max-w-[240px] truncate text-sm text-muted-foreground">
-                                    {row.summary}
-                                  </TableCell>
-                                  <TableCell className="text-right font-medium">
-                                    €{row.lineTotal.toFixed(2)}
-                                  </TableCell>
-                                  <TableCell className="text-right w-[72px]">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                      disabled={isDeleting}
-                                      aria-label={t("shopDeleteRegistration")}
-                                      onClick={() => setConfirmDeleteId(row.id)}
-                                    >
-                                      {isDeleting ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                      ) : (
-                                        <Trash2 className="h-4 w-4" />
-                                      )}
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
+                      <ShopPurchaseList
+                        rows={unpaidRegRows}
+                        nameByStudentId={nameByStudentId}
+                        deletingId={deletingId}
+                        onDelete={setConfirmDeleteId}
+                        deleteLabel={t("shopDeleteRegistration")}
+                      />
                     )}
                   </CollapsibleContent>
                 </Collapsible>
@@ -963,59 +943,13 @@ export default function CoachShopPage() {
                             {t("shopDeleteAllPaid")}
                           </Button>
                         </div>
-                        <div className="rounded-md border overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>{t("date")}</TableHead>
-                              <TableHead>{t("shopTableStudent")}</TableHead>
-                              <TableHead>{t("shopTableItems")}</TableHead>
-                              <TableHead className="text-right">{t("shopDayTotal")}</TableHead>
-                              <TableHead className="w-[72px]" />
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {paidRegRows.map((row) => {
-                              const sid = row.studentId || "";
-                              const isDeleting = deletingId === row.id;
-                              return (
-                                <TableRow key={`${row.id}-paid`}>
-                                  <TableCell className="font-medium whitespace-nowrap">
-                                    {row.date || "—"}
-                                    {row.time ? (
-                                      <span className="block text-xs text-muted-foreground">{row.time}</span>
-                                    ) : null}
-                                  </TableCell>
-                                  <TableCell>{nameByStudentId[sid] || sid.slice(0, 8) || "—"}</TableCell>
-                                  <TableCell className="max-w-[240px] truncate text-sm text-muted-foreground">
-                                    {row.summary}
-                                  </TableCell>
-                                  <TableCell className="text-right font-medium">
-                                    €{row.lineTotal.toFixed(2)}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                      disabled={isDeleting}
-                                      aria-label={t("shopDeleteRegistration")}
-                                      onClick={() => setConfirmDeleteId(row.id)}
-                                    >
-                                      {isDeleting ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                      ) : (
-                                        <Trash2 className="h-4 w-4" />
-                                      )}
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                        </div>
+                        <ShopPurchaseList
+                          rows={paidRegRows}
+                          nameByStudentId={nameByStudentId}
+                          deletingId={deletingId}
+                          onDelete={setConfirmDeleteId}
+                          deleteLabel={t("shopDeleteRegistration")}
+                        />
                       </div>
                     )}
                   </CollapsibleContent>

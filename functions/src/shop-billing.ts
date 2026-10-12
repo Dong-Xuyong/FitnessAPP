@@ -632,17 +632,220 @@ export function resolveMonthlyRate(roster: {
   return 0;
 }
 
-export function buildPaymentAmounts(monthlyRate: number, shopTotal: number): {
+export function clampLoyaltyDiscountPercent(raw: unknown): number {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(100, n);
+}
+
+/** Membership after the coach's loyalty percent. Shop totals stay full price. */
+export function applyLoyaltyDiscount(monthlyRate: number, percent: unknown): number {
+  const rate = roundMoney(Math.max(0, Number(monthlyRate) || 0));
+  const pct = clampLoyaltyDiscountPercent(percent);
+  if (pct <= 0) return rate;
+  return roundMoney(rate * (1 - pct / 100));
+}
+
+/** Discount applies once coaching has lasted this many whole years. */
+export const LOYALTY_DISCOUNT_AFTER_YEARS = 1;
+
+export type LoyaltyPaymentRow = {
+  period?: unknown;
+  status?: unknown;
+  paidAt?: unknown;
+};
+
+function loyaltyPeriodYm(raw: unknown): { y: number; m: number } | null {
+  const match = /^(\d{4})-(\d{1,2})/.exec(String(raw ?? "").trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null;
+  return { y, m };
+}
+
+function loyaltyStatusPaid(status: unknown): boolean {
+  const t = String(status ?? "").trim().toLowerCase();
+  return t === "paid" || t === "pago";
+}
+
+/** End of day 6 of the payment month. The open month is overdue after this. */
+function loyaltyGraceEnd(y: number, m: number): Date {
+  return new Date(y, m - 1, 6, 23, 59, 59, 999);
+}
+
+function loyaltyMonthIndex(y: number, m: number): number {
+  return y * 12 + (m - 1);
+}
+
+function loyaltyYmKey(y: number, m: number): string {
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+
+function parseLoyaltyStart(raw: unknown): { y: number; m: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw ?? "").trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const start = new Date(y, m - 1, d);
+  if (start.getFullYear() !== y || start.getMonth() !== m - 1 || start.getDate() !== d) return null;
+  return { y, m };
+}
+
+/** A month is Pago when any row for it is paid. `paidAt` does not matter. */
+function loyaltyPaidPeriodKeys(payments: LoyaltyPaymentRow[] | null | undefined): Set<string> {
+  const paid = new Set<string>();
+  for (const payment of payments ?? []) {
+    const period = loyaltyPeriodYm(payment.period);
+    if (!period || !loyaltyStatusPaid(payment.status)) continue;
+    paid.add(loyaltyYmKey(period.y, period.m));
+  }
+  return paid;
+}
+
+/**
+ * Last month that must already be Pago.
+ * Months that have ended always count. The still-open month counts only after
+ * day 6, when this app treats it as overdue.
+ */
+function loyaltyRequiredEndIndex(now: Date): number {
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const current = loyaltyMonthIndex(y, m);
+  if (now.getTime() > loyaltyGraceEnd(y, m).getTime()) return current;
+  return current - 1;
+}
+
+/**
+ * `YYYY-MM-01` of the month after the latest gap, or null when every required
+ * month is Pago. Pending, missing, and any other non-Pago status are gaps.
+ * Marking the month Pago removes the gap.
+ */
+export function loyaltyRestartOn(
+  startedOn: unknown,
+  payments?: LoyaltyPaymentRow[] | null,
+  now = new Date()
+): string | null {
+  const start = parseLoyaltyStart(startedOn);
+  if (!start || payments == null) return null;
+  const startIndex = loyaltyMonthIndex(start.y, start.m);
+  const endIndex = loyaltyRequiredEndIndex(now);
+  if (endIndex < startIndex) return null;
+  const paid = loyaltyPaidPeriodKeys(payments);
+  let latestGap = -1;
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const y = Math.floor(index / 12);
+    const m = (index % 12) + 1;
+    if (!paid.has(loyaltyYmKey(y, m))) latestGap = index;
+  }
+  if (latestGap < 0) return null;
+  const next = latestGap + 1;
+  const y = Math.floor(next / 12);
+  const m = (next % 12) + 1;
+  return `${loyaltyYmKey(y, m)}-01`;
+}
+
+/** Enrolment date, or the 1st of the month after the latest gap when that is later. */
+export function effectiveLoyaltyStartedOn(
+  startedOn: unknown,
+  payments?: LoyaltyPaymentRow[] | null,
+  now = new Date()
+): string {
+  const started = String(startedOn ?? "").trim().slice(0, 10);
+  const restart = loyaltyRestartOn(started, payments, now);
+  if (!restart) return started;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(started)) return restart;
+  return restart > started ? restart : started;
+}
+
+function coachingTenureYears(startedOn: string, now: Date): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(startedOn.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const start = new Date(year, month - 1, day);
+  if (start.getFullYear() !== year || start.getMonth() !== month - 1 || start.getDate() !== day) {
+    return null;
+  }
+  let years = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 0) years -= 1;
+  return years < 0 ? 0 : years;
+}
+
+export function loyaltyDiscountEligible(
+  startedOn: unknown,
+  now = new Date(),
+  afterYears = LOYALTY_DISCOUNT_AFTER_YEARS,
+  payments?: LoyaltyPaymentRow[] | null
+): boolean {
+  const years = coachingTenureYears(effectiveLoyaltyStartedOn(startedOn, payments, now), now);
+  return years != null && years >= afterYears;
+}
+
+/** List price until one uninterrupted year. A missed month restarts that year. */
+export function applyStoredLoyaltyDiscount(
+  monthlyRate: number,
+  percent: unknown,
+  startedOn: unknown,
+  now = new Date(),
+  payments?: LoyaltyPaymentRow[] | null
+): number {
+  const rate = roundMoney(Math.max(0, Number(monthlyRate) || 0));
+  if (!loyaltyDiscountEligible(startedOn, now, LOYALTY_DISCOUNT_AFTER_YEARS, payments)) return rate;
+  return applyLoyaltyDiscount(rate, percent);
+}
+
+/** Pending row still priced at the loyalty rate, after a miss made the discount ineligible. */
+export function rebasePendingLoyaltyAmount(
+  data: {
+    status?: unknown;
+    baseAmount?: unknown;
+    shopAmount?: unknown;
+    socioAmount?: unknown;
+    amount?: unknown;
+  },
+  dueMembership: number,
+  listRate: number,
+  percent: unknown
+): { amount: number; baseAmount: number; shopAmount: number; socioAmount: number } | null {
+  const status = String(data.status ?? "").trim().toLowerCase();
+  if (status === "paid" || status === "pago") return null;
+  if (status && status !== "pending" && status !== "pendente") return null;
+  const base = Number(data.baseAmount);
+  if (!Number.isFinite(base)) return null;
+  const discounted = applyLoyaltyDiscount(roundMoney(Math.max(0, listRate)), percent);
+  if (Math.abs(base - discounted) >= 0.001) return null;
+  const due = roundMoney(Math.max(0, dueMembership));
+  if (Math.abs(base - due) < 0.001) return null;
+  const shop = roundMoney(Math.max(0, Number(data.shopAmount) || 0));
+  const socio = roundMoney(Math.max(0, Number(data.socioAmount) || 0));
+  return buildPaymentAmounts(due, shop, socio);
+}
+
+export function clampSocioFee(raw: unknown): number {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return roundMoney(n);
+}
+
+export function buildPaymentAmounts(monthlyRate: number, shopTotal: number, socioFee = 0): {
   amount: number;
   baseAmount: number;
   shopAmount: number;
+  socioAmount: number;
 } {
   const baseAmount = roundMoney(Math.max(0, monthlyRate));
   const shopAmount = roundMoney(Math.max(0, shopTotal));
+  const socioAmount = clampSocioFee(socioFee);
   return {
-    amount: roundMoney(baseAmount + shopAmount),
+    amount: roundMoney(baseAmount + shopAmount + socioAmount),
     baseAmount,
     shopAmount,
+    socioAmount,
   };
 }
 

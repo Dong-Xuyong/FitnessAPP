@@ -39,7 +39,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { AlertCircle, ChevronDown, ChevronUp, Loader2, Minus, Plus, Store } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, Minus, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
@@ -484,15 +484,6 @@ export default function StudentShopPage() {
 
   return (
     <div className="space-y-6 w-full min-w-0 max-w-2xl">
-      <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
-            <Store className="h-8 w-8 text-accent shrink-0" aria-hidden />
-            {t("shop")}
-          </h1>
-        </div>
-      </header>
-
       {!authReady ? (
         <div className="flex items-center gap-2 text-muted-foreground text-sm py-8">
           <Loader2 className="h-4 w-4 animate-spin shrink-0" />

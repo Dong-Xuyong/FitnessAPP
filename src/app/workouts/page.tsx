@@ -182,27 +182,22 @@ export default function WorkoutsPage() {
 
   return (
     <Navigation>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
-          <div>
-            <h2 className="text-2xl font-bold font-headline">{t("trainingPrograms")}</h2>
-          </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
+      <div className="min-w-0 space-y-6">
+        <div className="flex flex-wrap gap-2">
             <CoachLibraryExcelActions />
             <Button size="icon" asChild title={t("createProgram")}>
               <Link href="/workouts/builder" aria-label={t("createProgram")}>
                 <Plus className="h-4 w-4" aria-hidden />
               </Link>
             </Button>
-          </div>
         </div>
 
         {!isLoading && basePrograms.length > 0 && db && user && (
-          <Card>
+          <Card className="min-w-0">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ListOrdered className="h-5 w-5 text-primary" aria-hidden />
-                {t("defaultStudentSequenceCardTitle")}
+              <CardTitle className="flex min-w-0 items-center gap-2 text-xl sm:text-2xl">
+                <ListOrdered className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+                <span className="min-w-0">{t("defaultStudentSequenceCardTitle")}</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -343,7 +338,7 @@ export default function WorkoutsPage() {
         )}
 
         {!isLoading && basePrograms.length > 0 && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid min-w-0 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {basePrograms.map((program) => {
               const exerciseCount = totalExercisesInProgram(program.sessions);
               const category = program.category ?? "Program library";
@@ -351,7 +346,7 @@ export default function WorkoutsPage() {
                 program.level === "all" || !program.level ? t("allLevels") : program.level;
 
               return (
-                <Card key={program.id} className="flex flex-col">
+                <Card key={program.id} className="flex min-w-0 flex-col">
                   <CardHeader>
                     <div className="flex justify-between items-start mb-2">
                       <Badge variant="outline" className="text-primary border-primary/20">
@@ -381,7 +376,7 @@ export default function WorkoutsPage() {
                     </div>
                   </CardContent>
                   <CardFooter className="pt-0 flex gap-2">
-                    <Button className="flex-1 gap-2" variant="secondary" asChild>
+                    <Button className="min-w-0 flex-1 gap-2 whitespace-normal" variant="secondary" asChild>
                       <Link href={`/workouts/builder?edit=${program.id}`}>
                         {t("editInBuilder")} <ArrowRight className="h-4 w-4" />
                       </Link>

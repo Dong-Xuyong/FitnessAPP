@@ -27,6 +27,13 @@ import {
   localTimeHms,
   periodFromShopDate,
   resolveBillableShopPaymentPeriod,
+  applyLoyaltyDiscount,
+  applyStoredLoyaltyDiscount,
+  coachingTenure,
+  effectiveLoyaltyStartedOn,
+  loyaltyDiscountEligible,
+  loyaltyRestartOn,
+  rebasePendingLoyaltyAmount,
   resolveMonthlyRate,
   resolveTargetPaymentPeriodForNewPurchase,
   revertShopRegistrationLinesPaidForFuturePeriods,
@@ -37,6 +44,21 @@ import {
   summarizeShopRegistrationsForPeriod,
   summarizeUnpaidShopRegistrations,
 } from "./shop-billing";
+
+function paidMonths(fromYm: string, toYm: string): Array<{ period: string; status: string }> {
+  let [y, m] = fromYm.split("-").map(Number);
+  const [endY, endM] = toYm.split("-").map(Number);
+  const rows: Array<{ period: string; status: string }> = [];
+  while (y < endY || (y === endY && m <= endM)) {
+    rows.push({ period: `${y}-${String(m).padStart(2, "0")}`, status: "paid" });
+    m += 1;
+    if (m === 13) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return rows;
+}
 
 describe("shop-billing", () => {
   const catalog = catalogMapFromItems([
@@ -353,6 +375,13 @@ describe("shop-billing", () => {
       amount: 112.5,
       baseAmount: 100,
       shopAmount: 12.5,
+      socioAmount: 0,
+    });
+    assert.deepEqual(buildPaymentAmounts(44.1, 0, 5), {
+      amount: 49.1,
+      baseAmount: 44.1,
+      shopAmount: 0,
+      socioAmount: 5,
     });
   });
 
@@ -382,6 +411,121 @@ describe("shop-billing", () => {
       }),
       120
     );
+  });
+
+  it("applyLoyaltyDiscount reduces membership only", () => {
+    assert.equal(applyLoyaltyDiscount(100, 5), 95);
+    assert.equal(applyLoyaltyDiscount(100, 0), 100);
+    assert.equal(applyLoyaltyDiscount(100, undefined), 100);
+    assert.equal(applyLoyaltyDiscount(100, 100), 0);
+    assert.equal(applyLoyaltyDiscount(100, 150), 0);
+    assert.equal(applyLoyaltyDiscount(100, -3), 100);
+  });
+
+  it("applyStoredLoyaltyDiscount waits one uninterrupted year", () => {
+    const start = "2025-10-01";
+    const paid = paidMonths("2025-10", "2026-09");
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 8, 30), paid), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), paid), 95);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, "", new Date(2026, 9, 1), paid), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), []), 100);
+  });
+
+  it("a gap restarts loyalty on the 1st of the next month", () => {
+    const start = "2026-06-01";
+    const julyPending = [
+      { period: "2026-06", status: "paid" },
+      { period: "2026-07", status: "pending" },
+      { period: "2026-08", status: "paid" },
+    ];
+    const augustOpen = new Date(2026, 7, 3, 12);
+    assert.equal(loyaltyRestartOn(start, julyPending, augustOpen), "2026-08-01");
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, augustOpen, julyPending), 100);
+
+    const augustPending = [
+      { period: "2026-06", status: "paid" },
+      { period: "2026-07", status: "paid" },
+      { period: "2026-08", status: "pending" },
+    ];
+    assert.equal(loyaltyRestartOn(start, augustPending, new Date(2026, 7, 6, 12)), null);
+    assert.equal(loyaltyRestartOn(start, augustPending, new Date(2026, 7, 7, 0, 0, 1)), "2026-09-01");
+
+    const settledLate = [
+      { period: "2026-06", status: "paid" },
+      { period: "2026-07", status: "pago", paidAt: "2026-09-15T10:00:00" },
+      { period: "2026-08", status: "paid" },
+    ];
+    assert.equal(loyaltyRestartOn(start, settledLate, new Date(2026, 7, 20, 12)), null);
+    assert.equal(effectiveLoyaltyStartedOn(start, settledLate, new Date(2026, 7, 20, 12)), start);
+
+    const missingJuly = [
+      { period: "2026-06", status: "paid" },
+      { period: "2026-08", status: "paid" },
+    ];
+    assert.equal(loyaltyRestartOn(start, missingJuly, new Date(2026, 7, 20, 12)), "2026-08-01");
+  });
+
+  it("Xuyong's July gap restarts the counter on 12 Oct 2026", () => {
+    // Enrolment shown as 03/11/2026 in en-US is 2026-03-11, which is 0 yr, 7 mo if counted straight through.
+    const start = "2026-03-11";
+    const now = new Date(2026, 9, 12, 12, 0, 0);
+    const payments = [
+      { period: "2026-06", status: "paid" },
+      { period: "2026-07", status: "pending" },
+      { period: "2026-08", status: "paid" },
+    ];
+    assert.deepEqual(coachingTenure(start, now), { years: 0, months: 7 });
+    assert.equal(loyaltyRestartOn(start, payments, now), "2026-11-01");
+    const clock = effectiveLoyaltyStartedOn(start, payments, now);
+    assert.equal(clock, "2026-11-01");
+    assert.deepEqual(coachingTenure(clock, now), { years: 0, months: 0 });
+    assert.equal(loyaltyDiscountEligible(start, now, 1, payments), false);
+    assert.equal(applyStoredLoyaltyDiscount(10, 5, start, now, payments), 10);
+  });
+
+  it("twelve full months after the restarted clock unlock the discount", () => {
+    const start = "2024-01-01";
+    const now = new Date(2026, 7, 1, 12);
+    const payments = paidMonths("2024-01", "2026-07").map((row) =>
+      row.period === "2025-07" ? { ...row, status: "pending" } : row
+    );
+    assert.equal(effectiveLoyaltyStartedOn(start, payments, now), "2025-08-01");
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 6, 31, 12), payments), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, now, payments), 95);
+  });
+
+  it("rebasePendingLoyaltyAmount drops the discount on a missed pending row", () => {
+    const next = rebasePendingLoyaltyAmount(
+      { status: "pending", baseAmount: 95, shopAmount: 4, socioAmount: 1, amount: 100 },
+      100,
+      100,
+      5
+    );
+    assert.deepEqual(next, { amount: 105, baseAmount: 100, shopAmount: 4, socioAmount: 1 });
+    assert.equal(
+      rebasePendingLoyaltyAmount(
+        { status: "pending", baseAmount: 90, shopAmount: 0, socioAmount: 0, amount: 90 },
+        100,
+        100,
+        5
+      ),
+      null
+    );
+    assert.equal(
+      rebasePendingLoyaltyAmount(
+        { status: "paid", baseAmount: 95, amount: 95 },
+        100,
+        100,
+        5
+      ),
+      null
+    );
+  });
+
+  it("coachingTenure counts whole years and leftover months", () => {
+    assert.deepEqual(coachingTenure("2025-03-15", new Date(2026, 5, 15)), { years: 1, months: 3 });
+    assert.deepEqual(coachingTenure("2025-03-15", new Date(2026, 5, 14)), { years: 1, months: 2 });
+    assert.equal(coachingTenure("not-a-date"), null);
   });
 
   it("buildShopBillingPeriodContextForMarkPaid keeps May purchases on May when marking May", () => {

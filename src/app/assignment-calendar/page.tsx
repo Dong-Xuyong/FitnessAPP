@@ -70,6 +70,7 @@ import {
 } from "@/components/EditWorkoutSessionDialog";
 import { clearAllTrainerWorkoutPlans } from "@/lib/firestore/clear-trainer-assignments";
 import { isSequenceStepEffectiveUnlocked } from "@/lib/workout-plan-sequence";
+import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { cn } from "@/lib/utils";
 import { slotStudentPlaceholderPhotoUrl } from "@/lib/slot-student-photo";
 import {
@@ -472,12 +473,25 @@ function buildSessionLogExercisesFromDoc(data: Record<string, unknown>): RosterS
   });
 }
 
+type RosterPlanMeta = { title: string; isCompleted: boolean; missing?: boolean };
+
+/** Booking `workoutPlanId`, or "" once that plan doc is gone (sequence reassigned → new plan ids). */
+function liveSlotPlanId(
+  row: DayBookedStudent,
+  fid: string,
+  rosterPlanMetaByKey: Record<string, RosterPlanMeta>
+): string {
+  const slotPlanId = String(row.workoutPlanId || "").trim();
+  if (!slotPlanId) return "";
+  return rosterPlanMetaByKey[`${fid}__${slotPlanId}`]?.missing ? "" : slotPlanId;
+}
+
 type CalendarDayRosterRowProps = {
   row: DayBookedStudent;
   bucket: CalendarRosterBucket;
   rosterStudentsSorted: Array<{ id: string } & Record<string, unknown>>;
   unlockedProgramByFirestoreId: Record<string, { id: string; title: string }>;
-  rosterPlanMetaByKey: Record<string, { title: string; isCompleted: boolean }>;
+  rosterPlanMetaByKey: Record<string, RosterPlanMeta>;
   sessionDayInferredPlanIdByFid: Record<string, string>;
   /** `${fid}__${expandPlanId}` → same-day session title (session-log picker; active fallbacks). */
   sessionRosterSessionTitleByExpandKey: Record<string, string>;
@@ -522,7 +536,7 @@ function CalendarDayRosterRow({
     hasDayLatestWorkoutTitle
       ? String(sessionLatestSameDayWorkoutTitleByFid[fid] ?? "").trim() || t("calendarRosterUntitledSession")
       : "";
-  const slotPlanId = String(row.workoutPlanId || "").trim();
+  const slotPlanId = liveSlotPlanId(row, fid, rosterPlanMetaByKey);
   const unlockedPick =
     unlockedProgramByFirestoreId[fid] ||
     (fid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
@@ -1086,7 +1100,7 @@ function firestoreScalarToDate(value: unknown): Date | null {
 
 /** YYYY-MM-DD when session is finished (`completedAt` set); uses `date` only as fallback for parsing. */
 function sessionCompletionCalendarDay(data: Record<string, unknown>): string | null {
-  if (!data.completedAt) return null;
+  if (!data.completedAt || isCoachBodyMetricSession(data)) return null;
   const d = firestoreScalarToDate(data.completedAt) ?? firestoreScalarToDate(data.date);
   if (!d) return null;
   return toDateStr(d);
@@ -1283,9 +1297,7 @@ export default function AssignmentCalendarPage() {
   const [isSavingAttendance, setIsSavingAttendance] = useState<string | null>(null);
 
   /** Per `firestoreStudentId__planId`: title + completion (for roster labels and grouping). */
-  const [rosterPlanMetaByKey, setRosterPlanMetaByKey] = useState<
-    Record<string, { title: string; isCompleted: boolean }>
-  >({});
+  const [rosterPlanMetaByKey, setRosterPlanMetaByKey] = useState<Record<string, RosterPlanMeta>>({});
   /**
    * Incremented whenever the page regains visibility (tab focus / back-navigation).
    * Drives re-fetch of plan meta + unlocked programs so completing a workout in the
@@ -1448,6 +1460,17 @@ export default function AssignmentCalendarPage() {
       })
     );
   }, [rosterStudents]);
+
+  /** Roster doc id → id that owns `workoutPlans` / `workoutSessions` (linked auth uid when present). */
+  const workoutStorageIdFor = useCallback(
+    (fid: string) =>
+      resolveWorkoutPlansStorageStudentId(
+        fid,
+        rosterStudentsSorted as Array<{ id: string; userId?: string; email?: string }>,
+        (portalStudents || []) as Array<{ id: string; email?: string }>
+      ) || fid,
+    [rosterStudentsSorted, portalStudents]
+  );
 
   // ── Refresh on page visibility (back-nav from coach session / student profile) ─
 
@@ -1806,12 +1829,7 @@ export default function AssignmentCalendarPage() {
       await Promise.all(
         fids.map(async (fid) => {
           try {
-            const storageId =
-              resolveWorkoutPlansStorageStudentId(
-                fid,
-                rosterStudentsSorted as Array<{ id: string; userId?: string; email?: string }>,
-                (portalStudents || []) as Array<{ id: string; email?: string }>
-              ) || fid;
+            const storageId = workoutStorageIdFor(fid);
             const plansPath = collection(
               db,
               "personalTrainers",
@@ -1853,13 +1871,13 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, portalStudents, planMetaRefreshTick]);
+  }, [db, user, studentsBookedOnSelectedDay, rosterStudentsSorted, workoutStorageIdFor, planMetaRefreshTick]);
 
   useEffect(() => {
     if (!db || !user || !expandedRosterPlanKey) return;
     const sep = expandedRosterPlanKey.indexOf("__");
     if (sep < 0) return;
-    const storageFid = expandedRosterPlanKey.slice(0, sep);
+    const storageFid = workoutStorageIdFor(expandedRosterPlanKey.slice(0, sep));
     const planId = expandedRosterPlanKey.slice(sep + 2);
     if (!storageFid || !planId) return;
 
@@ -1936,14 +1954,14 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [expandedRosterPlanKey, db, user, planMetaRefreshTick, sessionLogRefreshTick]);
+  }, [expandedRosterPlanKey, db, user, workoutStorageIdFor, planMetaRefreshTick, sessionLogRefreshTick]);
 
   /** Load same-day `workoutSessions` row for expanded roster key (plan id match) — completed section UI. */
   useEffect(() => {
     if (!db || !user || !expandedRosterPlanKey) return;
     const sep = expandedRosterPlanKey.indexOf("__");
     if (sep < 0) return;
-    const storageFid = expandedRosterPlanKey.slice(0, sep);
+    const storageFid = workoutStorageIdFor(expandedRosterPlanKey.slice(0, sep));
     const planId = expandedRosterPlanKey.slice(sep + 2);
     if (!storageFid || !planId) return;
 
@@ -1997,7 +2015,15 @@ export default function AssignmentCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [expandedRosterPlanKey, selectedDateStr, db, user, planMetaRefreshTick, sessionLogRefreshTick]);
+  }, [
+    expandedRosterPlanKey,
+    selectedDateStr,
+    db,
+    user,
+    workoutStorageIdFor,
+    planMetaRefreshTick,
+    sessionLogRefreshTick,
+  ]);
 
   useEffect(() => {
     if (!db || !user) return;
@@ -2035,16 +2061,16 @@ export default function AssignmentCalendarPage() {
       return;
     }
     (async () => {
-      const next: Record<string, { title: string; isCompleted: boolean }> = {};
+      const next: Record<string, RosterPlanMeta> = {};
       await Promise.all(
         [...keysToFetch.entries()].map(async ([key, { fid, planId }]) => {
           try {
             const snap = await getDoc(
-              doc(db, "personalTrainers", user.uid, "students", fid, "workoutPlans", planId)
+              doc(db, "personalTrainers", user.uid, "students", workoutStorageIdFor(fid), "workoutPlans", planId)
             );
             if (cancelled) return;
             if (!snap.exists()) {
-              next[key] = { title: "", isCompleted: false };
+              next[key] = { title: "", isCompleted: false, missing: true };
               return;
             }
             const data = snap.data() as Record<string, unknown>;
@@ -2071,6 +2097,7 @@ export default function AssignmentCalendarPage() {
     rosterStudentsSorted,
     unlockedProgramByFirestoreId,
     sessionDayInferredPlanIdByFid,
+    workoutStorageIdFor,
     planMetaRefreshTick,
   ]);
 
@@ -2119,7 +2146,7 @@ export default function AssignmentCalendarPage() {
               };
             }
             const snap = await getDocs(
-              collection(db, "personalTrainers", user.uid, "students", fid, "workoutSessions")
+              collection(db, "personalTrainers", user.uid, "students", workoutStorageIdFor(fid), "workoutSessions")
             );
             if (cancelled) {
               return {
@@ -2224,6 +2251,7 @@ export default function AssignmentCalendarPage() {
     studentsBookedOnSelectedDay,
     rosterStudentsSorted,
     unlockedProgramByFirestoreId,
+    workoutStorageIdFor,
     planMetaRefreshTick,
     sessionLogRefreshTick,
   ]);
@@ -2234,7 +2262,7 @@ export default function AssignmentCalendarPage() {
     const completed: DayBookedStudent[] = [];
     for (const row of studentsBookedOnSelectedDay) {
       const fid = row.firestoreStudentId || resolveFirestoreStudentId(rosterStudentsSorted, row.studentId);
-      const slotPlanId = String(row.workoutPlanId || "").trim();
+      const slotPlanId = liveSlotPlanId(row, fid, rosterPlanMetaByKey);
       const unlockedPick =
         unlockedProgramByFirestoreId[fid] ||
         (fid !== row.studentId ? unlockedProgramByFirestoreId[row.studentId] : undefined);
@@ -2637,7 +2665,7 @@ export default function AssignmentCalendarPage() {
     async function fetchPlans() {
       try {
         const snap = await getDocs(
-          collection(db!, "personalTrainers", user!.uid, "students", addStudentId, "workoutPlans")
+          collection(db!, "personalTrainers", user!.uid, "students", workoutStorageIdFor(addStudentId), "workoutPlans")
         );
         const plans = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
@@ -2656,7 +2684,7 @@ export default function AssignmentCalendarPage() {
     }
     fetchPlans();
     return () => { cancelled = true; };
-  }, [addStudentId, db, user, managingSlot]);
+  }, [addStudentId, db, user, managingSlot, workoutStorageIdFor]);
 
   const handleAddStudent = async () => {
     if (!managingSlot || !addStudentId || !db || !user) return;
@@ -2949,7 +2977,7 @@ export default function AssignmentCalendarPage() {
         if (weekMatch && db && user) {
           try {
             const plansSnap = await getDocs(
-              collection(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans")
+              collection(db, "personalTrainers", user.uid, "students", workoutStorageIdFor(filterStudentId), "workoutPlans")
             );
             const ws = selectedWeekStart;
             const pidMatch = String(weekMatch.programId || "").trim();
@@ -3152,12 +3180,13 @@ export default function AssignmentCalendarPage() {
         )
       );
 
+      const plansStorageId = workoutStorageIdFor(filterStudentId);
       const plansSnap = await getDocs(
-        collection(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans")
+        collection(db, "personalTrainers", user.uid, "students", plansStorageId, "workoutPlans")
       );
       await Promise.all(
         plansSnap.docs.map((d) =>
-          deleteDoc(doc(db, "personalTrainers", user.uid, "students", filterStudentId, "workoutPlans", d.id))
+          deleteDoc(doc(db, "personalTrainers", user.uid, "students", plansStorageId, "workoutPlans", d.id))
         )
       );
 
@@ -3178,10 +3207,6 @@ export default function AssignmentCalendarPage() {
   return (
     <Navigation>
       <div className="space-y-6">
-        <header>
-          <h2 className="text-3xl font-bold font-headline">{t("assignmentCalendar")}</h2>
-        </header>
-
         {/* ── Assign to week dialog ─────────────────────────────────────────── */}
         <Dialog open={assignWeekOpen} onOpenChange={(o) => {
           setAssignWeekOpen(o);
@@ -3913,12 +3938,12 @@ export default function AssignmentCalendarPage() {
 
           {/* Left: Calendar + settings */}
           <Card className="lg:col-span-2">
-            <CardHeader>
+            <CardHeader className="hidden md:flex">
               <CardTitle className="flex items-center gap-2">
                 <CalendarDays className="h-4 w-4 text-primary" aria-hidden /> Calendário
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 pt-6 md:pt-0">
               {/* Student filter */}
               <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
@@ -4726,7 +4751,7 @@ export default function AssignmentCalendarPage() {
         onOpenChange={(o) => !o && setRosterSessionEdit(null)}
         db={db}
         trainerUid={user?.uid}
-        storageStudentId={rosterSessionEdit?.storageFid ?? ""}
+        storageStudentId={rosterSessionEdit?.storageFid ? workoutStorageIdFor(rosterSessionEdit.storageFid) : ""}
         session={rosterSessionEdit?.session ?? null}
         t={t}
         toast={toast}
