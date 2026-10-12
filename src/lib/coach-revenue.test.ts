@@ -9,6 +9,34 @@ import {
   type CoachRevenueStudent,
 } from "./coach-revenue";
 
+/** Paid rows from `fromYm` through the last month the loyalty clock already requires. */
+function paidMonthsThroughRequiredEnd(
+  fromYm: string,
+  now: Date
+): Array<{ period: string; status: string }> {
+  let [y, m] = fromYm.split("-").map(Number);
+  const overdue = now.getDate() >= 7;
+  let endY = now.getFullYear();
+  let endM = now.getMonth() + 1;
+  if (!overdue) {
+    endM -= 1;
+    if (endM === 0) {
+      endM = 12;
+      endY -= 1;
+    }
+  }
+  const rows: Array<{ period: string; status: string }> = [];
+  while (y < endY || (y === endY && m <= endM)) {
+    rows.push({ period: `${y}-${String(m).padStart(2, "0")}`, status: "paid" });
+    m += 1;
+    if (m === 13) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return rows;
+}
+
 function student(partial: Partial<CoachRevenueStudent> & { id: string; name: string }): CoachRevenueStudent {
   return {
     roster: {},
@@ -95,22 +123,32 @@ describe("forecastStudentAmount", () => {
   });
 
   it("applies loyalty discount when forecasting from the monthly rate", () => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const nextPeriod =
+      month === 12
+        ? `${now.getFullYear() + 1}-01`
+        : `${now.getFullYear()}-${String(month + 1).padStart(2, "0")}`;
+    const payments = paidMonthsThroughRequiredEnd("2020-01", now);
+    const roster = {
+      billingStatus: "active",
+      monthlyRate: 100,
+      loyaltyDiscountPercent: 5,
+      coachingStartedOn: "2020-01-01",
+    };
     const row = forecastStudentAmount(
-      student({
-        id: "b2",
-        name: "Bruno",
-        roster: {
-          billingStatus: "active",
-          monthlyRate: 100,
-          loyaltyDiscountPercent: 5,
-          coachingStartedOn: "2020-01-01",
-        },
-        payments: [],
-      }),
-      "2026-09"
+      student({ id: "b2", name: "Bruno", roster, payments }),
+      nextPeriod
     );
     assert.equal(row?.amount, 95);
     assert.equal(row?.source, "monthly_rate");
+
+    const gapped = payments.slice(0, -1);
+    const withGap = forecastStudentAmount(
+      student({ id: "b2", name: "Bruno", roster, payments: gapped }),
+      nextPeriod
+    );
+    assert.equal(withGap?.amount, 100);
   });
 
   it("returns null for inactive students without a next-period row", () => {

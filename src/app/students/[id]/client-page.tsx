@@ -240,6 +240,14 @@ function adjustAssignedExercises(exercises: any[], weightDelta: number, repDelta
 }
 
 // ─── Billing Tab Component ───────────────────────────────────────
+function formatLoyaltyClockDate(ymd: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!match) return ymd;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(date.getTime())) return ymd;
+  return date.toLocaleDateString();
+}
+
 function BillingTab({
   db,
   user,
@@ -316,7 +324,9 @@ function BillingTab({
   const loyaltyStartedOn = effectiveLoyaltyStartedOn(coachingStartedOn, sortedPayments);
   const loyaltyActive = loyaltyDiscountEligible(loyaltyStartedOn);
   const discountedMonthly = applyStoredLoyaltyDiscount(listMonthly, loyaltyPercent, loyaltyStartedOn);
-  const tenure = coachingTenure(coachingStartedOn);
+  const tenure = coachingTenure(loyaltyStartedOn);
+  const loyaltyClockRestarted =
+    Boolean(loyaltyStartedOn) && loyaltyStartedOn !== coachingStartedOn.trim().slice(0, 10);
 
   const shopBillingContext = useMemo(
     () => buildShopBillingPeriodContextFromPayments(sortedPayments || []),
@@ -882,6 +892,11 @@ function BillingTab({
                 value={coachingStartedOn}
                 onChange={(e) => setCoachingStartedOn(e.target.value)}
               />
+              {loyaltyClockRestarted ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("loyaltyClockRestarted").replace("{date}", formatLoyaltyClockDate(loyaltyStartedOn))}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label>{t("socioFee")}</Label>
@@ -908,6 +923,9 @@ function BillingTab({
             </div>
             <p className="text-xs text-muted-foreground sm:col-span-2">
               {t("loyaltyDiscountRule")}
+              {loyaltyStartedOn
+                ? ` · ${t("loyaltyClockFrom").replace("{date}", formatLoyaltyClockDate(loyaltyStartedOn))}`
+                : ""}
               {tenure
                 ? ` · ${t("loyaltyTenure")
                     .replace("{years}", String(tenure.years))

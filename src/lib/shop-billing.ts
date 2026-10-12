@@ -1280,66 +1280,91 @@ function loyaltyStatusPaid(status: unknown): boolean {
   return t === "paid" || t === "pago";
 }
 
-/** End of day 6 of the payment month. Unpaid after this is a missed month. */
+/** End of day 6 of the payment month. The open month is overdue after this. */
 function loyaltyGraceEnd(y: number, m: number): Date {
   return new Date(y, m - 1, 6, 23, 59, 59, 999);
 }
 
-function loyaltyPaidLate(paidAt: unknown, y: number, m: number): boolean {
-  if (paidAt == null || paidAt === "") return false;
-  const t = Date.parse(String(paidAt));
-  if (!Number.isFinite(t)) return false;
-  return t > loyaltyGraceEnd(y, m).getTime();
+function loyaltyMonthIndex(y: number, m: number): number {
+  return y * 12 + (m - 1);
+}
+
+function loyaltyYmKey(y: number, m: number): string {
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+
+function parseLoyaltyStart(raw: unknown): { y: number; m: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw ?? "").trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const start = new Date(y, m - 1, d);
+  if (start.getFullYear() !== y || start.getMonth() !== m - 1 || start.getDate() !== d) return null;
+  return { y, m };
+}
+
+/** A month is Pago when any row for it is paid. `paidAt` does not matter. */
+function loyaltyPaidPeriodKeys(payments: LoyaltyPaymentRow[] | null | undefined): Set<string> {
+  const paid = new Set<string>();
+  for (const payment of payments ?? []) {
+    const period = loyaltyPeriodYm(payment.period);
+    if (!period || !loyaltyStatusPaid(payment.status)) continue;
+    paid.add(loyaltyYmKey(period.y, period.m));
+  }
+  return paid;
 }
 
 /**
- * `YYYY-MM-DD` (the 7th) of the latest missed month.
- * A miss is unpaid after day 6, or paid after day 6. On-time months do not count.
+ * Last month that must already be Pago.
+ * Months that have ended always count. The still-open month counts only after
+ * day 6, when this app treats it as overdue.
  */
-export function loyaltyRestartOn(
-  payments: LoyaltyPaymentRow[] | null | undefined,
-  now = new Date()
-): string | null {
-  if (!payments?.length) return null;
-  const nowMonth = now.getFullYear() * 12 + now.getMonth();
-  const byPeriod = new Map<string, { y: number; m: number; onTime: boolean; late: boolean; unpaid: boolean }>();
-  for (const payment of payments) {
-    const period = loyaltyPeriodYm(payment.period);
-    if (!period) continue;
-    if (period.y * 12 + (period.m - 1) > nowMonth) continue;
-    const key = `${period.y}-${String(period.m).padStart(2, "0")}`;
-    let row = byPeriod.get(key);
-    if (!row) {
-      row = { y: period.y, m: period.m, onTime: false, late: false, unpaid: false };
-      byPeriod.set(key, row);
-    }
-    if (loyaltyStatusPaid(payment.status)) {
-      if (loyaltyPaidLate(payment.paidAt, period.y, period.m)) row.late = true;
-      else row.onTime = true;
-    } else {
-      row.unpaid = true;
-    }
-  }
-
-  let latest: string | null = null;
-  for (const row of byPeriod.values()) {
-    if (row.onTime) continue;
-    const missed = row.late || (row.unpaid && now.getTime() > loyaltyGraceEnd(row.y, row.m).getTime());
-    if (!missed) continue;
-    const anchor = `${row.y}-${String(row.m).padStart(2, "0")}-07`;
-    if (!latest || anchor > latest) latest = anchor;
-  }
-  return latest;
+function loyaltyRequiredEndIndex(now: Date): number {
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const current = loyaltyMonthIndex(y, m);
+  if (now.getTime() > loyaltyGraceEnd(y, m).getTime()) return current;
+  return current - 1;
 }
 
-/** Registration date, or the 7th of the latest missed month when that is later. */
+/**
+ * `YYYY-MM-01` of the month after the latest gap, or null when every required
+ * month is Pago. Pending, missing, and any other non-Pago status are gaps.
+ * Marking the month Pago removes the gap.
+ */
+export function loyaltyRestartOn(
+  startedOn: unknown,
+  payments?: LoyaltyPaymentRow[] | null,
+  now = new Date()
+): string | null {
+  const start = parseLoyaltyStart(startedOn);
+  if (!start || payments == null) return null;
+  const startIndex = loyaltyMonthIndex(start.y, start.m);
+  const endIndex = loyaltyRequiredEndIndex(now);
+  if (endIndex < startIndex) return null;
+  const paid = loyaltyPaidPeriodKeys(payments);
+  let latestGap = -1;
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const y = Math.floor(index / 12);
+    const m = (index % 12) + 1;
+    if (!paid.has(loyaltyYmKey(y, m))) latestGap = index;
+  }
+  if (latestGap < 0) return null;
+  const next = latestGap + 1;
+  const y = Math.floor(next / 12);
+  const m = (next % 12) + 1;
+  return `${loyaltyYmKey(y, m)}-01`;
+}
+
+/** Enrolment date, or the 1st of the month after the latest gap when that is later. */
 export function effectiveLoyaltyStartedOn(
   startedOn: unknown,
   payments?: LoyaltyPaymentRow[] | null,
   now = new Date()
 ): string {
   const started = String(startedOn ?? "").trim().slice(0, 10);
-  const restart = loyaltyRestartOn(payments, now);
+  const restart = loyaltyRestartOn(started, payments, now);
   if (!restart) return started;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(started)) return restart;
   return restart > started ? restart : started;

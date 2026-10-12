@@ -472,7 +472,10 @@ const translations = {
     loyaltyTenure: "{years} yr, {months} mo",
     loyaltyDiscountPreview: "€{list} − {percent}% = €{due}",
     loyaltyDiscountApplied: "€{list} list − {percent}%",
-    loyaltyDiscountRule: "The discount starts 1 year after this date. A missed monthly payment restarts it.",
+    loyaltyDiscountRule:
+      "The discount starts 1 year after this date. A missing monthly payment restarts it on the 1st of the next month.",
+    loyaltyClockFrom: "counting from {date}",
+    loyaltyClockRestarted: "Loyalty count restarted on {date}",
     loyaltyDiscountWaiting: "€{list} until then · then €{due}",
     loyaltyDiscountPending: "{percent}% after 1 year",
     paymentMethod: "Payment Method",
@@ -1679,7 +1682,10 @@ const translations = {
     loyaltyTenure: "{years} ano(s), {months} mês(es)",
     loyaltyDiscountPreview: "€{list} − {percent}% = €{due}",
     loyaltyDiscountApplied: "€{list} de tabela − {percent}%",
-    loyaltyDiscountRule: "O desconto começa 1 ano depois desta data. Uma mensalidade em falta reinicia-o.",
+    loyaltyDiscountRule:
+      "O desconto começa 1 ano depois desta data. Uma mensalidade em falta reinicia-o no dia 1 do mês seguinte.",
+    loyaltyClockFrom: "a contar de {date}",
+    loyaltyClockRestarted: "Contagem de fidelização reiniciada em {date}",
     loyaltyDiscountWaiting: "€{list} até lá · depois €{due}",
     loyaltyDiscountPending: "{percent}% após 1 ano",
     paymentMethod: "Método de Pagamento",
