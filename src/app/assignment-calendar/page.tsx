@@ -102,9 +102,21 @@ import {
   upcomingOpenAvailabilityBlocks,
   upcomingVacationPeriods,
   vacationPeriodsOverlap,
+  weekdayKeyFromDate,
   type OpenAvailabilityBlock,
   type VacationPeriod,
 } from "@/lib/trainer-availability";
+import { BlockRulesSettings } from "@/components/BlockRulesSettings";
+import {
+  blocksCoveringSession,
+  effectiveBlockMaxStudents,
+  enrolledSlotTimesForSession,
+  generateSlotTimesByDuration,
+  normalizeBlockRules,
+  resolveBlockSettings,
+  unionClockTimes,
+  type BlockRule,
+} from "@/lib/block-rules";
 import {
   enrollStudentInSessionSlots,
   findSlotStudent,
@@ -1268,6 +1280,7 @@ export default function AssignmentCalendarPage() {
   // Slot settings
   const [slotDurationMin, setSlotDurationMin] = useState(30);
   const [defaultMaxStudents, setDefaultMaxStudents] = useState(4);
+  const [blockRules, setBlockRules] = useState<BlockRule[]>([]);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   /** Sidebar preview panels (calendar card); collapsed by default to save space. */
   const [availabilityPreviewOpen, setAvailabilityPreviewOpen] = useState(false);
@@ -1517,6 +1530,7 @@ export default function AssignmentCalendarPage() {
 
         if (data?.maxStudentsPerSlot) setDefaultMaxStudents(data.maxStudentsPerSlot);
         if (data?.slotDurationMin) setSlotDurationMin(data.slotDurationMin);
+        setBlockRules(normalizeBlockRules(data?.blockRules));
         setVacationPeriods(normalizeVacationPeriods(data?.vacationPeriods));
         setOpenAvailabilityBlocks(normalizeOpenAvailabilityBlocks(data?.openAvailabilityBlocks));
       } catch {}
@@ -1590,6 +1604,7 @@ export default function AssignmentCalendarPage() {
       openBlocks: openAvailabilityBlocks,
       slotDurationMin,
       vacationPeriods,
+      blockRules,
     });
     const bookedTimes = sessionSlots
       .filter((s) => s.date === selectedDateStr)
@@ -1601,8 +1616,35 @@ export default function AssignmentCalendarPage() {
     openAvailabilityBlocks,
     slotDurationMin,
     vacationPeriods,
+    blockRules,
     sessionSlots,
   ]);
+
+  const settingsForTime = useCallback(
+    (time: string, weekday: string = selectedDayKey) =>
+      resolveBlockSettings({
+        rules: blockRules,
+        weekday,
+        time,
+        defaultDurationMin: slotDurationMin,
+        defaultMaxStudents,
+      }),
+    [blockRules, selectedDayKey, slotDurationMin, defaultMaxStudents]
+  );
+
+  const durationForTime = useCallback(
+    (time: string, weekday: string = selectedDayKey) =>
+      blockRules.length === 0 ? slotDurationMin : settingsForTime(time, weekday).durationMin,
+    [blockRules.length, slotDurationMin, settingsForTime]
+  );
+
+  const maxForTime = useCallback(
+    (time: string, persisted?: number | null, weekday: string = selectedDayKey) =>
+      blockRules.length === 0
+        ? (persisted ?? defaultMaxStudents)
+        : effectiveBlockMaxStudents(persisted, settingsForTime(time, weekday).maxStudents),
+    [blockRules.length, defaultMaxStudents, settingsForTime]
+  );
 
   const showCoachDaySchedule = coachDayShowsSchedule({
     weeklyAvailable: selectedDayWeeklyAvailable,
@@ -2482,7 +2524,19 @@ export default function AssignmentCalendarPage() {
       toast({ title: "A hora de fim deve ser posterior à de início", variant: "destructive" });
       return;
     }
-    const slotStarts = generateSlotTimes(startTime, endTime, slotDurationMin);
+    const draftWeekday = weekdayKeyFromDate(new Date(`${date}T12:00:00`));
+    const slotStarts =
+      blockRules.length === 0
+        ? generateSlotTimes(startTime, endTime, slotDurationMin)
+        : generateSlotTimesByDuration(startTime, endTime, (time) =>
+            resolveBlockSettings({
+              rules: blockRules,
+              weekday: draftWeekday,
+              time,
+              defaultDurationMin: slotDurationMin,
+              defaultMaxStudents,
+            }).durationMin
+          );
     if (slotStarts.length < 1) {
       toast({
         title: `O intervalo deve ter pelo menos um bloco de ${slotDurationMin} min`,
@@ -2630,10 +2684,13 @@ export default function AssignmentCalendarPage() {
     if (!db || !user) return;
     setIsSavingSettings(true);
     try {
+      const rulesToSave = normalizeBlockRules(blockRules);
       await setDoc(doc(db, "personalTrainers", user.uid), {
         slotDurationMin,
         maxStudentsPerSlot: defaultMaxStudents,
+        blockRules: rulesToSave,
       }, { merge: true });
+      setBlockRules(rulesToSave);
       toast({ title: "Definições guardadas" });
     } catch {
       toast({ title: t("error") || "Error", variant: "destructive" });
@@ -2650,7 +2707,10 @@ export default function AssignmentCalendarPage() {
     setAddStudentId("");
     setSelectedPlanId("");
     setStudentWorkoutPlans([]);
-    setSlotMaxOverride(existing?.maxStudents ?? defaultMaxStudents);
+    setSlotMaxOverride(
+      existing?.maxStudents ??
+        (blockRules.length === 0 ? defaultMaxStudents : settingsForTime(time).maxStudents)
+    );
   };
 
   // Fetch workout plans for selected student in the add-student section
@@ -2774,7 +2834,7 @@ export default function AssignmentCalendarPage() {
         blocks: [...new Set([...timeSlots, startTime])].map((time) => ({
           date,
           startTime: time,
-          maxStudents: slotsByTime.get(time)?.maxStudents ?? defaultMaxStudents,
+          maxStudents: maxForTime(time, slotsByTime.get(time)?.maxStudents),
         })),
         mutate: (currentSlots) => {
           const working = new Map(
@@ -2945,7 +3005,19 @@ export default function AssignmentCalendarPage() {
         // Remove from all consecutive blocks of this session
         const sessionStart = entry.sessionStart ?? time;
         const enrolledDur = entry.sessionDurationMin ?? sessionDurForTime;
-        const blocksToFree = blocksForLogicalSession(sessionStart, enrolledDur, slotDurationMin);
+        const computedFree =
+          blockRules.length === 0
+            ? blocksForLogicalSession(sessionStart, enrolledDur, slotDurationMin)
+            : blocksCoveringSession({
+                slotTimes: timeSlots,
+                startTime: sessionStart,
+                sessionDurationMin: enrolledDur,
+                durationAt: (start) => durationForTime(start),
+              });
+        const blocksToFree = unionClockTimes(
+          computedFree,
+          enrolledSlotTimesForSession(sessionSlots, selectedDateStr, studentIds, sessionStart)
+        );
         await removeStudentFromSessionSlots({
           db,
           trainerId: user.uid,
@@ -2954,18 +3026,21 @@ export default function AssignmentCalendarPage() {
           blocks: blocksToFree.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: slotsByTime.get(startTime)?.maxStudents ?? defaultMaxStudents,
+            maxStudents: maxForTime(startTime, slotsByTime.get(startTime)?.maxStudents),
           })),
         });
         toast({ title: "Aluno removido dos blocos" });
       } else {
-        const blocksToBook = consecutiveSlotBlocksFrom(
-          timeSlots,
-          time,
-          slotsPerSessionForTime,
-          slotDurationMin
-        );
-        if (blocksToBook.length < slotsPerSessionForTime) {
+        const blocksToBook =
+          blockRules.length === 0
+            ? consecutiveSlotBlocksFrom(timeSlots, time, slotsPerSessionForTime, slotDurationMin)
+            : blocksCoveringSession({
+                slotTimes: timeSlots,
+                startTime: time,
+                sessionDurationMin: sessionDurForTime,
+                durationAt: (start) => durationForTime(start),
+              });
+        if (blocksToBook.length < (blockRules.length === 0 ? slotsPerSessionForTime : 1)) {
           toast({ title: `Não há blocos suficientes para sessão de ${sessionDurForTime} min`, variant: "destructive" });
           return;
         }
@@ -3019,7 +3094,7 @@ export default function AssignmentCalendarPage() {
           blocks: blocksToBook.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: slotsByTime.get(startTime)?.maxStudents ?? defaultMaxStudents,
+            maxStudents: maxForTime(startTime, slotsByTime.get(startTime)?.maxStudents),
           })),
         });
         if (!mutation.changed) {
@@ -3059,7 +3134,24 @@ export default function AssignmentCalendarPage() {
     }
 
     setIsSavingAttendance(key);
-    const blockTimes = blocksForLogicalSession(sessionStartResolved, durationMin, slotDurationMin);
+    const computedAttendanceBlocks =
+      blockRules.length === 0
+        ? blocksForLogicalSession(sessionStartResolved, durationMin, slotDurationMin)
+        : blocksCoveringSession({
+            slotTimes: timeSlots,
+            startTime: sessionStartResolved,
+            sessionDurationMin: durationMin,
+            durationAt: (start) => durationForTime(start),
+          });
+    const blockTimes = unionClockTimes(
+      computedAttendanceBlocks,
+      enrolledSlotTimesForSession(
+        sessionSlots,
+        date,
+        rosterStudentMatchIds(rosterStudentsSorted, st.studentId, portalStudentIdByEmail),
+        sessionStartResolved
+      )
+    );
     const atIso = new Date().toISOString();
 
     try {
@@ -3076,7 +3168,7 @@ export default function AssignmentCalendarPage() {
         blocks: blockTimes.map((startTime) => ({
           date,
           startTime,
-          maxStudents: slotsByTime.get(startTime)?.maxStudents ?? defaultMaxStudents,
+          maxStudents: maxForTime(startTime, slotsByTime.get(startTime)?.maxStudents),
         })),
       });
       const dialogDocId = slotDocId(date, managingSlot.startTime);
@@ -3573,11 +3665,15 @@ export default function AssignmentCalendarPage() {
             {managingSlot && (() => {
               const slotStudents = managingSlot.slot?.students ?? [];
               const isCancelled = isSessionSlotCancelled(managingSlot.slot);
-              const maxS = slotMaxOverride || defaultMaxStudents;
-              const persistedMax = managingSlot.slot?.maxStudents ?? defaultMaxStudents;
+              const slotWeekday = weekdayKeyFromDate(new Date(`${managingSlot.date}T12:00:00`));
+              const slotSettings = settingsForTime(managingSlot.startTime, slotWeekday);
+              const resolvedMax = blockRules.length === 0 ? defaultMaxStudents : slotSettings.maxStudents;
+              const shownDuration = durationForTime(managingSlot.startTime, slotWeekday);
+              const maxS = slotMaxOverride || resolvedMax;
+              const persistedMax = managingSlot.slot?.maxStudents ?? resolvedMax;
               const canSaveSlotMax =
                 !isCancelled &&
-                Math.min(20, Math.max(1, slotMaxOverride || defaultMaxStudents)) !== persistedMax;
+                Math.min(20, Math.max(1, slotMaxOverride || resolvedMax)) !== persistedMax;
               const canAdd =
                 !isCancelled &&
                 slotStudents.length < maxS;
@@ -3586,7 +3682,7 @@ export default function AssignmentCalendarPage() {
                   <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                       <Clock className="h-4 w-4 text-primary" />
-                      {managingSlot.startTime} – {addMin(managingSlot.startTime, slotDurationMin)}
+                      {managingSlot.startTime} – {addMin(managingSlot.startTime, shownDuration)}
                       {isCancelled && (
                         <Badge variant="outline" className="text-destructive border-destructive/40">
                           {t("coachSlotCancelledLabel")}
@@ -3615,7 +3711,7 @@ export default function AssignmentCalendarPage() {
                       <Input
                         type="number" min="1" max="20"
                         value={slotMaxOverride}
-                        onChange={(e) => setSlotMaxOverride(Number(e.target.value) || defaultMaxStudents)}
+                        onChange={(e) => setSlotMaxOverride(Number(e.target.value) || resolvedMax)}
                         className="w-16 h-7 text-sm text-center"
                         disabled={isCancelled}
                       />
@@ -3631,6 +3727,15 @@ export default function AssignmentCalendarPage() {
                         </span>/{maxS}
                       </span>
                     </div>
+                    {slotSettings.rule ? (
+                      <p className="text-[11px] text-muted-foreground -mt-2">
+                        Regra: {slotSettings.rule.durationMin} min · máx. {slotSettings.rule.maxStudents}
+                        {managingSlot.slot?.maxStudents != null &&
+                        managingSlot.slot.maxStudents !== slotSettings.rule.maxStudents
+                          ? " · este bloco já tem capacidade própria"
+                          : ""}
+                      </p>
+                    ) : null}
 
                     {/* Enrolled students */}
                     {slotStudents.length > 0 && (
@@ -4013,6 +4118,7 @@ export default function AssignmentCalendarPage() {
                 {isFilterActive && filterStudentSessionDuration && (
                   <p className="text-xs text-primary font-medium">
                     Sessões de {filterStudentSessionDuration} min · blocos {slotDurationMin} min
+                    {blockRules.length > 0 ? " · regras por horário" : ""}
                   </p>
                 )}
                 {isFilterActive && !filterStudentSessionDuration && !isLoadingFilterStudent && (
@@ -4129,7 +4235,20 @@ export default function AssignmentCalendarPage() {
                                       const nextDate = nextOccurrenceOfDay(day);
                                       const nextDateStr = toDateStr(nextDate);
                                       setSelectedDate(nextDate);
-                                      const firstSlot = generateSlotTimes(r.startTime, r.endTime, slotDurationMin)[0];
+                                      const nextWeekday = weekdayKeyFromDate(nextDate);
+                                      const rangeStarts =
+                                        blockRules.length === 0
+                                          ? generateSlotTimes(r.startTime, r.endTime, slotDurationMin)
+                                          : generateSlotTimesByDuration(r.startTime, r.endTime, (time) =>
+                                              resolveBlockSettings({
+                                                rules: blockRules,
+                                                weekday: nextWeekday,
+                                                time,
+                                                defaultDurationMin: slotDurationMin,
+                                                defaultMaxStudents,
+                                              }).durationMin
+                                            );
+                                      const firstSlot = rangeStarts[0];
                                       if (firstSlot) {
                                         const existingSlot = sessionSlots.find(
                                           (s) => s.date === nextDateStr && s.startTime === firstSlot
@@ -4138,7 +4257,17 @@ export default function AssignmentCalendarPage() {
                                         setAddStudentId("");
                                         setSelectedPlanId("");
                                         setStudentWorkoutPlans([]);
-                                        setSlotMaxOverride(existingSlot?.maxStudents ?? defaultMaxStudents);
+                                        const resolvedMax =
+                                          blockRules.length === 0
+                                            ? defaultMaxStudents
+                                            : resolveBlockSettings({
+                                                rules: blockRules,
+                                                weekday: nextWeekday,
+                                                time: firstSlot,
+                                                defaultDurationMin: slotDurationMin,
+                                                defaultMaxStudents,
+                                              }).maxStudents;
+                                        setSlotMaxOverride(existingSlot?.maxStudents ?? resolvedMax);
                                       }
                                     }}
                                   >
@@ -4235,6 +4364,10 @@ export default function AssignmentCalendarPage() {
                         />
                       </div>
                     </div>
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      Predefinição para blocos sem regra.
+                    </p>
+                    <BlockRulesSettings rules={blockRules} onChange={setBlockRules} />
                     <Button size="sm" variant="outline" className="w-full h-8 gap-1.5 text-xs"
                       onClick={handleSaveSettings} disabled={isSavingSettings}>
                       {isSavingSettings && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -4257,8 +4390,12 @@ export default function AssignmentCalendarPage() {
                   <CardDescription>
                     {showCoachDaySchedule
                       ? isFilterActive
-                        ? `${timeSlots.length} blocos de ${slotDurationMin} min · sessão ${effectiveSlotDuration} min`
-                        : `${timeSlots.length} blocos · ${slotDurationMin} min cada · máx. ${defaultMaxStudents} alunos`
+                        ? blockRules.length > 0
+                          ? `${timeSlots.length} blocos · sessão ${effectiveSlotDuration} min · regras por horário`
+                          : `${timeSlots.length} blocos de ${slotDurationMin} min · sessão ${effectiveSlotDuration} min`
+                        : blockRules.length > 0
+                          ? `${timeSlots.length} blocos · predefinição ${slotDurationMin} min, máx. ${defaultMaxStudents} · ${blockRules.length} regra(s)`
+                          : `${timeSlots.length} blocos · ${slotDurationMin} min cada · máx. ${defaultMaxStudents} alunos`
                       : selectedDayOnVacation
                         ? "Dia de férias"
                         : "Dia indisponível"}
@@ -4333,17 +4470,24 @@ export default function AssignmentCalendarPage() {
 
                     const slotsNeededForTime = getSlotsPerSessionForTime(time);
                     const sessionMinForTime = getSessionDurationForTime(time);
-                    const blocksForSession = consecutiveSlotBlocksFrom(
-                      timeSlots,
-                      time,
-                      slotsNeededForTime,
-                      slotDurationMin
-                    );
-                    const hasEnoughBlocks = !isEnrolled && blocksForSession.length === slotsNeededForTime;
+                    const blocksForSession =
+                      blockRules.length === 0
+                        ? consecutiveSlotBlocksFrom(timeSlots, time, slotsNeededForTime, slotDurationMin)
+                        : blocksCoveringSession({
+                            slotTimes: timeSlots,
+                            startTime: time,
+                            sessionDurationMin: sessionMinForTime,
+                            durationAt: (start) => durationForTime(start),
+                          });
+                    const hasEnoughBlocks =
+                      !isEnrolled &&
+                      (blockRules.length === 0
+                        ? blocksForSession.length === slotsNeededForTime
+                        : blocksForSession.length > 0);
                     const allFree = hasEnoughBlocks && blocksForSession.every((t2) => {
                       const s2 = slotsByTime.get(t2);
                       if (isSessionSlotCancelled(s2)) return false;
-                      return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
+                      return (s2?.students.length ?? 0) < maxForTime(t2, s2?.maxStudents);
                     });
                     const isCancelled = isSessionSlotCancelled(slot);
                     const isFull = !isEnrolled && (!hasEnoughBlocks || !allFree || isCancelled);
@@ -4362,7 +4506,7 @@ export default function AssignmentCalendarPage() {
                         {/* Time */}
                         <div className="flex flex-col items-end min-w-[58px] shrink-0">
                           <span className={`text-sm font-bold tabular-nums ${isContinuation ? "text-primary/50" : ""}`}>{time}</span>
-                          <span className="text-[10px] text-muted-foreground tabular-nums">{addMin(time, slotDurationMin)}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">{addMin(time, durationForTime(time))}</span>
                         </div>
                         <div className={`w-0.5 h-8 rounded-full shrink-0 ${
                           isEnrolled ? "bg-primary" : isFull ? "bg-muted-foreground/30" : "bg-border"}`} />
@@ -4370,7 +4514,7 @@ export default function AssignmentCalendarPage() {
                           <div className={`flex items-center gap-1 text-xs font-semibold shrink-0 tabular-nums ${
                             isEnrolled ? "text-primary" : "text-muted-foreground"}`}>
                             <Users className="h-3.5 w-3.5" />
-                            {slot?.students.length ?? 0}/{slot?.maxStudents ?? defaultMaxStudents}
+                            {slot?.students.length ?? 0}/{maxForTime(time, slot?.maxStudents)}
                           </div>
                         )}
                         <div className="flex-1 min-w-0">
@@ -4431,7 +4575,7 @@ export default function AssignmentCalendarPage() {
                             <span className="text-xs text-muted-foreground">Cheio</span>
                           ) : (
                             <span className="text-xs text-muted-foreground">
-                              {(slot?.maxStudents ?? defaultMaxStudents) - (slot?.students.length ?? 0)} lugar(es)
+                              {maxForTime(time, slot?.maxStudents) - (slot?.students.length ?? 0)} lugar(es)
                             </span>
                           )}
                         </div>
@@ -4468,7 +4612,7 @@ export default function AssignmentCalendarPage() {
                 <div className="space-y-1.5 max-h-[620px] overflow-y-auto pr-1">
                   {timeSlots.map((time) => {
                     const slot = slotsByTime.get(time);
-                    const maxS = slot?.maxStudents ?? defaultMaxStudents;
+                    const maxS = maxForTime(time, slot?.maxStudents);
                     const count = slot?.students.length ?? 0;
                     const isCancelled = isSessionSlotCancelled(slot);
                     const isFull = !isCancelled && count >= maxS;
@@ -4491,7 +4635,7 @@ export default function AssignmentCalendarPage() {
                         <div className="flex flex-col items-end min-w-[58px] shrink-0">
                           <span className="text-sm font-bold tabular-nums">{time}</span>
                           <span className="text-[10px] text-muted-foreground tabular-nums">
-                            {addMin(time, slotDurationMin)}
+                            {addMin(time, durationForTime(time))}
                           </span>
                         </div>
                         <div className={`w-0.5 h-8 rounded-full shrink-0 ${

@@ -31,6 +31,7 @@ import {
   weekdayKeyFromDate,
   type Availability,
 } from "@/lib/trainer-availability";
+import { normalizeBlockRules, type BlockRule } from "@/lib/block-rules";
 import {
   bulkEnrollWeeklyCycle,
   countStudentLogicalSessions,
@@ -173,7 +174,7 @@ export function StudentWeeklySchedulingTab({
 
   const trainerData = trainerDoc as (Record<string, unknown> & { id: string }) | null;
 
-  const { availability, vacationPeriods, openBlocks, slotDurationMin, defaultMaxStudents } = useMemo(() => {
+  const { availability, vacationPeriods, openBlocks, slotDurationMin, defaultMaxStudents, blockRules } = useMemo(() => {
     if (!trainerData) {
       return {
         availability: {} as Availability,
@@ -181,6 +182,7 @@ export function StudentWeeklySchedulingTab({
         openBlocks: [],
         slotDurationMin: 30,
         defaultMaxStudents: 1,
+        blockRules: [] as BlockRule[],
       };
     }
     const rawAvail = (trainerData.availability as Record<string, unknown>) ?? {};
@@ -194,6 +196,7 @@ export function StudentWeeklySchedulingTab({
       openBlocks: normalizeOpenAvailabilityBlocks(trainerData.openAvailabilityBlocks),
       slotDurationMin: Number(trainerData.slotDurationMin) || 30,
       defaultMaxStudents: Number(trainerData.maxStudentsPerSlot) || 1,
+      blockRules: normalizeBlockRules(trainerData.blockRules),
     };
   }, [trainerData]);
 
@@ -283,6 +286,7 @@ export function StudentWeeklySchedulingTab({
         openBlocks,
         slotDurationMin,
         vacationPeriods,
+        blockRules,
       });
 
       const slotsForPick = slotTimes.map((time) => ({
@@ -298,6 +302,7 @@ export function StudentWeeklySchedulingTab({
     vacationPeriods,
     openBlocks,
     slotDurationMin,
+    blockRules,
     effectivePattern,
   ]);
 
@@ -431,6 +436,7 @@ export function StudentWeeklySchedulingTab({
         openBlocks,
         existingSlots: sessionSlots,
         workoutPlans,
+        blockRules,
       });
       toast({
         title: t("weeklySchedulingSuccess"),
@@ -510,6 +516,7 @@ export function StudentWeeklySchedulingTab({
         availability={availability}
         vacationPeriods={vacationPeriods}
         openBlocks={openBlocks}
+        blockRules={blockRules}
         sessionSlots={sessionSlots}
         matchIds={matchIds}
         selectedDate={calendarViewDate}

@@ -1,5 +1,11 @@
 import { eachDayOfInterval, format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import {
+  generateSlotTimesByDuration,
+  normalizeBlockRules,
+  resolveBlockSettings,
+  type BlockRule,
+} from "./block-rules";
 
 export type TimeRange = { startTime: string; endTime: string };
 export type DaySchedule = { enabled: boolean; ranges: TimeRange[] };
@@ -31,6 +37,14 @@ const DAY_KEYS = [
 
 export function weekdayKeyFromDate(date: Date): string {
   return DAY_KEYS[date.getDay()];
+}
+
+/** Weekday key for a YYYY-MM-DD calendar date, at local noon so the day does not shift. */
+export function weekdayKeyFromDateStr(dateStr: string): string {
+  const key = String(dateStr || "").trim().slice(0, 10);
+  const date = new Date(`${key}T12:00:00`);
+  if (!Number.isFinite(date.getTime())) return "monday";
+  return weekdayKeyFromDate(date);
 }
 
 export function toDateStr(date: Date): string {
@@ -221,23 +235,40 @@ function timeWithinAnyOpenBlock(
 }
 
 /** Weekly slots outside open-block windows, plus slots from each open block on the date.
- *  Vacation days still use weekly hours so the coach can assign students. */
+ *  Vacation days still use weekly hours so the coach can assign students.
+ *  With no block rules the grid is the uniform `slotDurationMin` step. */
 export function resolveDaySlotTimes(args: {
   dateStr: string;
   weeklySched: DaySchedule | undefined;
   openBlocks: OpenAvailabilityBlock[];
   slotDurationMin: number;
   vacationPeriods?: VacationPeriod[];
+  blockRules?: BlockRule[];
 }): string[] {
   const { dateStr, weeklySched, openBlocks, slotDurationMin } = args;
   const onDate = openBlocksForDate(dateStr, openBlocks);
+  const rules = normalizeBlockRules(args.blockRules);
+  const weekday = weekdayKeyFromDateStr(dateStr);
+  const slotsIn = (startTime: string, endTime: string) => {
+    if (rules.length === 0) return generateSlotTimes(startTime, endTime, slotDurationMin);
+    return generateSlotTimesByDuration(startTime, endTime, (time) =>
+      resolveBlockSettings({
+        rules,
+        weekday,
+        time,
+        defaultDurationMin: slotDurationMin,
+        defaultMaxStudents: 1,
+      }).durationMin
+    );
+  };
 
-  const weeklySlots = generateSlotsForDay(weeklySched, slotDurationMin).filter(
-    (t) => !timeWithinAnyOpenBlock(t, onDate)
-  );
-  const openSlots = onDate.flatMap((b) =>
-    generateSlotTimes(b.startTime, b.endTime, slotDurationMin)
-  );
+  const weeklySlots =
+    !weeklySched?.enabled || !weeklySched.ranges.length
+      ? []
+      : [...new Set(weeklySched.ranges.flatMap((range) => slotsIn(range.startTime, range.endTime)))]
+          .sort()
+          .filter((time) => !timeWithinAnyOpenBlock(time, onDate));
+  const openSlots = onDate.flatMap((block) => slotsIn(block.startTime, block.endTime));
   return [...new Set([...weeklySlots, ...openSlots])].sort();
 }
 

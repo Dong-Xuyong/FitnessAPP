@@ -24,6 +24,12 @@ import {
 } from "@/lib/trainer-availability";
 import { normalizeAttendance, type SessionAttendanceStatus } from "@/lib/session-attendance-streak";
 import { getWeekStart, isDateBeforeToday, type SessionSlot } from "@/lib/session-slot-enrollment";
+import {
+  blocksCoveringSession,
+  effectiveBlockMaxStudents,
+  resolveBlockSettings,
+  type BlockRule,
+} from "@/lib/block-rules";
 
 const DAY_KEYS = [
   "sunday",
@@ -73,6 +79,7 @@ type Props = {
   availability: Availability;
   vacationPeriods: VacationPeriod[];
   openBlocks: OpenAvailabilityBlock[];
+  blockRules?: BlockRule[];
   sessionSlots: SessionSlot[];
   matchIds: string[];
   selectedDate: Date;
@@ -91,6 +98,7 @@ export function StudentSchedulingCalendarBoard({
   availability,
   vacationPeriods,
   openBlocks,
+  blockRules = [],
   sessionSlots,
   matchIds,
   selectedDate,
@@ -117,8 +125,9 @@ export function StudentSchedulingCalendarBoard({
         openBlocks,
         slotDurationMin,
         vacationPeriods,
+        blockRules,
       }),
-    [selectedDateStr, selectedDaySchedule, openBlocks, slotDurationMin]
+    [selectedDateStr, selectedDaySchedule, openBlocks, slotDurationMin, blockRules]
   );
 
   const showDaySchedule = coachDayShowsSchedule({
@@ -356,13 +365,47 @@ export function StudentSchedulingCalendarBoard({
                 const startIdx = timeSlots.indexOf(time);
                 const slotsNeeded = getSlotsPerSessionForTime();
                 const sessionMin = getSessionDurationForTime();
-                const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeeded);
-                const hasEnoughBlocks = !isEnrolled && blocksForSession.length === slotsNeeded;
+                const durationAt = (slotTime: string) =>
+                  resolveBlockSettings({
+                    rules: blockRules,
+                    weekday: selectedDayKey,
+                    time: slotTime,
+                    defaultDurationMin: slotDurationMin,
+                    defaultMaxStudents,
+                  }).durationMin;
+                const shownDuration = blockRules.length > 0 ? durationAt(time) : slotDurationMin;
+                const capacityAt = (slotTime: string, persisted?: number) =>
+                  blockRules.length > 0
+                    ? effectiveBlockMaxStudents(
+                        persisted,
+                        resolveBlockSettings({
+                          rules: blockRules,
+                          weekday: selectedDayKey,
+                          time: slotTime,
+                          defaultDurationMin: slotDurationMin,
+                          defaultMaxStudents,
+                        }).maxStudents
+                      )
+                    : (persisted ?? defaultMaxStudents);
+                const blocksForSession =
+                  blockRules.length > 0
+                    ? blocksCoveringSession({
+                        slotTimes: timeSlots,
+                        startTime: time,
+                        sessionDurationMin: sessionMin,
+                        durationAt,
+                      })
+                    : timeSlots.slice(startIdx, startIdx + slotsNeeded);
+                const hasEnoughBlocks =
+                  !isEnrolled &&
+                  (blockRules.length > 0
+                    ? blocksForSession.length > 0
+                    : blocksForSession.length === slotsNeeded);
                 const allFree =
                   hasEnoughBlocks &&
                   blocksForSession.every((t2) => {
                     const s2 = slotsByTime.get(t2);
-                    return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
+                    return (s2?.students.length ?? 0) < capacityAt(t2, s2?.maxStudents);
                   });
                 const isFull = !isEnrolled && (!hasEnoughBlocks || !allFree);
                 const att = normalizeAttendance(myEntry?.sessionAttendance);
@@ -388,7 +431,7 @@ export function StudentSchedulingCalendarBoard({
                         {time}
                       </span>
                       <span className="text-[10px] text-muted-foreground tabular-nums">
-                        {addMin(time, slotDurationMin)}
+                        {addMin(time, shownDuration)}
                       </span>
                     </div>
                     <div
@@ -405,7 +448,7 @@ export function StudentSchedulingCalendarBoard({
                         )}
                       >
                         <Users className="h-3.5 w-3.5" />
-                        {slot?.students.length ?? 0}/{slot?.maxStudents ?? defaultMaxStudents}
+                        {slot?.students.length ?? 0}/{capacityAt(time, slot?.maxStudents)}
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
@@ -466,8 +509,7 @@ export function StudentSchedulingCalendarBoard({
                           {t("weeklySchedulingSlotPlaces").replace(
                             "{n}",
                             String(
-                              (slot?.maxStudents ?? defaultMaxStudents) -
-                                (slot?.students.length ?? 0)
+                              capacityAt(time, slot?.maxStudents) - (slot?.students.length ?? 0)
                             )
                           )}
                         </span>

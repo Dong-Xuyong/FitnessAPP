@@ -464,6 +464,75 @@ service cloud.firestore {
         canStudentAccessTrainerStudentPath(resource.data.trainerId, resource.data.studentId);
     }
 
+    function isHm(value) {
+      return value is string && value.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+    }
+
+    function isWeekdayName(day) {
+      return day in ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    }
+
+    function blockRuleWeekdaysOk(days) {
+      return days is list
+        && days.size() >= 1
+        && days.size() <= 7
+        && isWeekdayName(days[0])
+        && (days.size() < 2 || isWeekdayName(days[1]))
+        && (days.size() < 3 || isWeekdayName(days[2]))
+        && (days.size() < 4 || isWeekdayName(days[3]))
+        && (days.size() < 5 || isWeekdayName(days[4]))
+        && (days.size() < 6 || isWeekdayName(days[5]))
+        && (days.size() < 7 || isWeekdayName(days[6]));
+    }
+
+    function blockRuleOk(rule) {
+      return rule is map
+        && rule.keys().hasOnly(['id', 'weekdays', 'startTime', 'endTime', 'durationMin', 'maxStudents'])
+        && rule.id is string
+        && rule.id.size() > 0
+        && rule.id.size() <= 80
+        && blockRuleWeekdaysOk(rule.weekdays)
+        && isHm(rule.startTime)
+        && isHm(rule.endTime)
+        && rule.startTime < rule.endTime
+        && rule.durationMin in [15, 30, 45, 60, 90]
+        && rule.maxStudents is int
+        && rule.maxStudents >= 1
+        && rule.maxStudents <= 20;
+    }
+
+    /**
+     * Absent on existing trainer docs. Present values are the ordered block rules
+     * edited from Definições dos blocos. Empty list keeps the old single default.
+     */
+    function blockRulesFieldOk() {
+      return !('blockRules' in request.resource.data)
+        || (
+          request.resource.data.blockRules is list
+          && request.resource.data.blockRules.size() <= 20
+          && (request.resource.data.blockRules.size() < 1 || blockRuleOk(request.resource.data.blockRules[0]))
+          && (request.resource.data.blockRules.size() < 2 || blockRuleOk(request.resource.data.blockRules[1]))
+          && (request.resource.data.blockRules.size() < 3 || blockRuleOk(request.resource.data.blockRules[2]))
+          && (request.resource.data.blockRules.size() < 4 || blockRuleOk(request.resource.data.blockRules[3]))
+          && (request.resource.data.blockRules.size() < 5 || blockRuleOk(request.resource.data.blockRules[4]))
+          && (request.resource.data.blockRules.size() < 6 || blockRuleOk(request.resource.data.blockRules[5]))
+          && (request.resource.data.blockRules.size() < 7 || blockRuleOk(request.resource.data.blockRules[6]))
+          && (request.resource.data.blockRules.size() < 8 || blockRuleOk(request.resource.data.blockRules[7]))
+          && (request.resource.data.blockRules.size() < 9 || blockRuleOk(request.resource.data.blockRules[8]))
+          && (request.resource.data.blockRules.size() < 10 || blockRuleOk(request.resource.data.blockRules[9]))
+          && (request.resource.data.blockRules.size() < 11 || blockRuleOk(request.resource.data.blockRules[10]))
+          && (request.resource.data.blockRules.size() < 12 || blockRuleOk(request.resource.data.blockRules[11]))
+          && (request.resource.data.blockRules.size() < 13 || blockRuleOk(request.resource.data.blockRules[12]))
+          && (request.resource.data.blockRules.size() < 14 || blockRuleOk(request.resource.data.blockRules[13]))
+          && (request.resource.data.blockRules.size() < 15 || blockRuleOk(request.resource.data.blockRules[14]))
+          && (request.resource.data.blockRules.size() < 16 || blockRuleOk(request.resource.data.blockRules[15]))
+          && (request.resource.data.blockRules.size() < 17 || blockRuleOk(request.resource.data.blockRules[16]))
+          && (request.resource.data.blockRules.size() < 18 || blockRuleOk(request.resource.data.blockRules[17]))
+          && (request.resource.data.blockRules.size() < 19 || blockRuleOk(request.resource.data.blockRules[18]))
+          && (request.resource.data.blockRules.size() < 20 || blockRuleOk(request.resource.data.blockRules[19]))
+        );
+    }
+
     match /personalTrainers/{personalTrainerId} {
     
       match /personalTrainingPrograms/{programId} {
@@ -515,8 +584,8 @@ service cloud.firestore {
       }
     
       allow get, list: if isSignedIn();
-      allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId);
-      allow update: if isExistingOwner(personalTrainerId) && isFieldUnchanged('id');
+      allow create: if isOwner(personalTrainerId) && matchesPath('id', personalTrainerId) && blockRulesFieldOk();
+      allow update: if isExistingOwner(personalTrainerId) && isFieldUnchanged('id') && blockRulesFieldOk();
       allow delete: if false;
 
       match /students/{studentId} {
