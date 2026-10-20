@@ -13,6 +13,12 @@ import {
   resolveDaySlotTimes,
   weekdayKeyFromDate,
 } from "@/lib/trainer-availability";
+import {
+  blocksCoveringSession,
+  normalizeBlockRules,
+  resolveBlockSettings,
+  type BlockRule,
+} from "@/lib/block-rules";
 
 // ── Shared slot types (mirrors assignment-calendar inline types) ──────────────
 
@@ -427,6 +433,7 @@ export async function bulkEnrollWeeklyCycle(params: {
   openBlocks: OpenAvailabilityBlock[];
   existingSlots: SessionSlot[];
   workoutPlans: WorkoutPlanRecord[];
+  blockRules?: BlockRule[];
 }): Promise<BulkEnrollResult> {
   const {
     db, trainerId, studentId, studentName, studentPhotoUrl,
@@ -436,6 +443,7 @@ export async function bulkEnrollWeeklyCycle(params: {
     availability, vacationPeriods, openBlocks,
     existingSlots, workoutPlans,
   } = params;
+  const blockRules = normalizeBlockRules(params.blockRules);
 
   const result: BulkEnrollResult = {
     created: 0,
@@ -482,16 +490,30 @@ export async function bulkEnrollWeeklyCycle(params: {
         openBlocks,
         slotDurationMin,
         vacationPeriods,
+        blockRules,
       });
 
-      // 4. Verify enough consecutive blocks starting at startTime
-      const blocksToBook = consecutiveSlotBlocksFrom(
-        daySlotTimes,
-        startTime,
-        slotsNeeded,
-        slotDurationMin
-      );
-      if (blocksToBook.length < slotsNeeded) {
+      const durationAt = (time: string) =>
+        resolveBlockSettings({
+          rules: blockRules,
+          weekday: dayKey,
+          time,
+          defaultDurationMin: slotDurationMin,
+          defaultMaxStudents,
+        }).durationMin;
+
+      // 4. Verify enough consecutive blocks starting at startTime.
+      // Empty rules keep the uniform step used before block rules existed.
+      const blocksToBook =
+        blockRules.length === 0
+          ? consecutiveSlotBlocksFrom(daySlotTimes, startTime, slotsNeeded, slotDurationMin)
+          : blocksCoveringSession({
+              slotTimes: daySlotTimes,
+              startTime,
+              sessionDurationMin,
+              durationAt,
+            });
+      if (blockRules.length === 0 ? blocksToBook.length < slotsNeeded : blocksToBook.length < 1) {
         result.skippedInsufficientBlocks++;
         continue;
       }
@@ -516,7 +538,17 @@ export async function bulkEnrollWeeklyCycle(params: {
           blocks: blocksToBook.map((time) => ({
             date: dateStr,
             startTime: time,
-            maxStudents: slotMap.get(slotDocId(dateStr, time))?.maxStudents ?? defaultMaxStudents,
+            maxStudents:
+              slotMap.get(slotDocId(dateStr, time))?.maxStudents ??
+              (blockRules.length === 0
+                ? defaultMaxStudents
+                : resolveBlockSettings({
+                    rules: blockRules,
+                    weekday: dayKey,
+                    time,
+                    defaultDurationMin: slotDurationMin,
+                    defaultMaxStudents,
+                  }).maxStudents),
           })),
         });
         if (!mutation.changed) {

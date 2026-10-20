@@ -69,6 +69,15 @@ import {
   type OpenAvailabilityBlock,
   type VacationPeriod,
 } from "@/lib/trainer-availability";
+import {
+  blocksCoveringSession,
+  effectiveBlockMaxStudents,
+  enrolledSlotTimesForSession,
+  normalizeBlockRules,
+  resolveBlockSettings,
+  unionClockTimes,
+  type BlockRule,
+} from "@/lib/block-rules";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -249,6 +258,7 @@ export default function StudentWorkoutsPage() {
   const [openAvailabilityBlocks, setOpenAvailabilityBlocks] = useState<OpenAvailabilityBlock[]>([]);
   const [slotDurationMin, setSlotDurationMin]       = useState(30);
   const [defaultMaxStudents, setDefaultMaxStudents] = useState(4);
+  const [blockRules, setBlockRules] = useState<BlockRule[]>([]);
 
   // Schedule
   const [sessionSlots, setSessionSlots] = useState<SessionSlot[]>([]);
@@ -356,6 +366,7 @@ export default function StudentWorkoutsPage() {
           const td = trainerDoc.data();
           if (td.slotDurationMin)   setSlotDurationMin(td.slotDurationMin);
           if (td.maxStudentsPerSlot) setDefaultMaxStudents(td.maxStudentsPerSlot);
+          setBlockRules(normalizeBlockRules(td.blockRules));
           setVacationPeriods(normalizeVacationPeriods(td.vacationPeriods));
           setOpenAvailabilityBlocks(normalizeOpenAvailabilityBlocks(td.openAvailabilityBlocks));
           const savedAvail = td.availability as any;
@@ -543,7 +554,8 @@ export default function StudentWorkoutsPage() {
   // ── Derived ───────────────────────────────────────────────────────────────────
 
   const selectedDateStr = toDateStr(selectedDate);
-  const selectedDaySched = availability[DAY_KEYS[selectedDate.getDay()]];
+  const selectedDayKey = DAY_KEYS[selectedDate.getDay()];
+  const selectedDaySched = availability[selectedDayKey];
   const selectedDayWeeklyAvailable = !!(selectedDaySched?.enabled && selectedDaySched.ranges.length);
   const selectedDayOnVacation = isDateInVacation(selectedDateStr, vacationPeriods);
   const openBlocksOnSelectedDay = useMemo(
@@ -569,6 +581,7 @@ export default function StudentWorkoutsPage() {
       openBlocks: openAvailabilityBlocks,
       slotDurationMin,
       vacationPeriods,
+      blockRules,
     });
     return [...new Set([...resolved, ...bookedTimes])].sort();
   }, [
@@ -577,6 +590,7 @@ export default function StudentWorkoutsPage() {
     openAvailabilityBlocks,
     slotDurationMin,
     vacationPeriods,
+    blockRules,
     sessionSlots,
     selectedDayOnVacation,
     myIds,
@@ -604,6 +618,37 @@ export default function StudentWorkoutsPage() {
       return Math.max(1, Math.ceil(dur / slotDurationMin));
     },
     [getSessionDurationForTime, slotDurationMin]
+  );
+
+  const durationAtTime = useCallback(
+    (time: string) =>
+      blockRules.length === 0
+        ? slotDurationMin
+        : resolveBlockSettings({
+            rules: blockRules,
+            weekday: selectedDayKey,
+            time,
+            defaultDurationMin: slotDurationMin,
+            defaultMaxStudents,
+          }).durationMin,
+    [blockRules, selectedDayKey, slotDurationMin, defaultMaxStudents]
+  );
+
+  const maxAtTime = useCallback(
+    (time: string, persisted?: number | null) =>
+      blockRules.length === 0
+        ? (persisted ?? defaultMaxStudents)
+        : effectiveBlockMaxStudents(
+            persisted,
+            resolveBlockSettings({
+              rules: blockRules,
+              weekday: selectedDayKey,
+              time,
+              defaultDurationMin: slotDurationMin,
+              defaultMaxStudents,
+            }).maxStudents
+          ),
+    [blockRules, selectedDayKey, slotDurationMin, defaultMaxStudents]
   );
 
   const isBookingBlockedAtTime = useCallback(
@@ -805,7 +850,19 @@ export default function StudentWorkoutsPage() {
           return;
         }
         const enrolledDur = myEntry.sessionDurationMin ?? sessionDurForTime;
-        const blocksToFree = blocksForLogicalSession(sessionStart, enrolledDur, slotDurationMin);
+        const computedFree =
+          blockRules.length === 0
+            ? blocksForLogicalSession(sessionStart, enrolledDur, slotDurationMin)
+            : blocksCoveringSession({
+                slotTimes: timeSlots,
+                startTime: sessionStart,
+                sessionDurationMin: enrolledDur,
+                durationAt: durationAtTime,
+              });
+        const blocksToFree = unionClockTimes(
+          computedFree,
+          enrolledSlotTimesForSession(sessionSlots, selectedDateStr, myIds, sessionStart)
+        );
         await removeStudentFromSessionSlots({
           db,
           trainerId,
@@ -814,7 +871,7 @@ export default function StudentWorkoutsPage() {
           blocks: blocksToFree.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: slotsByTime.get(startTime)?.maxStudents ?? defaultMaxStudents,
+            maxStudents: maxAtTime(startTime, slotsByTime.get(startTime)?.maxStudents),
           })),
         });
         toast({ title: "Inscrição cancelada" });
@@ -848,13 +905,16 @@ export default function StudentWorkoutsPage() {
           });
           return;
         }
-        const blocksToBook = consecutiveSlotBlocksFrom(
-          timeSlots,
-          time,
-          slotsNeededForTime,
-          slotDurationMin
-        );
-        if (blocksToBook.length < slotsNeededForTime) {
+        const blocksToBook =
+          blockRules.length === 0
+            ? consecutiveSlotBlocksFrom(timeSlots, time, slotsNeededForTime, slotDurationMin)
+            : blocksCoveringSession({
+                slotTimes: timeSlots,
+                startTime: time,
+                sessionDurationMin: sessionDurForTime,
+                durationAt: durationAtTime,
+              });
+        if (blocksToBook.length < (blockRules.length === 0 ? slotsNeededForTime : 1)) {
           toast({
             title: `Não há blocos consecutivos suficientes para uma sessão de ${sessionDurForTime} min neste horário.`,
             variant: "destructive",
@@ -895,14 +955,15 @@ export default function StudentWorkoutsPage() {
           blocks: blocksToBook.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: slotsByTime.get(startTime)?.maxStudents ?? defaultMaxStudents,
+            maxStudents: maxAtTime(startTime, slotsByTime.get(startTime)?.maxStudents),
           })),
         });
         if (!mutation.changed) {
           toast({ title: t("studentAlreadyBookedTodayTitle") });
           return;
         }
-        toast({ title: `Sessão de ${totalSessionMin} min reservada! (${blocksToBook[0]} – ${addMin(blocksToBook[blocksToBook.length-1], slotDurationMin)})` });
+        const lastBooked = blocksToBook[blocksToBook.length - 1];
+        toast({ title: `Sessão de ${totalSessionMin} min reservada! (${blocksToBook[0]} – ${addMin(lastBooked, durationAtTime(lastBooked))})` });
       }
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message, variant: "destructive" });
@@ -1091,7 +1152,7 @@ export default function StudentWorkoutsPage() {
                 <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 -mx-1 px-1">
                   {timeSlots.map(time => {
                     const slot = slotsByTime.get(time);
-                    const maxS = slot?.maxStudents ?? defaultMaxStudents;
+                    const maxS = maxAtTime(time, slot?.maxStudents);
                     const count = slot?.students.length ?? 0;
                     const mySlotEntry = findSlotStudent(slot, myIds);
                     const isEnrolled = !!mySlotEntry;
@@ -1106,13 +1167,29 @@ export default function StudentWorkoutsPage() {
                         studentIds: myIds,
                       });
 
-                    // A slot is a continuation only if it is strictly adjacent to sessionStart
+                    // A slot is a continuation only if it is strictly adjacent to sessionStart.
+                    // With rules, adjacency follows each block's own duration.
                     const isContinuation = isEnrolled
                       && !isOrphanedContinuation
                       && mySlotEntry.sessionStart !== undefined
                       && mySlotEntry.sessionStart !== time
                       && (() => {
                         const enrolledDur = mySlotEntry.sessionDurationMin ?? sessionMinForTime;
+                        if (blockRules.length > 0) {
+                          const covered = blocksCoveringSession({
+                            slotTimes: timeSlots,
+                            startTime: mySlotEntry.sessionStart!,
+                            sessionDurationMin: enrolledDur,
+                            durationAt: durationAtTime,
+                          });
+                          const enrolled = enrolledSlotTimesForSession(
+                            sessionSlots,
+                            selectedDateStr,
+                            myIds,
+                            mySlotEntry.sessionStart!
+                          );
+                          return covered.includes(time) || enrolled.includes(time);
+                        }
                         const needed = Math.max(1, Math.ceil(enrolledDur / slotDurationMin));
                         const [sh, sm] = mySlotEntry.sessionStart!.split(":").map(Number);
                         const [th, tm] = time.split(":").map(Number);
@@ -1122,15 +1199,26 @@ export default function StudentWorkoutsPage() {
                     const isSessionStart = isEnrolled && !isContinuation;
 
                     const startIdx = timeSlots.indexOf(time);
-                    const blocksForSession = timeSlots.slice(startIdx, startIdx + slotsNeededForTime);
-                    const hasEnoughBlocks = !isEnrolled
-                      && blocksForSession.length === slotsNeededForTime
-                      && areConsecutiveBlocks(blocksForSession, slotDurationMin);
+                    const blocksForSession =
+                      blockRules.length === 0
+                        ? timeSlots.slice(startIdx, startIdx + slotsNeededForTime)
+                        : blocksCoveringSession({
+                            slotTimes: timeSlots,
+                            startTime: time,
+                            sessionDurationMin: sessionMinForTime,
+                            durationAt: durationAtTime,
+                          });
+                    const hasEnoughBlocks = !isEnrolled && (
+                      blockRules.length === 0
+                        ? blocksForSession.length === slotsNeededForTime &&
+                          areConsecutiveBlocks(blocksForSession, slotDurationMin)
+                        : blocksForSession.length > 0
+                    );
                     const isSlotCancelled = isSessionSlotCancelled(slot);
                     const allBlocksFree = hasEnoughBlocks && blocksForSession.every(t2 => {
                       const s2 = slotsByTime.get(t2);
                       if (isSessionSlotCancelled(s2)) return false;
-                      return (s2?.students.length ?? 0) < (s2?.maxStudents ?? defaultMaxStudents);
+                      return (s2?.students.length ?? 0) < maxAtTime(t2, s2?.maxStudents);
                     });
                     const isFull = !isEnrolled && (!hasEnoughBlocks || !allBlocksFree || isSlotCancelled);
                     const slotStartsAt = getSlotStartDate(selectedDateStr, time);
@@ -1178,7 +1266,7 @@ export default function StudentWorkoutsPage() {
                           <span className={`text-base font-bold tabular-nums leading-none ${
                             isSessionStart ? "text-accent" : isContinuation ? "text-accent/50" : "text-foreground"
                           }`}>{time}</span>
-                          <span className="text-[10px] text-muted-foreground tabular-nums mt-0.5">{addMin(time, slotDurationMin)}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums mt-0.5">{addMin(time, durationAtTime(time))}</span>
                         </div>
 
                         {/* Main info */}
