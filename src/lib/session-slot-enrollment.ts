@@ -184,11 +184,16 @@ export function planSessionSlotEnrollment(params: {
     if (isSessionSlotCancelled(current)) {
       throw new SessionSlotMutationError("slot-cancelled", `O bloco ${block.startTime} foi cancelado.`);
     }
-    const maxStudents =
-      Number.isFinite(Number(current?.maxStudents)) && Number(current?.maxStudents) > 0
-        ? Number(current!.maxStudents)
-        : Math.max(1, Number(block.maxStudents) || 1);
     const students = Array.isArray(current?.students) ? current.students : [];
+    const persistedMax = Number(current?.maxStudents);
+    const requestedMax = Math.max(1, Number(block.maxStudents) || 1);
+    // An empty generated doc may still store the old default. A new booking
+    // adopts the capacity requested for this block (the matching rule).
+    // A slot that already has students keeps its saved capacity.
+    const maxStudents =
+      students.length > 0 && Number.isFinite(persistedMax) && persistedMax > 0
+        ? persistedMax
+        : requestedMax;
     if (students.length >= maxStudents) {
       throw new SessionSlotMutationError("slot-full", `O bloco ${block.startTime} está cheio.`);
     }

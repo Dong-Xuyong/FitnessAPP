@@ -109,7 +109,8 @@ import {
 import { BlockRulesSettings } from "@/components/BlockRulesSettings";
 import {
   blocksCoveringSession,
-  effectiveBlockMaxStudents,
+  dayGridStartTimes,
+  displayedBlockMaxStudents,
   enrolledSlotTimesForSession,
   generateSlotTimesByDuration,
   normalizeBlockRules,
@@ -1606,15 +1607,27 @@ export default function AssignmentCalendarPage() {
       vacationPeriods,
       blockRules,
     });
-    const bookedTimes = sessionSlots
-      .filter((s) => s.date === selectedDateStr)
-      .map((s) => s.startTime);
-    return [...new Set([...resolved, ...bookedTimes])].sort();
+    return dayGridStartTimes({
+      generated: resolved,
+      slots: sessionSlots.filter((slot) => slot.date === selectedDateStr),
+      durationMinAt: (time) =>
+        blockRules.length === 0
+          ? slotDurationMin
+          : resolveBlockSettings({
+              rules: blockRules,
+              weekday: selectedDayKey,
+              time,
+              defaultDurationMin: slotDurationMin,
+              defaultMaxStudents,
+            }).durationMin,
+    });
   }, [
     selectedDateStr,
+    selectedDayKey,
     selectedDaySchedule,
     openAvailabilityBlocks,
     slotDurationMin,
+    defaultMaxStudents,
     vacationPeriods,
     blockRules,
     sessionSlots,
@@ -1639,10 +1652,18 @@ export default function AssignmentCalendarPage() {
   );
 
   const maxForTime = useCallback(
-    (time: string, persisted?: number | null, weekday: string = selectedDayKey) =>
-      blockRules.length === 0
-        ? (persisted ?? defaultMaxStudents)
-        : effectiveBlockMaxStudents(persisted, settingsForTime(time, weekday).maxStudents),
+    (
+      time: string,
+      slot?: { maxStudents?: number | null; students?: readonly unknown[] } | null,
+      weekday: string = selectedDayKey
+    ) =>
+      displayedBlockMaxStudents({
+        rulesActive: blockRules.length > 0,
+        persistedMax: slot?.maxStudents,
+        resolvedMax: settingsForTime(time, weekday).maxStudents,
+        defaultMax: defaultMaxStudents,
+        studentCount: slot?.students?.length ?? 0,
+      }),
     [blockRules.length, defaultMaxStudents, settingsForTime]
   );
 
@@ -2708,8 +2729,13 @@ export default function AssignmentCalendarPage() {
     setSelectedPlanId("");
     setStudentWorkoutPlans([]);
     setSlotMaxOverride(
-      existing?.maxStudents ??
-        (blockRules.length === 0 ? defaultMaxStudents : settingsForTime(time).maxStudents)
+      displayedBlockMaxStudents({
+        rulesActive: blockRules.length > 0,
+        persistedMax: existing?.maxStudents,
+        resolvedMax: settingsForTime(time).maxStudents,
+        defaultMax: defaultMaxStudents,
+        studentCount: existing?.students?.length ?? 0,
+      })
     );
   };
 
@@ -2834,7 +2860,7 @@ export default function AssignmentCalendarPage() {
         blocks: [...new Set([...timeSlots, startTime])].map((time) => ({
           date,
           startTime: time,
-          maxStudents: maxForTime(time, slotsByTime.get(time)?.maxStudents),
+          maxStudents: maxForTime(time, slotsByTime.get(time)),
         })),
         mutate: (currentSlots) => {
           const working = new Map(
@@ -3026,7 +3052,7 @@ export default function AssignmentCalendarPage() {
           blocks: blocksToFree.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: maxForTime(startTime, slotsByTime.get(startTime)?.maxStudents),
+            maxStudents: maxForTime(startTime, slotsByTime.get(startTime)),
           })),
         });
         toast({ title: "Aluno removido dos blocos" });
@@ -3094,7 +3120,7 @@ export default function AssignmentCalendarPage() {
           blocks: blocksToBook.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: maxForTime(startTime, slotsByTime.get(startTime)?.maxStudents),
+            maxStudents: maxForTime(startTime, slotsByTime.get(startTime)),
           })),
         });
         if (!mutation.changed) {
@@ -3168,7 +3194,7 @@ export default function AssignmentCalendarPage() {
         blocks: blockTimes.map((startTime) => ({
           date,
           startTime,
-          maxStudents: maxForTime(startTime, slotsByTime.get(startTime)?.maxStudents),
+          maxStudents: maxForTime(startTime, slotsByTime.get(startTime)),
         })),
       });
       const dialogDocId = slotDocId(date, managingSlot.startTime);
@@ -4487,7 +4513,7 @@ export default function AssignmentCalendarPage() {
                     const allFree = hasEnoughBlocks && blocksForSession.every((t2) => {
                       const s2 = slotsByTime.get(t2);
                       if (isSessionSlotCancelled(s2)) return false;
-                      return (s2?.students.length ?? 0) < maxForTime(t2, s2?.maxStudents);
+                      return (s2?.students.length ?? 0) < maxForTime(t2, s2);
                     });
                     const isCancelled = isSessionSlotCancelled(slot);
                     const isFull = !isEnrolled && (!hasEnoughBlocks || !allFree || isCancelled);
@@ -4514,7 +4540,7 @@ export default function AssignmentCalendarPage() {
                           <div className={`flex items-center gap-1 text-xs font-semibold shrink-0 tabular-nums ${
                             isEnrolled ? "text-primary" : "text-muted-foreground"}`}>
                             <Users className="h-3.5 w-3.5" />
-                            {slot?.students.length ?? 0}/{maxForTime(time, slot?.maxStudents)}
+                            {slot?.students.length ?? 0}/{maxForTime(time, slot)}
                           </div>
                         )}
                         <div className="flex-1 min-w-0">
@@ -4575,7 +4601,7 @@ export default function AssignmentCalendarPage() {
                             <span className="text-xs text-muted-foreground">Cheio</span>
                           ) : (
                             <span className="text-xs text-muted-foreground">
-                              {maxForTime(time, slot?.maxStudents) - (slot?.students.length ?? 0)} lugar(es)
+                              {maxForTime(time, slot) - (slot?.students.length ?? 0)} lugar(es)
                             </span>
                           )}
                         </div>
@@ -4612,7 +4638,7 @@ export default function AssignmentCalendarPage() {
                 <div className="space-y-1.5 max-h-[620px] overflow-y-auto pr-1">
                   {timeSlots.map((time) => {
                     const slot = slotsByTime.get(time);
-                    const maxS = maxForTime(time, slot?.maxStudents);
+                    const maxS = maxForTime(time, slot);
                     const count = slot?.students.length ?? 0;
                     const isCancelled = isSessionSlotCancelled(slot);
                     const isFull = !isCancelled && count >= maxS;

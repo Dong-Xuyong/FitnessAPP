@@ -71,7 +71,8 @@ import {
 } from "@/lib/trainer-availability";
 import {
   blocksCoveringSession,
-  effectiveBlockMaxStudents,
+  dayGridStartTimes,
+  displayedBlockMaxStudents,
   enrolledSlotTimesForSession,
   normalizeBlockRules,
   resolveBlockSettings,
@@ -567,12 +568,10 @@ export default function StudentWorkoutsPage() {
   );
 
   const timeSlots = useMemo(() => {
-    const bookedTimes = selectedDayOnVacation
-      ? sessionSlots
-          .filter((s) => s.date === selectedDateStr && sessionSlotHasStudent(s, myIds))
-          .map((s) => s.startTime)
-      : sessionSlots.filter((s) => s.date === selectedDateStr).map((s) => s.startTime);
     if (selectedDayOnVacation) {
+      const bookedTimes = sessionSlots
+        .filter((s) => s.date === selectedDateStr && sessionSlotHasStudent(s, myIds))
+        .map((s) => s.startTime);
       return [...new Set(bookedTimes)].sort();
     }
     const resolved = resolveDaySlotTimes({
@@ -583,12 +582,27 @@ export default function StudentWorkoutsPage() {
       vacationPeriods,
       blockRules,
     });
-    return [...new Set([...resolved, ...bookedTimes])].sort();
+    return dayGridStartTimes({
+      generated: resolved,
+      slots: sessionSlots.filter((slot) => slot.date === selectedDateStr),
+      durationMinAt: (time) =>
+        blockRules.length === 0
+          ? slotDurationMin
+          : resolveBlockSettings({
+              rules: blockRules,
+              weekday: selectedDayKey,
+              time,
+              defaultDurationMin: slotDurationMin,
+              defaultMaxStudents,
+            }).durationMin,
+    });
   }, [
     selectedDateStr,
+    selectedDayKey,
     selectedDaySched,
     openAvailabilityBlocks,
     slotDurationMin,
+    defaultMaxStudents,
     vacationPeriods,
     blockRules,
     sessionSlots,
@@ -635,19 +649,20 @@ export default function StudentWorkoutsPage() {
   );
 
   const maxAtTime = useCallback(
-    (time: string, persisted?: number | null) =>
-      blockRules.length === 0
-        ? (persisted ?? defaultMaxStudents)
-        : effectiveBlockMaxStudents(
-            persisted,
-            resolveBlockSettings({
-              rules: blockRules,
-              weekday: selectedDayKey,
-              time,
-              defaultDurationMin: slotDurationMin,
-              defaultMaxStudents,
-            }).maxStudents
-          ),
+    (time: string, slot?: { maxStudents?: number | null; students?: readonly unknown[] } | null) =>
+      displayedBlockMaxStudents({
+        rulesActive: blockRules.length > 0,
+        persistedMax: slot?.maxStudents,
+        resolvedMax: resolveBlockSettings({
+          rules: blockRules,
+          weekday: selectedDayKey,
+          time,
+          defaultDurationMin: slotDurationMin,
+          defaultMaxStudents,
+        }).maxStudents,
+        defaultMax: defaultMaxStudents,
+        studentCount: slot?.students?.length ?? 0,
+      }),
     [blockRules, selectedDayKey, slotDurationMin, defaultMaxStudents]
   );
 
@@ -871,7 +886,7 @@ export default function StudentWorkoutsPage() {
           blocks: blocksToFree.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: maxAtTime(startTime, slotsByTime.get(startTime)?.maxStudents),
+            maxStudents: maxAtTime(startTime, slotsByTime.get(startTime)),
           })),
         });
         toast({ title: "Inscrição cancelada" });
@@ -955,7 +970,7 @@ export default function StudentWorkoutsPage() {
           blocks: blocksToBook.map((startTime) => ({
             date: selectedDateStr,
             startTime,
-            maxStudents: maxAtTime(startTime, slotsByTime.get(startTime)?.maxStudents),
+            maxStudents: maxAtTime(startTime, slotsByTime.get(startTime)),
           })),
         });
         if (!mutation.changed) {
@@ -1152,7 +1167,7 @@ export default function StudentWorkoutsPage() {
                 <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 -mx-1 px-1">
                   {timeSlots.map(time => {
                     const slot = slotsByTime.get(time);
-                    const maxS = maxAtTime(time, slot?.maxStudents);
+                    const maxS = maxAtTime(time, slot);
                     const count = slot?.students.length ?? 0;
                     const mySlotEntry = findSlotStudent(slot, myIds);
                     const isEnrolled = !!mySlotEntry;
@@ -1218,7 +1233,7 @@ export default function StudentWorkoutsPage() {
                     const allBlocksFree = hasEnoughBlocks && blocksForSession.every(t2 => {
                       const s2 = slotsByTime.get(t2);
                       if (isSessionSlotCancelled(s2)) return false;
-                      return (s2?.students.length ?? 0) < maxAtTime(t2, s2?.maxStudents);
+                      return (s2?.students.length ?? 0) < maxAtTime(t2, s2);
                     });
                     const isFull = !isEnrolled && (!hasEnoughBlocks || !allBlocksFree || isSlotCancelled);
                     const slotStartsAt = getSlotStartDate(selectedDateStr, time);

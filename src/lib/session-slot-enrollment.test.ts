@@ -384,6 +384,47 @@ describe("atomic enrollment planning", () => {
     );
   });
 
+  it("adopts the requested capacity on an empty generated slot", () => {
+    const currentSlots: SessionSlot[] = [
+      {
+        ...blocks[0],
+        id: slotDocId(blocks[0].date, blocks[0].startTime),
+        maxStudents: 4,
+        students: [],
+      },
+    ];
+    const planned = planSessionSlotEnrollment({
+      blocks: [{ ...blocks[0], maxStudents: 1 }],
+      currentSlots,
+      student: newStudent,
+      studentIds: ["roster-id"],
+    });
+    assert.equal(planned.slots[0]?.maxStudents, 1);
+    assert.equal(planned.slots[0]?.students.length, 1);
+  });
+
+  it("keeps the saved capacity when the slot already has students", () => {
+    const currentSlots: SessionSlot[] = [
+      {
+        ...blocks[0],
+        id: slotDocId(blocks[0].date, blocks[0].startTime),
+        maxStudents: 4,
+        students: [existingStudent],
+      },
+    ];
+    const planned = planSessionSlotEnrollment({
+      blocks: [{ ...blocks[0], maxStudents: 1 }],
+      currentSlots,
+      student: newStudent,
+      studentIds: ["roster-id"],
+    });
+    assert.equal(planned.slots[0]?.maxStudents, 4);
+    assert.deepEqual(
+      planned.slots[0]?.students.map((student) => student.studentId),
+      ["other", "roster-id"]
+    );
+  });
+
   it("rejects the whole session when a later block is full", () => {
     const currentSlots: SessionSlot[] = [
       { ...blocks[0], id: slotDocId(blocks[0].date, blocks[0].startTime), students: [] },

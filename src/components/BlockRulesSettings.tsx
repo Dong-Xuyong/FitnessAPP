@@ -11,6 +11,7 @@ import {
   BLOCK_DURATION_OPTIONS,
   BLOCK_WEEKDAY_ORDER,
   BLOCK_WEEKDAY_SHORT,
+  canonicalClockTime,
   formatBlockRuleDays,
   type BlockRule,
 } from "@/lib/block-rules";
@@ -77,11 +78,13 @@ export function BlockRulesSettings({ rules, onChange }: Props) {
       setFormError("Escolhe pelo menos um dia.");
       return;
     }
-    if (!draft.startTime || !draft.endTime) {
+    const startTime = canonicalClockTime(draft.startTime);
+    const endTime = canonicalClockTime(draft.endTime);
+    if (!startTime || !endTime) {
       setFormError("Indica a hora de início e de fim.");
       return;
     }
-    if (draft.endTime <= draft.startTime) {
+    if (endTime <= startTime) {
       setFormError("A hora de fim tem de ser depois da hora de início.");
       return;
     }
@@ -97,8 +100,8 @@ export function BlockRulesSettings({ rules, onChange }: Props) {
     const nextRule: BlockRule = {
       id: editingId ?? crypto.randomUUID(),
       weekdays: BLOCK_WEEKDAY_ORDER.filter((day) => draft.weekdays.includes(day)),
-      startTime: draft.startTime,
-      endTime: draft.endTime,
+      startTime,
+      endTime,
       durationMin: draft.durationMin,
       maxStudents,
     };
