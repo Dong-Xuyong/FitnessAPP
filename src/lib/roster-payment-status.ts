@@ -15,6 +15,7 @@ import {
   buildPaymentAmounts,
   clampSocioFee,
   resolveMonthlyRate,
+  type LoyaltyPaymentRow,
 } from "@/lib/shop-billing";
 
 export type RosterPaymentStatus = { status: string; period: string };
@@ -220,19 +221,31 @@ export async function fetchRosterPaymentStatusMap(
   db: Firestore,
   trainerUid: string,
   rosterStudentIds: string[],
-  onItem?: (id: string, status: RosterPaymentStatus) => void
+  onItem?: (id: string, status: RosterPaymentStatus) => void,
+  options?: { onPayments?: (id: string, rows: LoyaltyPaymentRow[]) => void }
 ): Promise<Record<string, RosterPaymentStatus>> {
   const currentPeriod = currentBillingPeriod();
   const entries = await Promise.all(
     rosterStudentIds.map(async (id) => {
       try {
-        const paymentsSnap = await getDocs(
-          query(
-            collection(db, "personalTrainers", trainerUid, "students", id, "payments"),
-            orderBy("period", "desc"),
-            limit(1)
-          )
+        const paymentsCol = collection(
+          db,
+          "personalTrainers",
+          trainerUid,
+          "students",
+          id,
+          "payments"
         );
+        const paymentsSnap = await getDocs(
+          options?.onPayments
+            ? query(paymentsCol, orderBy("period", "desc"))
+            : query(paymentsCol, orderBy("period", "desc"), limit(1))
+        );
+        const rows: LoyaltyPaymentRow[] = paymentsSnap.docs.map((paymentDoc) => {
+          const data = paymentDoc.data();
+          return { period: data.period, status: data.status };
+        });
+        options?.onPayments?.(id, rows);
         const docSnap = paymentsSnap.docs[0];
         if (!docSnap) return null;
         const data = docSnap.data();

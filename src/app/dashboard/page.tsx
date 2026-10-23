@@ -32,6 +32,11 @@ import {
   rememberRosterPaymentBadge,
 } from "@/lib/roster-payment-status";
 import { normalizedPaymentPaid } from "@/lib/student-payment-due";
+import {
+  loyaltyStartDateFromStudent,
+  studentLoyaltyTimeLabel,
+  type LoyaltyPaymentRow,
+} from "@/lib/shop-billing";
 
 type StudentRow = Record<string, unknown> & { id: string; _onRoster?: boolean };
 
@@ -138,6 +143,9 @@ function DashboardContent() {
   const [dashboardPaymentStatusMap, setDashboardPaymentStatusMap] = useState<
     Record<string, { status: string; period: string }>
   >({});
+  const [loyaltyPaymentsById, setLoyaltyPaymentsById] = useState<
+    Record<string, LoyaltyPaymentRow[]>
+  >({});
   const rosterIdsKey = useMemo(
     () =>
       (rosterStudents ?? [])
@@ -152,18 +160,31 @@ function DashboardContent() {
   const fetchDashboardPayments = useCallback(async () => {
     if (!db || !user || !rosterIdsKey) {
       setDashboardPaymentStatusMap({});
+      setLoyaltyPaymentsById({});
       return;
     }
     const ids = rosterIdsKey.split("\n");
-    await fetchRosterPaymentStatusMap(db, user.uid, ids, (id, status) => {
-      setDashboardPaymentStatusMap((prev) => {
-        const cur = prev[id];
-        if (cur?.status === status.status && cur.period === status.period) return prev;
-        return { ...prev, [id]: status };
-      });
-      const row = (rosterStudentsRef.current ?? []).find((s: { id?: string }) => s.id === id);
-      rememberRosterPaymentBadge(db, user.uid, id, status, row);
-    });
+    const paymentsById: Record<string, LoyaltyPaymentRow[]> = {};
+    await fetchRosterPaymentStatusMap(
+      db,
+      user.uid,
+      ids,
+      (id, status) => {
+        setDashboardPaymentStatusMap((prev) => {
+          const cur = prev[id];
+          if (cur?.status === status.status && cur.period === status.period) return prev;
+          return { ...prev, [id]: status };
+        });
+        const row = (rosterStudentsRef.current ?? []).find((s: { id?: string }) => s.id === id);
+        rememberRosterPaymentBadge(db, user.uid, id, status, row);
+      },
+      {
+        onPayments: (id, rows) => {
+          paymentsById[id] = rows;
+        },
+      }
+    );
+    setLoyaltyPaymentsById(paymentsById);
   }, [db, user, rosterIdsKey]);
 
   useEffect(() => {
@@ -531,10 +552,20 @@ function DashboardContent() {
                                 {streakByStudentId[student.id] ?? 0} {t("sessionsStreakCompact")}
                               </Badge>
                               <p className="text-[10px] text-muted-foreground">
-                                {t("memberSince")}{" "}
-                                {student.joinedAt
-                                  ? new Date(String(student.joinedAt)).toLocaleDateString()
-                                  : t("today")}
+                                {studentLoyaltyTimeLabel(
+                                  loyaltyStartDateFromStudent({
+                                    coachingStartedOn: student.coachingStartedOn,
+                                    joinedAt: student.joinedAt,
+                                  }),
+                                  loyaltyPaymentsById[student.id],
+                                  {
+                                    short: t("loyaltyShort"),
+                                    yearOne: t("loyaltyYearOne"),
+                                    yearMany: t("loyaltyYearMany"),
+                                    monthOne: t("loyaltyMonthOne"),
+                                    monthMany: t("loyaltyMonthMany"),
+                                  }
+                                )}
                               </p>
                             </div>
                           </Link>
