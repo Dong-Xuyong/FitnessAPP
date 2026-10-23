@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  BLOCK_WEEKDAY_ORDER,
   blocksCoveringSession,
+  canonicalClockTime,
+  dayGridStartTimes,
+  displayedBlockMaxStudents,
   effectiveBlockMaxStudents,
   enrolledSlotTimesForSession,
   firstMatchingBlockRule,
@@ -15,6 +19,8 @@ import {
   consecutiveSlotBlocksFrom,
   generateSlotTimes,
   resolveDaySlotTimes,
+  weekdayKeyFromDate,
+  weekdayKeyFromDateStr,
   type DaySchedule,
 } from "./trainer-availability";
 
@@ -219,6 +225,191 @@ describe("generateSlotTimesByDuration", () => {
       generateSlotTimesByDuration("09:00", "11:00", () => 30),
       generateSlotTimes("09:00", "11:00", 30)
     );
+  });
+});
+
+const fridayRule: BlockRule = {
+  id: "sex-1530",
+  weekdays: ["friday"],
+  startTime: "15:30",
+  endTime: "16:30",
+  durationMin: 60,
+  maxStudents: 1,
+};
+
+const fridayAfternoon: DaySchedule = {
+  enabled: true,
+  ranges: [{ startTime: "15:30", endTime: "17:00" }],
+};
+
+function fridayDuration(time: string): number {
+  return resolveBlockSettings({
+    rules: [fridayRule],
+    weekday: "friday",
+    time,
+    defaultDurationMin: 30,
+    defaultMaxStudents: 4,
+  }).durationMin;
+}
+
+describe("Friday 30 Oct 2026 rule Sex 15:30–16:30", () => {
+  it("uses JS getDay Sunday-first, and Lisbon and UTC agree on that Friday", () => {
+    const localNoon = new Date(2026, 9, 30, 12, 0, 0);
+    assert.equal(localNoon.getDay(), 5);
+    assert.equal(weekdayKeyFromDate(localNoon), "friday");
+    assert.equal(weekdayKeyFromDateStr("2026-10-30"), "friday");
+    assert.equal(BLOCK_WEEKDAY_ORDER.indexOf("friday"), 4);
+    assert.equal(BLOCK_WEEKDAY_ORDER[localNoon.getDay()], "saturday");
+    const noonUtc = new Date("2026-10-30T12:00:00Z");
+    assert.equal(
+      new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Lisbon", weekday: "long" }).format(noonUtc),
+      "Friday"
+    );
+    assert.equal(
+      new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(noonUtc),
+      "Friday"
+    );
+  });
+
+  it("matches 15:30 by minutes, with an inclusive start and an exclusive end", () => {
+    const rules = normalizeBlockRules([fridayRule]);
+    assert.equal(firstMatchingBlockRule(rules, "friday", "15:30")?.durationMin, 60);
+    assert.equal(firstMatchingBlockRule(rules, "friday", "16:00")?.maxStudents, 1);
+    assert.equal(firstMatchingBlockRule(rules, "friday", "16:30"), null);
+    const unpadded: BlockRule = { ...fridayRule, startTime: "9:30", endTime: "10:30" };
+    assert.equal(firstMatchingBlockRule([unpadded], "friday", "09:30")?.id, fridayRule.id);
+    assert.equal(canonicalClockTime("15:30:00"), "15:30");
+    const fromTimeInput = normalizeBlockRules([
+      { ...fridayRule, startTime: "15:30:00", endTime: "16:30:00" },
+    ]);
+    assert.equal(fromTimeInput[0]?.startTime, "15:30");
+    assert.equal(fromTimeInput[0]?.endTime, "16:30");
+    assert.equal(firstMatchingBlockRule(fromTimeInput, "friday", "15:30")?.maxStudents, 1);
+  });
+
+  it("builds one 60 min block at 15:30 inside the rule and keeps the default after it", () => {
+    const withoutRules = resolveDaySlotTimes({
+      dateStr: "2026-10-30",
+      weeklySched: fridayAfternoon,
+      openBlocks: [],
+      slotDurationMin: 30,
+    });
+    assert.deepEqual(withoutRules, ["15:30", "16:00", "16:30"]);
+
+    const times = resolveDaySlotTimes({
+      dateStr: "2026-10-30",
+      weeklySched: fridayAfternoon,
+      openBlocks: [],
+      slotDurationMin: 30,
+      blockRules: [fridayRule],
+    });
+    assert.deepEqual(times, ["15:30", "16:30"]);
+    const atStart = resolveBlockSettings({
+      rules: [fridayRule],
+      weekday: weekdayKeyFromDateStr("2026-10-30"),
+      time: "15:30",
+      defaultDurationMin: 30,
+      defaultMaxStudents: 4,
+    });
+    assert.equal(atStart.durationMin, 60);
+    assert.equal(atStart.maxStudents, 1);
+    assert.equal(fridayDuration("16:30"), 30);
+  });
+
+  it("is exactly one block when the open window is the rule range", () => {
+    const times = resolveDaySlotTimes({
+      dateStr: "2026-10-30",
+      weeklySched: { enabled: true, ranges: [{ startTime: "15:30", endTime: "16:30" }] },
+      openBlocks: [],
+      slotDurationMin: 30,
+      blockRules: [fridayRule],
+    });
+    assert.deepEqual(times, ["15:30"]);
+  });
+
+  it("drops empty generated slots and keeps bookings that the rule does not cover", () => {
+    const generated = resolveDaySlotTimes({
+      dateStr: "2026-10-30",
+      weeklySched: fridayAfternoon,
+      openBlocks: [],
+      slotDurationMin: 30,
+      blockRules: [fridayRule],
+    });
+    const emptyDocs = dayGridStartTimes({
+      generated,
+      durationMinAt: fridayDuration,
+      slots: [
+        { startTime: "15:30", students: [] },
+        { startTime: "16:00", students: [] },
+      ],
+    });
+    assert.deepEqual(emptyDocs, ["15:30", "16:30"]);
+    assert.equal(
+      displayedBlockMaxStudents({
+        rulesActive: true,
+        persistedMax: 4,
+        resolvedMax: 1,
+        defaultMax: 4,
+        studentCount: 0,
+      }),
+      1
+    );
+
+    const sameSession = dayGridStartTimes({
+      generated,
+      durationMinAt: fridayDuration,
+      slots: [
+        { startTime: "15:30", students: [{ studentId: "a", sessionStart: "15:30" }] },
+        { startTime: "16:00", students: [{ studentId: "a", sessionStart: "15:30" }] },
+      ],
+    });
+    assert.deepEqual(sameSession, ["15:30", "16:30"]);
+    assert.equal(
+      displayedBlockMaxStudents({
+        rulesActive: true,
+        persistedMax: 4,
+        resolvedMax: 1,
+        defaultMax: 4,
+        studentCount: 1,
+      }),
+      1
+    );
+
+    const orphanContinuation = dayGridStartTimes({
+      generated,
+      durationMinAt: fridayDuration,
+      slots: [{ startTime: "16:00", students: [{ studentId: "a", sessionStart: "15:30" }] }],
+    });
+    assert.deepEqual(orphanContinuation, ["15:30", "16:00", "16:30"]);
+
+    const separateBooking = dayGridStartTimes({
+      generated,
+      durationMinAt: fridayDuration,
+      slots: [{ startTime: "16:00", students: [{ studentId: "b", sessionStart: "16:00" }] }],
+    });
+    assert.deepEqual(separateBooking, ["15:30", "16:00", "16:30"]);
+    assert.equal(
+      displayedBlockMaxStudents({
+        rulesActive: true,
+        persistedMax: 4,
+        resolvedMax: 1,
+        defaultMax: 4,
+        studentCount: 2,
+      }),
+      4
+    );
+  });
+
+  it("does not let a Monday-first index treat this Friday as Saturday", () => {
+    const saturdayRule: BlockRule = { ...fridayRule, id: "sat", weekdays: ["saturday"] };
+    const times = resolveDaySlotTimes({
+      dateStr: "2026-10-30",
+      weeklySched: fridayAfternoon,
+      openBlocks: [],
+      slotDurationMin: 30,
+      blockRules: [saturdayRule],
+    });
+    assert.deepEqual(times, ["15:30", "16:00", "16:30"]);
   });
 });
 

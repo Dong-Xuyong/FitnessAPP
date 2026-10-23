@@ -45,11 +45,21 @@ export type ResolvedBlockSettings = {
 };
 
 function parseHm(time: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(time || "").trim());
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(time || "").trim());
   if (!match) return null;
   const hours = Number(match[1]);
   const minutes = Number(match[2]);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 23 || minutes > 59) return null;
+  const seconds = match[3] == null ? 0 : Number(match[3]);
+  if (
+    !Number.isFinite(hours) ||
+    !Number.isFinite(minutes) ||
+    !Number.isFinite(seconds) ||
+    hours > 23 ||
+    minutes > 59 ||
+    seconds > 59
+  ) {
+    return null;
+  }
   return hours * 60 + minutes;
 }
 
@@ -62,6 +72,11 @@ function normalizeHm(time: string): string | null {
   const mins = parseHm(time);
   if (mins == null) return null;
   return formatHm(mins);
+}
+
+/** `HH:MM`, or null when the clock time cannot be read. Seconds are dropped. */
+export function canonicalClockTime(time: string): string | null {
+  return normalizeHm(time);
 }
 
 function isDurationOption(value: number): value is (typeof BLOCK_DURATION_OPTIONS)[number] {
@@ -152,8 +167,9 @@ export function resolveBlockSettings(args: {
 }
 
 /**
- * A saved session-slot capacity stays in force so existing blocks are unchanged.
- * Rules apply when the block has not been materialized yet.
+ * Prefer a saved capacity when it is a positive number.
+ * Day views use `displayedBlockMaxStudents`, which ignores that saved value
+ * on empty slots so a generated default does not hide the rule.
  */
 export function effectiveBlockMaxStudents(
   persistedMaxStudents: number | null | undefined,
@@ -164,6 +180,101 @@ export function effectiveBlockMaxStudents(
   const resolved = Number(resolvedMaxStudents);
   if (Number.isFinite(resolved) && resolved > 0) return resolved;
   return 1;
+}
+
+/**
+ * Capacity shown and offered for a block.
+ * With no rules, a saved max still wins.
+ * With rules, an empty slot follows the rule even if a generated doc
+ * still stores the old default. A booked slot keeps its saved max when
+ * that is what still fits everyone already enrolled.
+ */
+export function displayedBlockMaxStudents(args: {
+  rulesActive: boolean;
+  persistedMax?: number | null;
+  resolvedMax: number;
+  defaultMax: number;
+  studentCount: number;
+}): number {
+  if (!args.rulesActive) {
+    return args.persistedMax == null ? args.defaultMax : args.persistedMax;
+  }
+  const resolved = Number(args.resolvedMax);
+  const ruleMax = Number.isFinite(resolved) && resolved > 0 ? Math.floor(resolved) : 1;
+  const count = Math.max(0, Math.floor(Number(args.studentCount) || 0));
+  if (count > ruleMax) return effectiveBlockMaxStudents(args.persistedMax, count);
+  return ruleMax;
+}
+
+export type DayGridSlot = {
+  startTime: string;
+  students?: ReadonlyArray<{ studentId?: string; sessionStart?: string }>;
+  cancelledAt?: string | null;
+};
+
+/**
+ * Start times for a day view.
+ * `generated` already follows the rules. Empty slot docs do not add the old
+ * 30-minute steps back. A booking stays: its start is kept when it is not
+ * already on the grid, including a continuation whose session start is no
+ * longer visible. A continuation that sits inside a longer generated block
+ * stays off the grid when that student is already listed on the session start.
+ */
+export function dayGridStartTimes(args: {
+  generated: readonly string[];
+  slots: readonly DayGridSlot[];
+  durationMinAt: (time: string) => number;
+}): string[] {
+  const generated = [...new Set(args.generated.filter(Boolean))].sort();
+  const generatedSet = new Set(generated);
+  const slotsByStart = new Map<string, DayGridSlot>();
+  for (const slot of args.slots) {
+    if (slot.startTime) slotsByStart.set(slot.startTime, slot);
+  }
+
+  const parentShowsStudent = (sessionStart: string, studentId: string): boolean => {
+    if (!generatedSet.has(sessionStart) || !studentId) return false;
+    const parent = slotsByStart.get(sessionStart);
+    if (!parent) return false;
+    return (parent.students ?? []).some((student) => {
+      const id = String(student.studentId || "").trim();
+      if (id !== studentId) return false;
+      return (student.sessionStart ?? sessionStart) === sessionStart;
+    });
+  };
+
+  const insideGeneratedBlock = (time: string): boolean => {
+    const timeMins = parseHm(time);
+    if (timeMins == null) return false;
+    for (const start of generated) {
+      const startMins = parseHm(start);
+      if (startMins == null || timeMins <= startMins) continue;
+      const duration = Math.max(1, Math.floor(Number(args.durationMinAt(start)) || 0));
+      if (timeMins < startMins + duration) return true;
+    }
+    return false;
+  };
+
+  const extra: string[] = [];
+  for (const slot of args.slots) {
+    const time = slot.startTime;
+    if (!time || generatedSet.has(time)) continue;
+    const students = slot.students ?? [];
+    const cancelled = Boolean(slot.cancelledAt);
+    if (students.length === 0 && !cancelled) continue;
+
+    if (insideGeneratedBlock(time)) {
+      const uncovered = students.filter((student) => {
+        const id = String(student.studentId || "").trim();
+        const sessionStart = student.sessionStart ?? time;
+        return !parentShowsStudent(sessionStart, id);
+      });
+      if (uncovered.length === 0) continue;
+    }
+    extra.push(time);
+  }
+
+  return [...new Set([...generated, ...extra])].sort();
 }
 
 export function addMinutesToClock(time: string, minutes: number): string {
