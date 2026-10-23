@@ -1232,6 +1232,59 @@ export function applyLoyaltyDiscount(monthlyRate: number, percent: unknown): num
   return roundMoney(rate * (1 - pct / 100));
 }
 
+export type LoyaltyTenureLabels = {
+  short: string;
+  yearOne: string;
+  yearMany: string;
+  monthOne: string;
+  monthMany: string;
+};
+
+/**
+ * Same line as the student form helper under Fidelização (%).
+ * `1` uses the singular unit. A missing tenure returns null.
+ */
+export function formatLoyaltyTenureLabel(
+  tenure: { years: number; months: number } | null,
+  labels: LoyaltyTenureLabels
+): string | null {
+  if (!tenure) return null;
+  const parts: string[] = [];
+  if (tenure.years > 0) {
+    parts.push(`${tenure.years} ${tenure.years === 1 ? labels.yearOne : labels.yearMany}`);
+  }
+  if (tenure.months > 0 || parts.length === 0) {
+    parts.push(`${tenure.months} ${tenure.months === 1 ? labels.monthOne : labels.monthMany}`);
+  }
+  return `${labels.short}: ${parts.join(", ")}`;
+}
+
+/** `coachingStartedOn` when it is a calendar date, otherwise the join date. */
+export function loyaltyStartDateFromStudent(student: {
+  coachingStartedOn?: unknown;
+  joinedAt?: unknown;
+}): string {
+  const started = String(student.coachingStartedOn ?? "").trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(started)) return started;
+  const joined = String(student.joinedAt ?? "").trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(joined)) return joined;
+  return "";
+}
+
+/** Form helper and Painel card: tenure from the effective loyalty start. */
+export function studentLoyaltyTimeLabel(
+  startedOn: unknown,
+  payments: LoyaltyPaymentRow[] | null | undefined,
+  labels: LoyaltyTenureLabels,
+  now = new Date()
+): string {
+  const line = formatLoyaltyTenureLabel(
+    coachingTenure(effectiveLoyaltyStartedOn(startedOn, payments, now), now),
+    labels
+  );
+  return line ?? `${labels.short}: 0 ${labels.monthMany}`;
+}
+
 /** Whole years and leftover months since `YYYY-MM-DD`. Null if the date is invalid. */
 export function coachingTenure(
   startedOn: string,

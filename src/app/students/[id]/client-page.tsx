@@ -138,6 +138,7 @@ import {
   clampSocioFee,
   coachingTenure,
   effectiveLoyaltyStartedOn,
+  formatLoyaltyTenureLabel,
   loyaltyDiscountEligible,
   catalogMapFromItems,
   collectShopLinesForPaymentPeriod,
@@ -243,17 +244,13 @@ function formatLoyaltyCountLine(
   tenure: { years: number; months: number } | null,
   t: (key: TranslationKey) => string
 ): string | null {
-  if (!tenure) return null;
-  const parts: string[] = [];
-  if (tenure.years > 0) {
-    parts.push(`${tenure.years} ${tenure.years === 1 ? t("loyaltyYearOne") : t("loyaltyYearMany")}`);
-  }
-  if (tenure.months > 0 || parts.length === 0) {
-    parts.push(
-      `${tenure.months} ${tenure.months === 1 ? t("loyaltyMonthOne") : t("loyaltyMonthMany")}`
-    );
-  }
-  return `${t("loyaltyShort")}: ${parts.join(", ")}`;
+  return formatLoyaltyTenureLabel(tenure, {
+    short: t("loyaltyShort"),
+    yearOne: t("loyaltyYearOne"),
+    yearMany: t("loyaltyYearMany"),
+    monthOne: t("loyaltyMonthOne"),
+    monthMany: t("loyaltyMonthMany"),
+  });
 }
 
 function BillingTab({

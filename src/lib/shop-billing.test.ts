@@ -31,6 +31,9 @@ import {
   applyStoredLoyaltyDiscount,
   coachingTenure,
   effectiveLoyaltyStartedOn,
+  formatLoyaltyTenureLabel,
+  loyaltyStartDateFromStudent,
+  studentLoyaltyTimeLabel,
   loyaltyDiscountEligible,
   loyaltyRestartOn,
   rebasePendingLoyaltyAmount,
@@ -547,6 +550,49 @@ describe("shop-billing", () => {
     assert.deepEqual(coachingTenure("2025-03-15", new Date(2026, 5, 15)), { years: 1, months: 3 });
     assert.deepEqual(coachingTenure("2025-03-15", new Date(2026, 5, 14)), { years: 1, months: 2 });
     assert.equal(coachingTenure("not-a-date"), null);
+  });
+
+  it("formats Painel loyalty time the same way as the form helper", () => {
+    const pt = {
+      short: "Fidelização",
+      yearOne: "ano",
+      yearMany: "anos",
+      monthOne: "mês",
+      monthMany: "meses",
+    };
+    assert.equal(formatLoyaltyTenureLabel({ years: 0, months: 0 }, pt), "Fidelização: 0 meses");
+    assert.equal(formatLoyaltyTenureLabel({ years: 0, months: 1 }, pt), "Fidelização: 1 mês");
+    assert.equal(formatLoyaltyTenureLabel({ years: 0, months: 7 }, pt), "Fidelização: 7 meses");
+    assert.equal(formatLoyaltyTenureLabel({ years: 1, months: 0 }, pt), "Fidelização: 1 ano");
+    assert.equal(formatLoyaltyTenureLabel({ years: 1, months: 3 }, pt), "Fidelização: 1 ano, 3 meses");
+    assert.equal(formatLoyaltyTenureLabel({ years: 2, months: 1 }, pt), "Fidelização: 2 anos, 1 mês");
+    assert.equal(formatLoyaltyTenureLabel(null, pt), null);
+
+    const joined = new Date(2026, 9, 23, 12);
+    assert.equal(
+      studentLoyaltyTimeLabel("2026-09-27", undefined, pt, joined),
+      "Fidelização: 0 meses"
+    );
+    assert.equal(
+      studentLoyaltyTimeLabel(
+        loyaltyStartDateFromStudent({
+          coachingStartedOn: "2026-03-11",
+          joinedAt: "2026-09-27T12:00:00",
+        }),
+        [
+          { period: "2026-06", status: "paid" },
+          { period: "2026-07", status: "pending" },
+          { period: "2026-08", status: "paid" },
+        ],
+        pt,
+        new Date(2026, 9, 12, 12)
+      ),
+      "Fidelização: 2 meses"
+    );
+    assert.equal(
+      loyaltyStartDateFromStudent({ joinedAt: "2026-09-27T12:00:00" }),
+      "2026-09-27"
+    );
   });
 
   it("buildShopBillingPeriodContextForMarkPaid keeps May purchases on May when marking May", () => {
