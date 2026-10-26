@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
-import { doc, getDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import {
   commitFinishedWorkoutSession,
   exerciseHasLoggedSet,
@@ -42,9 +42,12 @@ import {
   normalizeTrainingAccessMode,
 } from "@/lib/student-training-access";
 import {
-  buildLastPerfByExercise,
   formatLastSessionPerformanceLabel,
+  lastPerfLookupForPlanExercises,
   normalizeExerciseKey,
+  planExerciseName,
+  prefillUntouchedSetLogs,
+  type CompletedSessionRef,
   type LastSessionPerf,
 } from "@/lib/last-session-performance";
 import { getYouTubeEmbedUrl } from "@/lib/exercise-video";
@@ -54,7 +57,6 @@ import {
   MentionedExerciseDemoChips,
 } from "@/components/ExerciseTextDemoButtons";
 
-const SESSION_QUERY_LIMIT = 40;
 const NOTE_MAX_LENGTH = 500;
 
 /** Effort faces: light → very hard */
@@ -130,6 +132,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [isSaving, setIsSaving] = useState(false);
   const [effectiveStudentId, setEffectiveStudentId] = useState<string | null>(null);
   const [lastPerfLookup, setLastPerfLookup] = useState<Record<string, LastSessionPerf>>({});
+  const [sessionRows, setSessionRows] = useState<CompletedSessionRef[]>([]);
   const [exerciseLibraryVideos, setExerciseLibraryVideos] = useState<LibraryExerciseVideo[]>([]);
   const [selectedExerciseVideo, setSelectedExerciseVideo] = useState<{
     title: string;
@@ -146,20 +149,23 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
   const [sessionFeedbackOpen, setSessionFeedbackOpen] = useState(false);
   /** Prior step doc is completed but `studentUnlocked` may still be false if unlock write failed. */
   const [priorStepCompletedOverride, setPriorStepCompletedOverride] = useState(false);
-  const prefilledSignatureRef = useRef<string | null>(null);
   const metricsPrefilledRef = useRef(false);
   const embeddedExerciseVideoUrl = selectedExerciseVideo
     ? getYouTubeEmbedUrl(selectedExerciseVideo.url)
     : null;
 
   useEffect(() => {
-    prefilledSignatureRef.current = null;
     metricsPrefilledRef.current = false;
     setSessionBodyWeightKg("");
     setSessionBodyFatPercent("");
     setPresenceCheckLoading(true);
     setPresenceAllowed(false);
     setPriorStepCompletedOverride(false);
+    setLogs({});
+    setLastPerfLookup({});
+    setSessionRows([]);
+    setWorkout(null);
+    setIsLoadingWorkout(true);
   }, [workoutId]);
 
   useEffect(() => {
@@ -191,7 +197,35 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
         ]);
         if (planDoc.exists() && !cancelled) {
           const workoutData = { ...planDoc.data(), personalTrainerId: trainerId } as WorkoutPlan;
-          setWorkout(workoutData);
+          let rows: CompletedSessionRef[] = [];
+          try {
+            // Full collection read, sorted in memory. orderBy(completedAt) fails when
+            // older docs store Timestamps and newer docs store ISO strings, and a limit
+            // would drop the session the plan card still shows as “Última vez”.
+            const sessionsSnap = await getDocs(
+              collection(
+                db!,
+                "personalTrainers",
+                trainerId,
+                "students",
+                resolvedStudentId,
+                "workoutSessions"
+              )
+            );
+            if (!cancelled) {
+              rows = sessionsSnap.docs.map((sessionDoc) => sessionDoc.data() as CompletedSessionRef);
+            }
+          } catch (sessionError) {
+            console.error("Error loading previous session:", sessionError);
+            rows = [];
+          }
+          if (!cancelled) {
+            const planExercises = workoutData.exercises || [];
+            setSessionRows(rows);
+            setLastPerfLookup(lastPerfLookupForPlanExercises(planExercises, workoutId, rows));
+            setLogs(() => prefillUntouchedSetLogs({}, planExercises, workoutId, rows));
+            setWorkout(workoutData);
+          }
         }
         if (!cancelled) {
           const videos: LibraryExerciseVideo[] = [];
@@ -337,82 +371,8 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
     return () => window.clearInterval(id);
   }, [db, user?.uid, presenceAllowed, workout, runPresenceCheck]);
 
-  useEffect(() => {
-    const rosterStudentId = effectiveStudentId ?? "";
-    const trainerPid = workout?.personalTrainerId ?? "";
-    if (!db || !rosterStudentId || !trainerPid || !workoutId || !workout) return;
-    let cancelled = false;
-    async function fetchPreviousSession() {
-      try {
-        const sessionsCol = collection(
-          db!,
-          "personalTrainers",
-          trainerPid,
-          "students",
-          rosterStudentId,
-          "workoutSessions"
-        );
-        const q = query(sessionsCol, orderBy("completedAt", "desc"), limit(SESSION_QUERY_LIMIT));
-        const snap = await getDocs(q);
-        if (cancelled) return;
-        const perf: Record<string, LastSessionPerf> = {};
-        for (const docSnap of snap.docs) {
-          const data = docSnap.data() as {
-            completedAt?: string;
-            exercises?: WorkoutExercise[];
-          };
-          if (!data.completedAt) continue;
-          const perEx = buildLastPerfByExercise(data);
-          for (const [key, p] of Object.entries(perEx)) {
-            if (!(key in perf)) perf[key] = p;
-          }
-        }
-        setLastPerfLookup(perf);
-      } catch (e) {
-        console.error("Error loading previous session:", e);
-        setLastPerfLookup({});
-      }
-    }
-    fetchPreviousSession();
-    return () => {
-      cancelled = true;
-    };
-  }, [db, effectiveStudentId, workout?.personalTrainerId, workoutId, workout]);
-
   const exercises = workout?.exercises || [];
   const totalExercises = exercises.length;
-
-  useEffect(() => {
-    if (!workout || exercises.length === 0) return;
-    const lookupKey = Object.keys(lastPerfLookup)
-      .sort()
-      .map((k) => `${k}:${lastPerfLookup[k].weight}:${lastPerfLookup[k].reps}`)
-      .join("|");
-    const sig = `${workoutId}:${lookupKey}`;
-    if (prefilledSignatureRef.current === sig) return;
-    prefilledSignatureRef.current = sig;
-
-    setLogs((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      exercises.forEach((ex, i) => {
-        const nk = normalizeExerciseKey(ex.exerciseName);
-        const p = lastPerfLookup[nk];
-        if (!p) return;
-        const existing = prev[i];
-        const empty =
-          !existing ||
-          (String(existing.weight).trim() === "" && String(existing.reps).trim() === "");
-        if (!empty) return;
-        next[i] = {
-          weight: p.weight > 0 ? String(p.weight) : "",
-          reps: p.reps > 0 ? String(p.reps) : "",
-        };
-        changed = true;
-      });
-      return changed ? next : prev;
-    });
-  }, [workout, exercises.length, workoutId, lastPerfLookup]);
 
   const updateLog = (exerciseIndex: number, field: keyof Pick<SetLog, "weight" | "reps">, value: string) =>
     setLogs((prev) => ({
@@ -433,6 +393,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
       const resolvedStudentId = effectiveStudentId || user.uid;
       const parsedBw = parseOptionalBodyWeightKg(sessionBodyWeightKg);
       const parsedBf = parseOptionalBodyFatPercent(sessionBodyFatPercent);
+      const logsToSave = prefillUntouchedSetLogs(logs, exercises, workoutId, sessionRows);
       await commitFinishedWorkoutSession({
         db,
         trainerId,
@@ -442,7 +403,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
         workoutTitle: workout.title,
         sequenceNextPlanId: workout.sequenceNextPlanId,
         exercises,
-        logs,
+        logs: logsToSave,
         bodyWeightKg: parsedBw,
         bodyFatPercent: parsedBf,
         difficultyNotes,
@@ -734,9 +695,10 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
 
         <div className="space-y-4">
           {exercises.map((exercise, index) => {
+            const exerciseName = planExerciseName(exercise, index);
             const log = logs[index] ?? { weight: "", reps: "" };
             const logged = exerciseHasLoggedSet(log);
-            const exerciseKey = normalizeExerciseKey(exercise.exerciseName);
+            const exerciseKey = normalizeExerciseKey(exerciseName);
             const notes = String(exercise.notes || "").trim();
             const prevPerf = lastPerfLookup[exerciseKey];
             const lastHint = formatLastSessionPerformanceLabel(prevPerf, {
@@ -758,10 +720,10 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                       </Badge>
                       <div className="flex items-start gap-2">
                         <CardTitle className="text-2xl flex-1 whitespace-pre-wrap break-words">
-                          {exercise.exerciseName}
+                          {exerciseName}
                         </CardTitle>
                         <ExactExerciseDemoButton
-                          title={exercise.exerciseName}
+                          title={exerciseName}
                           libraryVideos={exerciseLibraryVideos}
                           onSelect={setSelectedExerciseVideo}
                           watchDemoLabel={t("watchDemo")}
@@ -779,7 +741,7 @@ export default function WorkoutSessionPage({ workoutId }: { workoutId: string })
                     </div>
                   ) : null}
                   <MentionedExerciseDemoChips
-                    title={exercise.exerciseName}
+                    title={exerciseName}
                     extraText={notes}
                     libraryVideos={exerciseLibraryVideos}
                     onSelect={setSelectedExerciseVideo}

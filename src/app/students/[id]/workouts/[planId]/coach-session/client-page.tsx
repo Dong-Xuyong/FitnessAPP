@@ -12,8 +12,17 @@ import { Badge } from "@/components/ui/badge";
 import { Dumbbell, CheckCircle2, Save, Loader2, X, StickyNote, ChevronDown, ChevronUp } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore } from "@/firebase";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { commitFinishedWorkoutSession, exerciseHasLoggedSet } from "@/lib/workout-session-finish";
+import {
+  formatLastSessionPerformanceLabel,
+  lastPerfLookupForPlanExercises,
+  normalizeExerciseKey,
+  planExerciseName,
+  prefillUntouchedSetLogs,
+  type CompletedSessionRef,
+  type LastSessionPerf,
+} from "@/lib/last-session-performance";
 import { resolveSequenceEffectiveUnlock } from "@/lib/workout-plan-sequence";
 import { cn } from "@/lib/utils";
 import { getStudentDisplayName } from "@/lib/student-display";
@@ -93,6 +102,8 @@ export default function CoachWorkoutSessionPage({
   const [workout, setWorkout] = useState<WorkoutPlan | null>(null);
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(true);
   const [logs, setLogs] = useState<Record<number, SetLog>>({});
+  const [lastPerfLookup, setLastPerfLookup] = useState<Record<string, LastSessionPerf>>({});
+  const [sessionRows, setSessionRows] = useState<CompletedSessionRef[]>([]);
   const [isFinished, setIsFinished] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [difficultyNotes, setDifficultyNotes] = useState("");
@@ -112,6 +123,11 @@ export default function CoachWorkoutSessionPage({
     setSessionBodyFatPercent("");
     setSequenceUnlockPending(false);
     setEffectivelyUnlocked(true);
+    setLogs({});
+    setLastPerfLookup({});
+    setSessionRows([]);
+    setWorkout(null);
+    setIsLoadingWorkout(true);
   }, [planId, storageStudentId]);
 
   useEffect(() => {
@@ -148,7 +164,25 @@ export default function CoachWorkoutSessionPage({
           return;
         }
         const planData = { ...planSnap.data(), personalTrainerId: trainerId } as WorkoutPlan;
-        if (!cancelled) setWorkout(planData);
+        let rows: CompletedSessionRef[] = [];
+        try {
+          const sessionsSnap = await getDocs(
+            collection(db!, "personalTrainers", trainerId, "students", storageStudentId, "workoutSessions")
+          );
+          if (!cancelled) {
+            rows = sessionsSnap.docs.map((sessionDoc) => sessionDoc.data() as CompletedSessionRef);
+          }
+        } catch (sessionError) {
+          console.error("Error loading previous session:", sessionError);
+          rows = [];
+        }
+        if (!cancelled) {
+          const planExercises = planData.exercises || [];
+          setSessionRows(rows);
+          setLastPerfLookup(lastPerfLookupForPlanExercises(planExercises, planId, rows));
+          setLogs(() => prefillUntouchedSetLogs({}, planExercises, planId, rows));
+          setWorkout(planData);
+        }
 
         if (!cancelled && !metricsPrefilledRef.current && uidForSession) {
           metricsPrefilledRef.current = true;
@@ -231,6 +265,7 @@ export default function CoachWorkoutSessionPage({
     try {
       const parsedBw = parseOptionalBodyWeightKg(sessionBodyWeightKg);
       const parsedBf = parseOptionalBodyFatPercent(sessionBodyFatPercent);
+      const logsToSave = prefillUntouchedSetLogs(logs, exercises, planId, sessionRows);
       await commitFinishedWorkoutSession({
         db,
         trainerId: user.uid,
@@ -240,7 +275,7 @@ export default function CoachWorkoutSessionPage({
         workoutTitle: workout.title,
         sequenceNextPlanId: workout.sequenceNextPlanId,
         exercises,
-        logs,
+        logs: logsToSave,
         bodyWeightKg: parsedBw,
         bodyFatPercent: parsedBf,
         difficultyNotes,
@@ -510,8 +545,17 @@ export default function CoachWorkoutSessionPage({
 
         <div className="space-y-4">
           {exercises.map((exercise, index) => {
+            const exerciseName = planExerciseName(exercise, index);
             const log = logs[index] ?? { weight: "", reps: "" };
             const logged = exerciseHasLoggedSet(log);
+            const lastHint = formatLastSessionPerformanceLabel(lastPerfLookup[normalizeExerciseKey(exerciseName)], {
+              weighted: (weight, reps) =>
+                t("lastSessionPerformance")
+                  .replace("{weight}", String(weight))
+                  .replace("{reps}", String(reps)),
+              bodyweight: (reps) =>
+                t("lastSessionPerformanceBodyweight").replace("{reps}", String(reps)),
+            });
 
             return (
               <Card key={index}>
@@ -521,7 +565,7 @@ export default function CoachWorkoutSessionPage({
                       <Badge variant="outline" className="text-xs mb-1">
                         {t("exercises")} {index + 1}/{totalExercises}
                       </Badge>
-                      <CardTitle className="text-2xl">{exercise.exerciseName}</CardTitle>
+                      <CardTitle className="text-2xl">{exerciseName}</CardTitle>
                     </div>
                   </div>
 
@@ -537,6 +581,10 @@ export default function CoachWorkoutSessionPage({
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     {t("registerYourSet")}
                   </p>
+
+                  {lastHint ? (
+                    <p className="text-xs font-medium text-primary/90">{lastHint}</p>
+                  ) : null}
 
                   <div
                     className={cn(
