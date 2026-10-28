@@ -121,6 +121,7 @@ export default function CoachRevenuePage() {
             sessionDurationMin: row.sessionDurationMin,
             sessionsPerWeek: row.sessionsPerWeek,
             loyaltyDiscountPercent: row.loyaltyDiscountPercent,
+            loyaltyDiscountAfterMonths: row.loyaltyDiscountAfterMonths,
             loyaltyDiscountAfterYears: row.loyaltyDiscountAfterYears,
             coachingStartedOn: row.coachingStartedOn,
             socioFee: row.socioFee,

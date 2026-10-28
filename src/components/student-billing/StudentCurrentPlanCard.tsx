@@ -28,7 +28,7 @@ export function StudentCurrentPlanCard({ plan }: Props) {
   const monthlyLabel =
     plan.monthlyRate > 0 || showDiscount ? `€${plan.monthlyRate.toFixed(2)}` : t("notSet");
   const waitUnit =
-    plan.loyaltyDiscountAfterYears === 1 ? t("loyaltyYearOne") : t("loyaltyYearMany");
+    plan.loyaltyDiscountAfterMonths === 1 ? t("loyaltyMonthOne") : t("loyaltyMonthMany");
 
   return (
     <Card>
@@ -76,7 +76,7 @@ export function StudentCurrentPlanCard({ plan }: Props) {
                 <p className="text-xs text-muted-foreground">
                   {t("loyaltyDiscountPending")
                     .replace("{percent}", String(plan.loyaltyDiscountPercent))
-                    .replace("{years}", String(plan.loyaltyDiscountAfterYears))
+                    .replace("{months}", String(plan.loyaltyDiscountAfterMonths))
                     .replace("{unit}", waitUnit)}
                 </p>
               ) : null}

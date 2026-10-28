@@ -200,6 +200,30 @@ describe("forecastStudentAmount", () => {
     assert.equal(ready?.amount, 95);
     assert.equal(ready?.loyaltyListAmount, 100);
     assert.equal(ready?.loyaltyDueAmount, 95);
+
+    const sixMonths = forecastStudentAmount(
+      student({
+        id: "six",
+        name: "Six",
+        roster: { ...base, loyaltyDiscountAfterMonths: 6, loyaltyDiscountAfterYears: 5 },
+        payments,
+      }),
+      nextPeriod
+    );
+    assert.equal(sixMonths?.amount, 95);
+    assert.equal(sixMonths?.loyaltyDueAmount, 95);
+
+    const eighteenMonths = forecastStudentAmount(
+      student({
+        id: "eighteen",
+        name: "Eighteen",
+        roster: { ...base, loyaltyDiscountAfterMonths: 18 },
+        payments,
+      }),
+      nextPeriod
+    );
+    assert.equal(eighteenMonths?.amount, 100);
+    assert.equal(eighteenMonths?.loyaltyDueAmount, undefined);
   });
 
   it("returns null for inactive students without a next-period row", () => {

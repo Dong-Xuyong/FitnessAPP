@@ -29,8 +29,9 @@ import {
   resolveBillableShopPaymentPeriod,
   applyLoyaltyDiscount,
   applyStoredLoyaltyDiscount,
-  clampLoyaltyDiscountAfterYears,
+  clampLoyaltyDiscountAfterMonths,
   loyaltyMembershipQuote,
+  loyaltyWaitMonths,
   coachingTenure,
   effectiveLoyaltyStartedOn,
   formatLoyaltyTenureLabel,
@@ -427,7 +428,7 @@ describe("shop-billing", () => {
     assert.equal(applyLoyaltyDiscount(100, -3), 100);
   });
 
-  it("applyStoredLoyaltyDiscount waits one uninterrupted year", () => {
+  it("applyStoredLoyaltyDiscount waits twelve uninterrupted months", () => {
     const start = "2025-10-01";
     const paid = paidMonths("2025-10", "2026-09");
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 8, 30), paid), 100);
@@ -436,25 +437,89 @@ describe("shop-billing", () => {
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), []), 95);
   });
 
-  it("applyStoredLoyaltyDiscount uses the coach's wait and defaults to one year", () => {
+  it("applyStoredLoyaltyDiscount uses the coach's month wait and defaults to 12", () => {
     const start = "2025-10-01";
     const paid = paidMonths("2025-10", "2027-09");
     const atOneYear = new Date(2026, 9, 1);
     const atTwoYears = new Date(2027, 9, 1);
-    assert.equal(clampLoyaltyDiscountAfterYears(undefined), 1);
-    assert.equal(clampLoyaltyDiscountAfterYears(""), 1);
-    assert.equal(clampLoyaltyDiscountAfterYears(null), 1);
-    assert.equal(clampLoyaltyDiscountAfterYears(-1), 1);
-    assert.equal(clampLoyaltyDiscountAfterYears("nope"), 1);
-    assert.equal(clampLoyaltyDiscountAfterYears(2.9), 2);
-    assert.equal(clampLoyaltyDiscountAfterYears(0), 0);
-    assert.equal(clampLoyaltyDiscountAfterYears(40), 30);
-    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atOneYear, paid, 2), 100);
-    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atTwoYears, paid, 2), 95);
+    const atSixMonths = new Date(2026, 3, 1);
+    assert.equal(clampLoyaltyDiscountAfterMonths(undefined), 12);
+    assert.equal(clampLoyaltyDiscountAfterMonths(""), 12);
+    assert.equal(clampLoyaltyDiscountAfterMonths(null), 12);
+    assert.equal(clampLoyaltyDiscountAfterMonths(-1), 12);
+    assert.equal(clampLoyaltyDiscountAfterMonths("nope"), 12);
+    assert.equal(clampLoyaltyDiscountAfterMonths(6.9), 6);
+    assert.equal(clampLoyaltyDiscountAfterMonths(0), 0);
+    assert.equal(clampLoyaltyDiscountAfterMonths(400), 360);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atOneYear, paid, 24), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atTwoYears, paid, 24), 95);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atOneYear, paid, undefined), 95);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2025, 9, 1), [], 0), 95);
-    assert.equal(loyaltyDiscountEligible(start, atOneYear, 2, paid), false);
-    assert.equal(loyaltyDiscountEligible(start, atTwoYears, "2", paid), true);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 2, 31), paid, 6), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atSixMonths, paid, 6), 95);
+    assert.equal(loyaltyDiscountEligible(start, atOneYear, 24, paid), false);
+    assert.equal(loyaltyDiscountEligible(start, atTwoYears, "24", paid), true);
+    assert.equal(loyaltyDiscountEligible(start, atSixMonths, 6, paid), true);
+  });
+
+  it("a stored year wait is read as months until the months field is set", () => {
+    assert.equal(loyaltyWaitMonths(undefined), 12);
+    assert.equal(loyaltyWaitMonths({}), 12);
+    assert.equal(loyaltyWaitMonths({ loyaltyDiscountAfterYears: 1 }), 12);
+    assert.equal(loyaltyWaitMonths({ loyaltyDiscountAfterYears: 2 }), 24);
+    assert.equal(loyaltyWaitMonths({ loyaltyDiscountAfterYears: 0 }), 0);
+    assert.equal(loyaltyWaitMonths({ loyaltyDiscountAfterYears: 30 }), 360);
+    assert.equal(loyaltyWaitMonths({ loyaltyDiscountAfterYears: 40 }), 360);
+    assert.equal(
+      loyaltyWaitMonths({ loyaltyDiscountAfterMonths: "", loyaltyDiscountAfterYears: 3 }),
+      36
+    );
+    assert.equal(
+      loyaltyWaitMonths({ loyaltyDiscountAfterMonths: 6, loyaltyDiscountAfterYears: 2 }),
+      6
+    );
+    assert.equal(
+      loyaltyWaitMonths({ loyaltyDiscountAfterMonths: 0, loyaltyDiscountAfterYears: 1 }),
+      0
+    );
+
+    const start = "2025-10-01";
+    const paid = paidMonths("2025-10", "2026-09");
+    const atOneYear = new Date(2026, 9, 1);
+    assert.equal(
+      applyStoredLoyaltyDiscount(
+        100,
+        5,
+        start,
+        atOneYear,
+        paid,
+        loyaltyWaitMonths({ loyaltyDiscountAfterYears: 1 })
+      ),
+      95
+    );
+    assert.equal(
+      applyStoredLoyaltyDiscount(
+        100,
+        5,
+        start,
+        atOneYear,
+        paid,
+        loyaltyWaitMonths({ loyaltyDiscountAfterYears: 2 })
+      ),
+      100
+    );
+  });
+
+  it("a short month wait still restarts after a missed payment", () => {
+    const start = "2026-01-01";
+    const now = new Date(2026, 5, 1);
+    const paid = paidMonths("2026-01", "2026-05");
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, now, paid, 5), 95);
+    const missed = paid.map((row) =>
+      row.period === "2026-03" ? { ...row, status: "pending" } : row
+    );
+    assert.equal(effectiveLoyaltyStartedOn(start, missed, now), "2026-04-01");
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, now, missed, 5), 100);
   });
 
   it("loyaltyMembershipQuote shows list and discounted prices only when the charge matches", () => {

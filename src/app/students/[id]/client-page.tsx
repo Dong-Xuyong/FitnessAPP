@@ -63,6 +63,7 @@ import {
   getDocs,
   limit,
   writeBatch,
+  deleteField,
 } from "firebase/firestore";
 import {
   DndContext,
@@ -134,13 +135,14 @@ import {
   applyStoredLoyaltyDiscount,
   buildPaymentAmounts,
   buildShopBillingPeriodContextFromPayments,
-  clampLoyaltyDiscountAfterYears,
+  clampLoyaltyDiscountAfterMonths,
   clampLoyaltyDiscountPercent,
   clampSocioFee,
   coachingTenure,
   effectiveLoyaltyStartedOn,
   formatLoyaltyTenureLabel,
   loyaltyDiscountEligible,
+  loyaltyWaitMonths,
   catalogMapFromItems,
   collectShopLinesForPaymentPeriod,
   collectShopLinesPaidByPaymentId,
@@ -282,7 +284,7 @@ function BillingTab({
   const [paymentDetails, setPaymentDetails] = useState("");
   const [coachingStartedOn, setCoachingStartedOn] = useState("");
   const [loyaltyDiscountPercent, setLoyaltyDiscountPercent] = useState("");
-  const [loyaltyDiscountAfterYears, setLoyaltyDiscountAfterYears] = useState("1");
+  const [loyaltyDiscountAfterMonths, setLoyaltyDiscountAfterMonths] = useState("12");
   const [socioFee, setSocioFee] = useState("");
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [newPayment, setNewPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid" });
@@ -307,7 +309,7 @@ function BillingTab({
   }, [rate30Min, rate60Min, sessionDurationMin, sessionsPerWeek]);
 
   const loyaltyPercent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
-  const loyaltyAfterYears = clampLoyaltyDiscountAfterYears(loyaltyDiscountAfterYears);
+  const loyaltyAfterMonths = clampLoyaltyDiscountAfterMonths(loyaltyDiscountAfterMonths);
   const listMonthly = Number(monthlyRate) || calculatedMonthlyRate || 0;
   const socioAmount = clampSocioFee(socioFee);
 
@@ -334,14 +336,14 @@ function BillingTab({
     (a: any, b: any) => (b.period || "").localeCompare(a.period || "")
   );
   const loyaltyStartedOn = effectiveLoyaltyStartedOn(coachingStartedOn, sortedPayments);
-  const loyaltyActive = loyaltyDiscountEligible(loyaltyStartedOn, new Date(), loyaltyAfterYears);
+  const loyaltyActive = loyaltyDiscountEligible(loyaltyStartedOn, new Date(), loyaltyAfterMonths);
   const discountedMonthly = applyStoredLoyaltyDiscount(
     listMonthly,
     loyaltyPercent,
     loyaltyStartedOn,
     new Date(),
     undefined,
-    loyaltyAfterYears
+    loyaltyAfterMonths
   );
   const loyaltyCountLine = formatLoyaltyCountLine(coachingTenure(loyaltyStartedOn), t);
 
@@ -456,12 +458,8 @@ function BillingTab({
       setLoyaltyDiscountPercent(
         storedPercent == null || storedPercent === "" ? "" : String(storedPercent)
       );
-      setLoyaltyDiscountAfterYears(
-        String(
-          clampLoyaltyDiscountAfterYears(
-            (rosterData as Record<string, unknown>).loyaltyDiscountAfterYears
-          )
-        )
+      setLoyaltyDiscountAfterMonths(
+        String(loyaltyWaitMonths(rosterData as Record<string, unknown>))
       );
       const storedSocio = (rosterData as Record<string, unknown>).socioFee;
       setSocioFee(storedSocio == null || storedSocio === "" ? "" : String(storedSocio));
@@ -617,7 +615,7 @@ function BillingTab({
     const mode = normalizeTrainingAccessMode(trainingAccessMode);
     const started = coachingStartedOn.trim().slice(0, 10);
     const percent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
-    const afterYears = clampLoyaltyDiscountAfterYears(loyaltyDiscountAfterYears);
+    const afterMonths = clampLoyaltyDiscountAfterMonths(loyaltyDiscountAfterMonths);
     const listRate = Number(monthlyRate) || calculatedMonthlyRate || 0;
     const membership = applyStoredLoyaltyDiscount(
       listRate,
@@ -625,7 +623,7 @@ function BillingTab({
       effectiveLoyaltyStartedOn(started, sortedPayments),
       new Date(),
       undefined,
-      afterYears
+      afterMonths
     );
     const socio = clampSocioFee(socioFee);
     const registrationDate = /^\d{4}-\d{2}-\d{2}$/.test(started) ? started : "";
@@ -640,7 +638,8 @@ function BillingTab({
       socioFee: socio,
       coachingStartedOn: registrationDate,
       loyaltyDiscountPercent: percent,
-      loyaltyDiscountAfterYears: afterYears,
+      loyaltyDiscountAfterMonths: afterMonths,
+      loyaltyDiscountAfterYears: deleteField(),
       paymentMethod,
       paymentDetails,
       billingStatus: "active",
@@ -956,27 +955,28 @@ function BillingTab({
                   ) : (
                     t("loyaltyDiscountPending")
                       .replace("{percent}", String(loyaltyPercent))
-                      .replace("{years}", String(loyaltyAfterYears))
+                      .replace("{months}", String(loyaltyAfterMonths))
                       .replace(
                         "{unit}",
-                        loyaltyAfterYears === 1 ? t("loyaltyYearOne") : t("loyaltyYearMany")
+                        loyaltyAfterMonths === 1 ? t("loyaltyMonthOne") : t("loyaltyMonthMany")
                       )
                   )}
                 </p>
               ) : null}
             </div>
             <div className="space-y-2">
-              <Label>{t("loyaltyDiscountAfterYears")}</Label>
+              <Label>{t("loyaltyDiscountAfterMonths")}</Label>
               <Input
                 type="number"
                 min="0"
-                max="30"
+                max="360"
                 step="1"
-                placeholder="1"
-                value={loyaltyDiscountAfterYears}
-                onChange={(e) => setLoyaltyDiscountAfterYears(e.target.value)}
+                inputMode="numeric"
+                placeholder="12"
+                value={loyaltyDiscountAfterMonths}
+                onChange={(e) => setLoyaltyDiscountAfterMonths(e.target.value)}
               />
-              <p className="text-xs text-muted-foreground">{t("loyaltyDiscountAfterYearsHint")}</p>
+              <p className="text-xs text-muted-foreground">{t("loyaltyDiscountAfterMonthsHint")}</p>
             </div>
             <div className="space-y-2">
               <Label>{t("paymentMethod")}</Label>

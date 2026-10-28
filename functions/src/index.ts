@@ -8,6 +8,7 @@ import { logger } from "firebase-functions";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import {
   applyStoredLoyaltyDiscount,
+  loyaltyWaitMonths,
   rebasePendingLoyaltyAmount,
   resolveMonthlyRate,
 } from "./shop-billing";
@@ -162,7 +163,7 @@ export const enforcePaymentBlocking = onSchedule(
           roster.coachingStartedOn,
           lisbonNow,
           paymentRows,
-          roster.loyaltyDiscountAfterYears
+          loyaltyWaitMonths(roster)
         );
         for (const p of payDocs) {
           const next = rebasePendingLoyaltyAmount(
