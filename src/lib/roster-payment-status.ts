@@ -79,7 +79,8 @@ export async function ensurePendingPaymentForCurrentPeriod(
     roster.loyaltyDiscountPercent,
     roster.coachingStartedOn,
     new Date(),
-    paymentRows
+    paymentRows,
+    roster.loyaltyDiscountAfterYears
   );
   const amounts = buildPaymentAmounts(monthlyRate, 0, clampSocioFee(roster.socioFee));
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
@@ -132,7 +133,8 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
     roster.loyaltyDiscountPercent,
     roster.coachingStartedOn,
     now,
-    paymentRows
+    paymentRows,
+    roster.loyaltyDiscountAfterYears
   );
   const socioFee = clampSocioFee(roster.socioFee);
   if ((!Number.isFinite(monthlyRate) || monthlyRate <= 0) && socioFee <= 0) return false;

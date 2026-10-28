@@ -134,6 +134,7 @@ import {
   applyStoredLoyaltyDiscount,
   buildPaymentAmounts,
   buildShopBillingPeriodContextFromPayments,
+  clampLoyaltyDiscountAfterYears,
   clampLoyaltyDiscountPercent,
   clampSocioFee,
   coachingTenure,
@@ -156,6 +157,10 @@ import {
   fetchShopRegistrationsForStudentCandidates,
   resolveShopRegistrationStudentIds,
 } from "@/lib/fetch-shop-registrations";
+import {
+  LoyaltyMembershipFigures,
+  membershipDiscountApplied,
+} from "@/components/student-billing/LoyaltyMembershipFigures";
 import {
   markShopRegistrationsPaidForPayment,
   repairShopLinesForPaidPayments,
@@ -277,6 +282,7 @@ function BillingTab({
   const [paymentDetails, setPaymentDetails] = useState("");
   const [coachingStartedOn, setCoachingStartedOn] = useState("");
   const [loyaltyDiscountPercent, setLoyaltyDiscountPercent] = useState("");
+  const [loyaltyDiscountAfterYears, setLoyaltyDiscountAfterYears] = useState("1");
   const [socioFee, setSocioFee] = useState("");
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [newPayment, setNewPayment] = useState({ period: "", amount: "", method: "mbway", status: "paid" });
@@ -301,6 +307,7 @@ function BillingTab({
   }, [rate30Min, rate60Min, sessionDurationMin, sessionsPerWeek]);
 
   const loyaltyPercent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
+  const loyaltyAfterYears = clampLoyaltyDiscountAfterYears(loyaltyDiscountAfterYears);
   const listMonthly = Number(monthlyRate) || calculatedMonthlyRate || 0;
   const socioAmount = clampSocioFee(socioFee);
 
@@ -327,8 +334,15 @@ function BillingTab({
     (a: any, b: any) => (b.period || "").localeCompare(a.period || "")
   );
   const loyaltyStartedOn = effectiveLoyaltyStartedOn(coachingStartedOn, sortedPayments);
-  const loyaltyActive = loyaltyDiscountEligible(loyaltyStartedOn);
-  const discountedMonthly = applyStoredLoyaltyDiscount(listMonthly, loyaltyPercent, loyaltyStartedOn);
+  const loyaltyActive = loyaltyDiscountEligible(loyaltyStartedOn, new Date(), loyaltyAfterYears);
+  const discountedMonthly = applyStoredLoyaltyDiscount(
+    listMonthly,
+    loyaltyPercent,
+    loyaltyStartedOn,
+    new Date(),
+    undefined,
+    loyaltyAfterYears
+  );
   const loyaltyCountLine = formatLoyaltyCountLine(coachingTenure(loyaltyStartedOn), t);
 
   const shopBillingContext = useMemo(
@@ -441,6 +455,13 @@ function BillingTab({
       const storedPercent = (rosterData as Record<string, unknown>).loyaltyDiscountPercent;
       setLoyaltyDiscountPercent(
         storedPercent == null || storedPercent === "" ? "" : String(storedPercent)
+      );
+      setLoyaltyDiscountAfterYears(
+        String(
+          clampLoyaltyDiscountAfterYears(
+            (rosterData as Record<string, unknown>).loyaltyDiscountAfterYears
+          )
+        )
       );
       const storedSocio = (rosterData as Record<string, unknown>).socioFee;
       setSocioFee(storedSocio == null || storedSocio === "" ? "" : String(storedSocio));
@@ -596,11 +617,15 @@ function BillingTab({
     const mode = normalizeTrainingAccessMode(trainingAccessMode);
     const started = coachingStartedOn.trim().slice(0, 10);
     const percent = clampLoyaltyDiscountPercent(loyaltyDiscountPercent);
+    const afterYears = clampLoyaltyDiscountAfterYears(loyaltyDiscountAfterYears);
     const listRate = Number(monthlyRate) || calculatedMonthlyRate || 0;
     const membership = applyStoredLoyaltyDiscount(
       listRate,
       percent,
-      effectiveLoyaltyStartedOn(started, sortedPayments)
+      effectiveLoyaltyStartedOn(started, sortedPayments),
+      new Date(),
+      undefined,
+      afterYears
     );
     const socio = clampSocioFee(socioFee);
     const registrationDate = /^\d{4}-\d{2}-\d{2}$/.test(started) ? started : "";
@@ -615,6 +640,7 @@ function BillingTab({
       socioFee: socio,
       coachingStartedOn: registrationDate,
       loyaltyDiscountPercent: percent,
+      loyaltyDiscountAfterYears: afterYears,
       paymentMethod,
       paymentDetails,
       billingStatus: "active",
@@ -920,6 +946,37 @@ function BillingTab({
               {loyaltyCountLine ? (
                 <p className="text-xs text-muted-foreground">{loyaltyCountLine}</p>
               ) : null}
+              {loyaltyPercent > 0 && listMonthly > 0 ? (
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {loyaltyActive ? (
+                    t("loyaltyDiscountApplied")
+                      .replace("{list}", listMonthly.toFixed(2))
+                      .replace("{discounted}", discountedMonthly.toFixed(2))
+                      .replace("{percent}", String(loyaltyPercent))
+                  ) : (
+                    t("loyaltyDiscountPending")
+                      .replace("{percent}", String(loyaltyPercent))
+                      .replace("{years}", String(loyaltyAfterYears))
+                      .replace(
+                        "{unit}",
+                        loyaltyAfterYears === 1 ? t("loyaltyYearOne") : t("loyaltyYearMany")
+                      )
+                  )}
+                </p>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label>{t("loyaltyDiscountAfterYears")}</Label>
+              <Input
+                type="number"
+                min="0"
+                max="30"
+                step="1"
+                placeholder="1"
+                value={loyaltyDiscountAfterYears}
+                onChange={(e) => setLoyaltyDiscountAfterYears(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">{t("loyaltyDiscountAfterYearsHint")}</p>
             </div>
             <div className="space-y-2">
               <Label>{t("paymentMethod")}</Label>
@@ -1004,12 +1061,28 @@ function BillingTab({
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
               {suggestedRecordPayment.amount > 0 ? (
-                <p className="text-xs text-muted-foreground sm:text-right sm:max-w-[220px]">
-                  {t("shopBillingMembership")}: €{suggestedRecordPayment.baseAmount.toFixed(2)} ·{" "}
+                <p className="text-xs text-muted-foreground sm:text-right sm:max-w-[360px]">
+                  {t("shopBillingMembership")}:{" "}
+                  <LoyaltyMembershipFigures
+                    listAmount={listMonthly}
+                    chargedAmount={suggestedRecordPayment.baseAmount}
+                    percent={loyaltyPercent}
+                    eligible={loyaltyActive}
+                  />
+                  {" · "}
                   {suggestedRecordPayment.socioAmount > 0
                     ? `${t("socioFeeShort")}: €${suggestedRecordPayment.socioAmount.toFixed(2)} · `
                     : ""}
-                  {t("shopBillingShop")}: €{suggestedRecordPayment.shopAmount.toFixed(2)} ·{" "}
+                  {suggestedRecordPayment.shopAmount > 0 &&
+                  membershipDiscountApplied(
+                    listMonthly,
+                    suggestedRecordPayment.baseAmount,
+                    loyaltyPercent,
+                    loyaltyActive
+                  )
+                    ? t("shopBillingShopFullPrice")
+                    : t("shopBillingShop")}
+                  : €{suggestedRecordPayment.shopAmount.toFixed(2)} ·{" "}
                   {t("shopBillingTotal")}: €{suggestedRecordPayment.amount.toFixed(2)}
                 </p>
               ) : null}
@@ -1062,11 +1135,27 @@ function BillingTab({
                   activeRecordBreakdown.shopAmount > 0 ||
                   activeRecordBreakdown.socioAmount > 0 ? (
                     <p className="text-xs text-muted-foreground">
-                      {t("shopBillingMembership")}: €{activeRecordBreakdown.baseAmount.toFixed(2)} ·{" "}
+                      {t("shopBillingMembership")}:{" "}
+                      <LoyaltyMembershipFigures
+                        listAmount={listMonthly}
+                        chargedAmount={activeRecordBreakdown.baseAmount}
+                        percent={loyaltyPercent}
+                        eligible={loyaltyActive}
+                      />
+                      {" · "}
                       {activeRecordBreakdown.socioAmount > 0
                         ? `${t("socioFeeShort")}: €${activeRecordBreakdown.socioAmount.toFixed(2)} · `
                         : ""}
-                      {t("shopBillingShop")}: €{activeRecordBreakdown.shopAmount.toFixed(2)} ·{" "}
+                      {activeRecordBreakdown.shopAmount > 0 &&
+                      membershipDiscountApplied(
+                        listMonthly,
+                        activeRecordBreakdown.baseAmount,
+                        loyaltyPercent,
+                        loyaltyActive
+                      )
+                        ? t("shopBillingShopFullPrice")
+                        : t("shopBillingShop")}
+                      : €{activeRecordBreakdown.shopAmount.toFixed(2)} ·{" "}
                       {t("shopBillingTotal")}: €{activeRecordBreakdown.amount.toFixed(2)}
                     </p>
                   ) : null}
@@ -1123,13 +1212,30 @@ function BillingTab({
                           <div className="space-y-1">
                             <Label className="text-xs">{t("amount")}</Label>
                             <div className="rounded-md border bg-muted px-3 py-2 text-sm space-y-0.5">
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Base</span>
-                                <span>{editingPayment.lockedBaseAmount.toFixed(2)} €</span>
+                              <div className="flex justify-between gap-3">
+                                <span className="text-muted-foreground">{t("shopBillingMembership")}</span>
+                                <span className="tabular-nums">
+                                  <LoyaltyMembershipFigures
+                                    listAmount={listMonthly}
+                                    chargedAmount={editingPayment.lockedBaseAmount}
+                                    percent={loyaltyPercent}
+                                    eligible={loyaltyActive}
+                                  />
+                                </span>
                               </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Shop</span>
-                                <span>{editingPayment.lockedShopAmount.toFixed(2)} €</span>
+                              <div className="flex justify-between gap-3">
+                                <span className="text-muted-foreground">
+                                  {editingPayment.lockedShopAmount > 0 &&
+                                  membershipDiscountApplied(
+                                    listMonthly,
+                                    editingPayment.lockedBaseAmount,
+                                    loyaltyPercent,
+                                    loyaltyActive
+                                  )
+                                    ? t("shopBillingShopFullPrice")
+                                    : t("shopBillingShop")}
+                                </span>
+                                <span className="tabular-nums">{editingPayment.lockedShopAmount.toFixed(2)} €</span>
                               </div>
                               <div className="flex justify-between font-medium border-t pt-0.5 mt-0.5">
                                 <span>Total</span>
@@ -1261,14 +1367,31 @@ function BillingTab({
                                   )
                                 : [];
                             const purchaseLines = linked.length > 0 ? linked : unsynced;
+                            const membershipCharged = Number(p.baseAmount ?? 0);
+                            const discountOnMembership = membershipDiscountApplied(
+                              listMonthly,
+                              membershipCharged,
+                              loyaltyPercent,
+                              loyaltyActive
+                            );
                             return showBreakdown ? (
                               <div className="text-xs text-muted-foreground space-y-0.5 mt-0.5">
                                 <p>
-                                  {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)} ·{" "}
+                                  {t("shopBillingMembership")}:{" "}
+                                  <LoyaltyMembershipFigures
+                                    listAmount={listMonthly}
+                                    chargedAmount={membershipCharged}
+                                    percent={loyaltyPercent}
+                                    eligible={loyaltyActive}
+                                  />
+                                  {" · "}
                                   {Number(p.socioAmount ?? 0) > 0
                                     ? `${t("socioFeeShort")}: €${Number(p.socioAmount).toFixed(2)} · `
                                     : ""}
-                                  {t("shopBillingShop")}: €{shopCharge.toFixed(2)}
+                                  {discountOnMembership && shopCharge > 0
+                                    ? t("shopBillingShopFullPrice")
+                                    : t("shopBillingShop")}
+                                  : €{shopCharge.toFixed(2)}
                                 </p>
                                 {purchaseLines.length > 0 ? (
                                   <ul className="space-y-0.5">
@@ -1292,7 +1415,26 @@ function BillingTab({
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 justify-end sm:shrink-0">
-                        <span className="text-sm font-bold">€{p.amount}</span>
+                        <span className="text-sm font-bold tabular-nums">
+                          {!paymentHasShopBreakdown(p) &&
+                          Number(p.shopAmount ?? 0) <= 0 &&
+                          Number(p.socioAmount ?? 0) <= 0 &&
+                          membershipDiscountApplied(
+                            listMonthly,
+                            Number(p.amount),
+                            loyaltyPercent,
+                            loyaltyActive
+                          ) ? (
+                            <LoyaltyMembershipFigures
+                              listAmount={listMonthly}
+                              chargedAmount={Number(p.amount)}
+                              percent={loyaltyPercent}
+                              eligible={loyaltyActive}
+                            />
+                          ) : (
+                            <>€{p.amount}</>
+                          )}
+                        </span>
                         <Badge
                           variant={normalizedPaymentPaid(p.status) ? "default" : "outline"}
                           className={

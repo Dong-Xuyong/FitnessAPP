@@ -121,6 +121,7 @@ export default function CoachRevenuePage() {
             sessionDurationMin: row.sessionDurationMin,
             sessionsPerWeek: row.sessionsPerWeek,
             loyaltyDiscountPercent: row.loyaltyDiscountPercent,
+            loyaltyDiscountAfterYears: row.loyaltyDiscountAfterYears,
             coachingStartedOn: row.coachingStartedOn,
             socioFee: row.socioFee,
           },
@@ -345,7 +346,24 @@ export default function CoachRevenuePage() {
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right tabular-nums">{formatEuro(row.amount)}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {formatEuro(row.amount)}
+                              {row.loyaltyListAmount != null && row.loyaltyDueAmount != null ? (
+                                <p className="text-[11px] text-muted-foreground font-normal">
+                                  {t("shopBillingMembership")}:{" "}
+                                  <span className="line-through">
+                                    {formatEuro(row.loyaltyListAmount)}
+                                  </span>
+                                  {" → "}
+                                  {formatEuro(row.loyaltyDueAmount)} ({row.loyaltyPercent}%)
+                                </p>
+                              ) : null}
+                              {row.loyaltyShopAmount != null && row.loyaltyShopAmount > 0 ? (
+                                <p className="text-[11px] text-muted-foreground font-normal">
+                                  {t("shopBillingShopFullPrice")}: {formatEuro(row.loyaltyShopAmount)}
+                                </p>
+                              ) : null}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

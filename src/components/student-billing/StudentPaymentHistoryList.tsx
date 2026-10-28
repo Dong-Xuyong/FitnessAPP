@@ -7,13 +7,26 @@ import { formatBillingPeriodLabel } from "@/lib/billing-period-label";
 import { paymentHasShopBreakdown } from "@/lib/shop-billing";
 import type { StudentPaymentRecord } from "@/hooks/use-student-billing-data";
 import { paymentMethodLabel } from "@/components/student-billing/payment-method-label";
+import {
+  LoyaltyMembershipFigures,
+  membershipDiscountApplied,
+} from "@/components/student-billing/LoyaltyMembershipFigures";
 
 type Props = {
   payments: StudentPaymentRecord[];
   defaultMethod?: string;
+  listMonthlyRate?: number;
+  loyaltyDiscountPercent?: number;
+  loyaltyDiscountActive?: boolean;
 };
 
-export function StudentPaymentHistoryList({ payments, defaultMethod }: Props) {
+export function StudentPaymentHistoryList({
+  payments,
+  defaultMethod,
+  listMonthlyRate = 0,
+  loyaltyDiscountPercent = 0,
+  loyaltyDiscountActive = false,
+}: Props) {
   const { t, locale } = useI18n();
 
   if (payments.length === 0) {
@@ -34,6 +47,24 @@ export function StudentPaymentHistoryList({ payments, defaultMethod }: Props) {
         );
         const amount = Number.isFinite(p.amount) ? p.amount! : 0;
         const showBreakdown = paymentHasShopBreakdown(p);
+        const membershipCharged = Number(p.baseAmount ?? 0);
+        const shop = Number(p.shopAmount ?? 0);
+        const socio = Number(p.socioAmount ?? 0);
+        const discountOnMembership = membershipDiscountApplied(
+          listMonthlyRate,
+          membershipCharged,
+          loyaltyDiscountPercent,
+          loyaltyDiscountActive
+        );
+        const bareAmountIsMembership = !showBreakdown && shop <= 0 && socio <= 0;
+        const discountOnTotal =
+          bareAmountIsMembership &&
+          membershipDiscountApplied(
+            listMonthlyRate,
+            amount,
+            loyaltyDiscountPercent,
+            loyaltyDiscountActive
+          );
         const paidAtRaw = p.paidAt;
         const paidAtLabel =
           paidAtRaw && Number.isFinite(Date.parse(paidAtRaw))
@@ -51,7 +82,18 @@ export function StudentPaymentHistoryList({ payments, defaultMethod }: Props) {
                 <Badge className="bg-green-100 text-green-800 dark:bg-green-950/50 dark:text-green-200">
                   {t("paid")}
                 </Badge>
-                <span className="text-sm font-bold tabular-nums">€{amount.toFixed(2)}</span>
+                <span className="text-sm font-bold tabular-nums">
+                  {discountOnTotal ? (
+                    <LoyaltyMembershipFigures
+                      listAmount={listMonthlyRate}
+                      chargedAmount={amount}
+                      percent={loyaltyDiscountPercent}
+                      eligible={loyaltyDiscountActive}
+                    />
+                  ) : (
+                    <>€{amount.toFixed(2)}</>
+                  )}
+                </span>
               </div>
             </div>
             <ul className="text-xs space-y-1.5 text-muted-foreground">
@@ -59,17 +101,27 @@ export function StudentPaymentHistoryList({ payments, defaultMethod }: Props) {
                 <>
                   <li className="flex items-center gap-2">
                     <Percent className="h-3.5 w-3.5 shrink-0" />
-                    {t("shopBillingMembership")}: €{Number(p.baseAmount ?? 0).toFixed(2)}
+                    {t("shopBillingMembership")}:{" "}
+                    <LoyaltyMembershipFigures
+                      listAmount={listMonthlyRate}
+                      chargedAmount={membershipCharged}
+                      percent={loyaltyDiscountPercent}
+                      eligible={loyaltyDiscountActive}
+                    />
                   </li>
-                  {Number(p.socioAmount ?? 0) > 0 ? (
+                  {socio > 0 ? (
                     <li className="flex items-center gap-2">
                       <Banknote className="h-3.5 w-3.5 shrink-0" />
-                      {t("socioFeeShort")}: €{Number(p.socioAmount).toFixed(2)}
+                      {t("socioFeeShort")}: €{socio.toFixed(2)}
                     </li>
                   ) : null}
                   <li className="flex items-center gap-2">
                     <ShoppingBag className="h-3.5 w-3.5 shrink-0" />
-                    {t("shopBillingShop")}: €{Number(p.shopAmount ?? 0).toFixed(2)}
+                    {discountOnMembership && shop > 0
+                      ? t("shopBillingShopFullPrice")
+                      : t("shopBillingShop")}
+                    : €
+                    {shop.toFixed(2)}
                   </li>
                 </>
               ) : null}

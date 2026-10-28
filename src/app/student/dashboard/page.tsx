@@ -46,10 +46,12 @@ export default function StudentDashboardPage() {
   const { user, isUserLoading } = useUser();
   const db = useFirestore();
   const { t } = useI18n();
-  const { currentPeriodPending, paymentMethod, loading: billingLoading } = useStudentBillingData(
-    db,
-    user?.uid
-  );
+  const {
+    currentPeriodPending,
+    paymentMethod,
+    plan: billingPlan,
+    loading: billingLoading,
+  } = useStudentBillingData(db, user?.uid);
 
   const [activeTab, setActiveTab] = useState<DashTab>("home");
 
@@ -278,6 +280,9 @@ export default function StudentDashboardPage() {
             <StudentPendingPaymentCard
               payment={currentPeriodPending}
               paymentMethod={paymentMethod}
+              listMonthlyRate={billingPlan?.listMonthlyRate}
+              loyaltyDiscountPercent={billingPlan?.loyaltyDiscountPercent}
+              loyaltyDiscountActive={billingPlan?.loyaltyDiscountActive}
             />
           ) : null}
 

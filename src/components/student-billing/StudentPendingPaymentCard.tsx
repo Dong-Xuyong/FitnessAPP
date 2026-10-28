@@ -10,18 +10,28 @@ import { formatBillingPeriodLabel } from "@/lib/billing-period-label";
 import { paymentHasShopBreakdown } from "@/lib/shop-billing";
 import type { StudentPaymentRecord } from "@/hooks/use-student-billing-data";
 import { paymentMethodLabel } from "@/components/student-billing/payment-method-label";
+import {
+  LoyaltyMembershipFigures,
+  membershipDiscountApplied,
+} from "@/components/student-billing/LoyaltyMembershipFigures";
 
 type Props = {
   payment: StudentPaymentRecord;
   paymentMethod: string;
   /** Hide CTA when already on the billing page. */
   hideInstructionsLink?: boolean;
+  listMonthlyRate?: number;
+  loyaltyDiscountPercent?: number;
+  loyaltyDiscountActive?: boolean;
 };
 
 export function StudentPendingPaymentCard({
   payment,
   paymentMethod,
   hideInstructionsLink = false,
+  listMonthlyRate = 0,
+  loyaltyDiscountPercent = 0,
+  loyaltyDiscountActive = false,
 }: Props) {
   const { t, locale } = useI18n();
   const periodLabel = formatBillingPeriodLabel(
@@ -30,6 +40,19 @@ export function StudentPendingPaymentCard({
   );
   const amount = Number.isFinite(payment.amount) ? payment.amount! : 0;
   const showBreakdown = paymentHasShopBreakdown(payment);
+  const membershipCharged = Number(payment.baseAmount ?? 0);
+  const discountOnMembership = membershipDiscountApplied(
+    listMonthlyRate,
+    membershipCharged,
+    loyaltyDiscountPercent,
+    loyaltyDiscountActive
+  );
+  const shop = Number(payment.shopAmount ?? 0);
+  const socio = Number(payment.socioAmount ?? 0);
+  const bareAmountIsMembership = !showBreakdown && shop <= 0 && socio <= 0;
+  const discountOnTotal =
+    bareAmountIsMembership &&
+    membershipDiscountApplied(listMonthlyRate, amount, loyaltyDiscountPercent, loyaltyDiscountActive);
 
   return (
     <Card className="border-amber-500/40 bg-amber-500/5">
@@ -47,7 +70,18 @@ export function StudentPendingPaymentCard({
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="font-semibold capitalize">{periodLabel}</p>
-          <p className="text-lg font-bold tabular-nums">€{amount.toFixed(2)}</p>
+          <p className="text-lg font-bold tabular-nums">
+            {discountOnTotal ? (
+              <LoyaltyMembershipFigures
+                listAmount={listMonthlyRate}
+                chargedAmount={amount}
+                percent={loyaltyDiscountPercent}
+                eligible={loyaltyDiscountActive}
+              />
+            ) : (
+              <>€{amount.toFixed(2)}</>
+            )}
+          </p>
         </div>
         <ul className="text-sm space-y-2">
           {showBreakdown ? (
@@ -55,21 +89,31 @@ export function StudentPendingPaymentCard({
               <li className="flex items-center gap-2 text-muted-foreground">
                 <Percent className="h-4 w-4 shrink-0 text-primary" />
                 <span>
-                  {t("shopBillingMembership")}: €{Number(payment.baseAmount ?? 0).toFixed(2)}
+                  {t("shopBillingMembership")}:{" "}
+                  <LoyaltyMembershipFigures
+                    listAmount={listMonthlyRate}
+                    chargedAmount={membershipCharged}
+                    percent={loyaltyDiscountPercent}
+                    eligible={loyaltyDiscountActive}
+                  />
                 </span>
               </li>
-              {Number(payment.socioAmount ?? 0) > 0 ? (
+              {socio > 0 ? (
                 <li className="flex items-center gap-2 text-muted-foreground">
                   <Banknote className="h-4 w-4 shrink-0 text-primary" />
                   <span>
-                    {t("socioFeeShort")}: €{Number(payment.socioAmount).toFixed(2)}
+                    {t("socioFeeShort")}: €{socio.toFixed(2)}
                   </span>
                 </li>
               ) : null}
               <li className="flex items-center gap-2 text-muted-foreground">
                 <ShoppingBag className="h-4 w-4 shrink-0 text-primary" />
                 <span>
-                  {t("shopBillingShop")}: €{Number(payment.shopAmount ?? 0).toFixed(2)}
+                  {discountOnMembership && shop > 0
+                    ? t("shopBillingShopFullPrice")
+                    : t("shopBillingShop")}
+                  : €
+                  {shop.toFixed(2)}
                 </span>
               </li>
             </>

@@ -39,6 +39,9 @@ export default function StudentBillingPage() {
           payment={currentPeriodPending}
           paymentMethod={paymentMethod}
           hideInstructionsLink
+          listMonthlyRate={plan?.listMonthlyRate}
+          loyaltyDiscountPercent={plan?.loyaltyDiscountPercent}
+          loyaltyDiscountActive={plan?.loyaltyDiscountActive}
         />
       ) : null}
 
@@ -60,7 +63,13 @@ export default function StudentBillingPage() {
           <CardTitle className="text-lg">{t("paymentHistory")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <StudentPaymentHistoryList payments={paidPayments} defaultMethod={paymentMethod} />
+          <StudentPaymentHistoryList
+            payments={paidPayments}
+            defaultMethod={paymentMethod}
+            listMonthlyRate={plan?.listMonthlyRate}
+            loyaltyDiscountPercent={plan?.loyaltyDiscountPercent}
+            loyaltyDiscountActive={plan?.loyaltyDiscountActive}
+          />
         </CardContent>
       </Card>
     </div>
