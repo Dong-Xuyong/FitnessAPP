@@ -1,4 +1,10 @@
-import { applyStoredLoyaltyDiscount, resolveMonthlyRate, roundMoney } from "@/lib/shop-billing";
+import {
+  applyStoredLoyaltyDiscount,
+  loyaltyDiscountEligible,
+  loyaltyMembershipQuote,
+  resolveMonthlyRate,
+  roundMoney,
+} from "@/lib/shop-billing";
 import {
   currentBillingPeriod,
   nextBillingPeriod,
@@ -31,6 +37,7 @@ export type CoachRevenueRosterFields = {
   sessionDurationMin?: unknown;
   sessionsPerWeek?: unknown;
   loyaltyDiscountPercent?: unknown;
+  loyaltyDiscountAfterYears?: unknown;
   coachingStartedOn?: unknown;
   socioFee?: unknown;
 };
@@ -66,6 +73,13 @@ export type ForecastStudentRow = {
   amount: number;
   source: "payment_row" | "monthly_rate";
   paid: boolean;
+  /** Membership list price when this row's membership is the loyalty price. */
+  loyaltyListAmount?: number;
+  /** Membership after the loyalty percent. Shop totals stay outside this pair. */
+  loyaltyDueAmount?: number;
+  loyaltyPercent?: number;
+  /** Shop portion that stayed at full price, when the membership discount applies. */
+  loyaltyShopAmount?: number;
 };
 
 export type CurrentPeriodMix = {
@@ -177,6 +191,54 @@ function paymentsForPeriod(
   return payments.filter((p) => canonicalBillingPeriodYm(p.period) === period);
 }
 
+function discountedMembership(
+  roster: CoachRevenueRosterFields,
+  payments: CoachRevenuePayment[],
+  now: Date
+): number {
+  return applyStoredLoyaltyDiscount(
+    resolveMonthlyRate(roster),
+    roster.loyaltyDiscountPercent,
+    roster.coachingStartedOn,
+    now,
+    payments,
+    roster.loyaltyDiscountAfterYears
+  );
+}
+
+function loyaltyPriceFields(
+  roster: CoachRevenueRosterFields,
+  payments: CoachRevenuePayment[],
+  chargedMembership: number,
+  shopAmount: number,
+  now: Date
+): Pick<
+  ForecastStudentRow,
+  "loyaltyListAmount" | "loyaltyDueAmount" | "loyaltyPercent" | "loyaltyShopAmount"
+> {
+  const list = resolveMonthlyRate(roster);
+  const eligible = loyaltyDiscountEligible(
+    roster.coachingStartedOn,
+    now,
+    roster.loyaltyDiscountAfterYears,
+    payments
+  );
+  const quote = loyaltyMembershipQuote(
+    list,
+    chargedMembership,
+    roster.loyaltyDiscountPercent,
+    eligible
+  );
+  if (!quote.discountApplied) return {};
+  const shop = roundMoney(Math.max(0, shopAmount));
+  return {
+    loyaltyListAmount: quote.listAmount,
+    loyaltyDueAmount: quote.discountedAmount,
+    loyaltyPercent: quote.percent,
+    ...(shop > 0 ? { loyaltyShopAmount: shop } : {}),
+  };
+}
+
 function emptyMonth(period: string, isForecast = false): MonthlyRevenueRow {
   return {
     period,
@@ -223,13 +285,18 @@ export function forecastStudentAmount(
   student: CoachRevenueStudent,
   nextPeriod: string
 ): ForecastStudentRow | null {
+  const now = new Date();
   const existing = paymentsForPeriod(student.payments, nextPeriod);
   if (existing.length > 0) {
     let total = 0;
+    let membership = 0;
+    let shop = 0;
     let paid = false;
     for (const payment of existing) {
       const split = splitPaymentAmounts(payment);
       total = roundMoney(total + split.total);
+      membership = roundMoney(membership + split.membership);
+      shop = roundMoney(shop + split.shop);
       if (normalizedPaymentPaid(payment.status)) paid = true;
     }
     if (total <= 0 && !paid) return null;
@@ -239,18 +306,14 @@ export function forecastStudentAmount(
       amount: total,
       source: "payment_row",
       paid,
+      ...loyaltyPriceFields(student.roster, student.payments, membership, shop, now),
     };
   }
 
   if (!isBillingActive(student.roster)) return null;
+  const dueMembership = discountedMembership(student.roster, student.payments, now);
   const rate = roundMoney(
-    applyStoredLoyaltyDiscount(
-      resolveMonthlyRate(student.roster),
-      student.roster.loyaltyDiscountPercent,
-      student.roster.coachingStartedOn,
-      new Date(),
-      student.payments
-    ) + roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
+    dueMembership + roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
   );
   if (!Number.isFinite(rate) || rate <= 0) return null;
   return {
@@ -259,6 +322,7 @@ export function forecastStudentAmount(
     amount: rate,
     source: "monthly_rate",
     paid: false,
+    ...loyaltyPriceFields(student.roster, student.payments, dueMembership, 0, now),
   };
 }
 
@@ -300,13 +364,8 @@ function currentPeriodMixFromStudents(
 
     if (!isBillingActive(student.roster)) continue;
     const rate = roundMoney(
-      applyStoredLoyaltyDiscount(
-        resolveMonthlyRate(student.roster),
-        student.roster.loyaltyDiscountPercent,
-        student.roster.coachingStartedOn,
-        now,
-        student.payments
-      ) + roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
+      discountedMembership(student.roster, student.payments, now) +
+        roundMoney(Math.max(0, Number(student.roster.socioFee) || 0))
     );
     if (rate <= 0) continue;
     if (overdueNow) {

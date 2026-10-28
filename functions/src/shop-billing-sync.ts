@@ -215,7 +215,8 @@ export async function syncShopPaymentForPeriod(
     roster.loyaltyDiscountPercent,
     roster.coachingStartedOn,
     new Date(),
-    paymentRows
+    paymentRows,
+    roster.loyaltyDiscountAfterYears
   );
   const registrations = await loadStudentPurchases(trainerId, authStudentId);
 

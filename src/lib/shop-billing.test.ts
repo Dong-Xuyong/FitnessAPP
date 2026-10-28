@@ -29,6 +29,8 @@ import {
   resolveBillableShopPaymentPeriod,
   applyLoyaltyDiscount,
   applyStoredLoyaltyDiscount,
+  clampLoyaltyDiscountAfterYears,
+  loyaltyMembershipQuote,
   coachingTenure,
   effectiveLoyaltyStartedOn,
   formatLoyaltyTenureLabel,
@@ -432,6 +434,39 @@ describe("shop-billing", () => {
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), paid), 95);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, "", new Date(2026, 9, 1), paid), 100);
     assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2026, 9, 1), []), 95);
+  });
+
+  it("applyStoredLoyaltyDiscount uses the coach's wait and defaults to one year", () => {
+    const start = "2025-10-01";
+    const paid = paidMonths("2025-10", "2027-09");
+    const atOneYear = new Date(2026, 9, 1);
+    const atTwoYears = new Date(2027, 9, 1);
+    assert.equal(clampLoyaltyDiscountAfterYears(undefined), 1);
+    assert.equal(clampLoyaltyDiscountAfterYears(""), 1);
+    assert.equal(clampLoyaltyDiscountAfterYears(null), 1);
+    assert.equal(clampLoyaltyDiscountAfterYears(-1), 1);
+    assert.equal(clampLoyaltyDiscountAfterYears("nope"), 1);
+    assert.equal(clampLoyaltyDiscountAfterYears(2.9), 2);
+    assert.equal(clampLoyaltyDiscountAfterYears(0), 0);
+    assert.equal(clampLoyaltyDiscountAfterYears(40), 30);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atOneYear, paid, 2), 100);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atTwoYears, paid, 2), 95);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, atOneYear, paid, undefined), 95);
+    assert.equal(applyStoredLoyaltyDiscount(100, 5, start, new Date(2025, 9, 1), [], 0), 95);
+    assert.equal(loyaltyDiscountEligible(start, atOneYear, 2, paid), false);
+    assert.equal(loyaltyDiscountEligible(start, atTwoYears, "2", paid), true);
+  });
+
+  it("loyaltyMembershipQuote shows list and discounted prices only when the charge matches", () => {
+    const on = loyaltyMembershipQuote(100, 95, 5, true);
+    assert.equal(on.discountApplied, true);
+    assert.equal(on.listAmount, 100);
+    assert.equal(on.discountedAmount, 95);
+    assert.equal(on.percent, 5);
+    assert.equal(loyaltyMembershipQuote(100, 100, 5, true).discountApplied, false);
+    assert.equal(loyaltyMembershipQuote(100, 95, 5, false).discountApplied, false);
+    assert.equal(loyaltyMembershipQuote(100, 90, 5, true).discountApplied, false);
+    assert.equal(loyaltyMembershipQuote(100, 95, 0, true).discountApplied, false);
   });
 
   it("a gap restarts loyalty on the 1st of the next month", () => {

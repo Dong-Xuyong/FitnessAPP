@@ -6,6 +6,7 @@ import { Calendar, Clock, Euro, Repeat } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { StudentBillingPlan } from "@/hooks/use-student-billing-data";
 import { paymentMethodLabel } from "@/components/student-billing/payment-method-label";
+import { LoyaltyMembershipFigures } from "@/components/student-billing/LoyaltyMembershipFigures";
 
 type Props = {
   plan: StudentBillingPlan;
@@ -26,6 +27,8 @@ export function StudentCurrentPlanCard({ plan }: Props) {
     !plan.loyaltyDiscountActive && plan.loyaltyDiscountPercent > 0 && plan.listMonthlyRate > 0;
   const monthlyLabel =
     plan.monthlyRate > 0 || showDiscount ? `€${plan.monthlyRate.toFixed(2)}` : t("notSet");
+  const waitUnit =
+    plan.loyaltyDiscountAfterYears === 1 ? t("loyaltyYearOne") : t("loyaltyYearMany");
 
   return (
     <Card>
@@ -57,17 +60,24 @@ export function StudentCurrentPlanCard({ plan }: Props) {
             <Euro className="h-4 w-4 shrink-0 text-primary mt-0.5" />
             <div>
               <p className="text-xs text-muted-foreground">{t("monthlyRate")}</p>
-              <p className="font-semibold tabular-nums">{monthlyLabel}</p>
               {showDiscount ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("loyaltyDiscountApplied")
-                    .replace("{list}", plan.listMonthlyRate.toFixed(2))
-                    .replace("{percent}", String(plan.loyaltyDiscountPercent))}
+                <p className="font-semibold tabular-nums">
+                  <LoyaltyMembershipFigures
+                    listAmount={plan.listMonthlyRate}
+                    chargedAmount={plan.monthlyRate}
+                    percent={plan.loyaltyDiscountPercent}
+                    eligible
+                  />
                 </p>
-              ) : null}
+              ) : (
+                <p className="font-semibold tabular-nums">{monthlyLabel}</p>
+              )}
               {showWaiting ? (
                 <p className="text-xs text-muted-foreground">
-                  {t("loyaltyDiscountPending").replace("{percent}", String(plan.loyaltyDiscountPercent))}
+                  {t("loyaltyDiscountPending")
+                    .replace("{percent}", String(plan.loyaltyDiscountPercent))
+                    .replace("{years}", String(plan.loyaltyDiscountAfterYears))
+                    .replace("{unit}", waitUnit)}
                 </p>
               ) : null}
               {plan.socioFee > 0 ? (

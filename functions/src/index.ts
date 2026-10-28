@@ -161,7 +161,8 @@ export const enforcePaymentBlocking = onSchedule(
           roster.loyaltyDiscountPercent,
           roster.coachingStartedOn,
           lisbonNow,
-          paymentRows
+          paymentRows,
+          roster.loyaltyDiscountAfterYears
         );
         for (const p of payDocs) {
           const next = rebasePendingLoyaltyAmount(

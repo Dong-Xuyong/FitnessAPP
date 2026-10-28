@@ -142,6 +142,9 @@ describe("forecastStudentAmount", () => {
     );
     assert.equal(row?.amount, 95);
     assert.equal(row?.source, "monthly_rate");
+    assert.equal(row?.loyaltyListAmount, 100);
+    assert.equal(row?.loyaltyDueAmount, 95);
+    assert.equal(row?.loyaltyPercent, 5);
 
     const gapped = payments.map((payment, index) =>
       index === payments.length - 1 ? { ...payment, status: "pending" } : payment
@@ -151,6 +154,52 @@ describe("forecastStudentAmount", () => {
       nextPeriod
     );
     assert.equal(withGap?.amount, 100);
+    assert.equal(withGap?.loyaltyListAmount, undefined);
+  });
+
+  it("forecast keeps full price until the coach's loyalty wait, not only one year", () => {
+    const now = new Date();
+    const start = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+    const startOn = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
+    const month = now.getMonth() + 1;
+    const nextPeriod =
+      month === 12
+        ? `${now.getFullYear() + 1}-01`
+        : `${now.getFullYear()}-${String(month + 1).padStart(2, "0")}`;
+    const payments = paidMonthsThroughRequiredEnd(
+      startOn.slice(0, 7),
+      now
+    );
+    const base = {
+      billingStatus: "active",
+      monthlyRate: 100,
+      loyaltyDiscountPercent: 5,
+      coachingStartedOn: startOn,
+    };
+    const waiting = forecastStudentAmount(
+      student({
+        id: "wait",
+        name: "Wait",
+        roster: { ...base, loyaltyDiscountAfterYears: 2 },
+        payments,
+      }),
+      nextPeriod
+    );
+    assert.equal(waiting?.amount, 100);
+    assert.equal(waiting?.loyaltyDueAmount, undefined);
+
+    const ready = forecastStudentAmount(
+      student({
+        id: "ready",
+        name: "Ready",
+        roster: { ...base, loyaltyDiscountAfterYears: 1 },
+        payments,
+      }),
+      nextPeriod
+    );
+    assert.equal(ready?.amount, 95);
+    assert.equal(ready?.loyaltyListAmount, 100);
+    assert.equal(ready?.loyaltyDueAmount, 95);
   });
 
   it("returns null for inactive students without a next-period row", () => {
