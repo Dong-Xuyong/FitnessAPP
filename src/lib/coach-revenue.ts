@@ -2,6 +2,7 @@ import {
   applyStoredLoyaltyDiscount,
   loyaltyDiscountEligible,
   loyaltyMembershipQuote,
+  loyaltyWaitMonths,
   resolveMonthlyRate,
   roundMoney,
 } from "@/lib/shop-billing";
@@ -37,6 +38,8 @@ export type CoachRevenueRosterFields = {
   sessionDurationMin?: unknown;
   sessionsPerWeek?: unknown;
   loyaltyDiscountPercent?: unknown;
+  loyaltyDiscountAfterMonths?: unknown;
+  /** Older roster docs. Read as months × 12 when the months field is absent. */
   loyaltyDiscountAfterYears?: unknown;
   coachingStartedOn?: unknown;
   socioFee?: unknown;
@@ -202,7 +205,7 @@ function discountedMembership(
     roster.coachingStartedOn,
     now,
     payments,
-    roster.loyaltyDiscountAfterYears
+    loyaltyWaitMonths(roster)
   );
 }
 
@@ -220,7 +223,7 @@ function loyaltyPriceFields(
   const eligible = loyaltyDiscountEligible(
     roster.coachingStartedOn,
     now,
-    roster.loyaltyDiscountAfterYears,
+    loyaltyWaitMonths(roster),
     payments
   );
   const quote = loyaltyMembershipQuote(

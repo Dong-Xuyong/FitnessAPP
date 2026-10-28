@@ -638,21 +638,48 @@ export function clampLoyaltyDiscountPercent(raw: unknown): number {
   return Math.min(100, n);
 }
 
-/** Discount applies once coaching has lasted this many whole years. */
-export const LOYALTY_DISCOUNT_AFTER_YEARS = 1;
+/** Discount applies once this many complete months have passed without a missed payment. */
+export const LOYALTY_DISCOUNT_AFTER_MONTHS = 12;
+
+/** Previous year cap was 30. Months use the same ceiling. */
+export const LOYALTY_DISCOUNT_AFTER_MONTHS_MAX = 30 * 12;
+
+function nonNegativeWhole(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const whole = Math.floor(n);
+  if (whole < 0) return null;
+  return whole;
+}
 
 /**
- * Whole years before the loyalty percent applies.
- * Missing or invalid values stay at {@link LOYALTY_DISCOUNT_AFTER_YEARS}.
+ * Whole months before the loyalty percent applies.
+ * Missing or invalid values stay at {@link LOYALTY_DISCOUNT_AFTER_MONTHS}.
  * `0` applies the discount as soon as the loyalty clock has a start date.
  */
-export function clampLoyaltyDiscountAfterYears(raw: unknown): number {
-  if (raw == null || raw === "") return LOYALTY_DISCOUNT_AFTER_YEARS;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return LOYALTY_DISCOUNT_AFTER_YEARS;
-  const years = Math.floor(n);
-  if (years < 0) return LOYALTY_DISCOUNT_AFTER_YEARS;
-  return Math.min(30, years);
+export function clampLoyaltyDiscountAfterMonths(raw: unknown): number {
+  const months = nonNegativeWhole(raw);
+  if (months == null) return LOYALTY_DISCOUNT_AFTER_MONTHS;
+  return Math.min(LOYALTY_DISCOUNT_AFTER_MONTHS_MAX, months);
+}
+
+/**
+ * Months stored on a roster doc.
+ * Prefers `loyaltyDiscountAfterMonths`. A doc that only has the old
+ * `loyaltyDiscountAfterYears` converts with years × 12.
+ */
+export function loyaltyWaitMonths(source?: object | null): number {
+  if (source == null) return LOYALTY_DISCOUNT_AFTER_MONTHS;
+  const row = source as {
+    loyaltyDiscountAfterMonths?: unknown;
+    loyaltyDiscountAfterYears?: unknown;
+  };
+  const months = nonNegativeWhole(row.loyaltyDiscountAfterMonths);
+  if (months != null) return Math.min(LOYALTY_DISCOUNT_AFTER_MONTHS_MAX, months);
+  const years = nonNegativeWhole(row.loyaltyDiscountAfterYears);
+  if (years != null) return Math.min(LOYALTY_DISCOUNT_AFTER_MONTHS_MAX, years * 12);
+  return LOYALTY_DISCOUNT_AFTER_MONTHS;
 }
 
 /** Membership after the coach's loyalty percent. Shop totals stay full price. */
@@ -769,7 +796,8 @@ export function effectiveLoyaltyStartedOn(
   return restart > started ? restart : started;
 }
 
-function coachingTenureYears(startedOn: string, now: Date): number | null {
+/** Whole months since YYYY-MM-DD. Same day rule as coachingTenure in src/lib/shop-billing.ts. */
+function coachingCompleteMonths(startedOn: string, now: Date): number | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(startedOn.trim());
   if (!match) return null;
   const year = Number(match[1]);
@@ -782,31 +810,35 @@ function coachingTenureYears(startedOn: string, now: Date): number | null {
   let years = now.getFullYear() - start.getFullYear();
   let months = now.getMonth() - start.getMonth();
   if (now.getDate() < start.getDate()) months -= 1;
-  if (months < 0) years -= 1;
-  return years < 0 ? 0 : years;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years < 0) return 0;
+  return years * 12 + months;
 }
 
 export function loyaltyDiscountEligible(
   startedOn: unknown,
   now = new Date(),
-  afterYears: unknown = LOYALTY_DISCOUNT_AFTER_YEARS,
+  afterMonths: unknown = LOYALTY_DISCOUNT_AFTER_MONTHS,
   payments?: LoyaltyPaymentRow[] | null
 ): boolean {
-  const years = coachingTenureYears(effectiveLoyaltyStartedOn(startedOn, payments, now), now);
-  return years != null && years >= clampLoyaltyDiscountAfterYears(afterYears);
+  const months = coachingCompleteMonths(effectiveLoyaltyStartedOn(startedOn, payments, now), now);
+  return months != null && months >= clampLoyaltyDiscountAfterMonths(afterMonths);
 }
 
-/** List price until the configured uninterrupted years. A missed month restarts that wait. */
+/** List price until the configured uninterrupted months. A missed month restarts that wait. */
 export function applyStoredLoyaltyDiscount(
   monthlyRate: number,
   percent: unknown,
   startedOn: unknown,
   now = new Date(),
   payments?: LoyaltyPaymentRow[] | null,
-  afterYears: unknown = LOYALTY_DISCOUNT_AFTER_YEARS
+  afterMonths: unknown = LOYALTY_DISCOUNT_AFTER_MONTHS
 ): number {
   const rate = roundMoney(Math.max(0, Number(monthlyRate) || 0));
-  if (!loyaltyDiscountEligible(startedOn, now, afterYears, payments)) return rate;
+  if (!loyaltyDiscountEligible(startedOn, now, afterMonths, payments)) return rate;
   return applyLoyaltyDiscount(rate, percent);
 }
 

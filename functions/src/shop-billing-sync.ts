@@ -4,6 +4,7 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import {
   applyStoredLoyaltyDiscount,
+  loyaltyWaitMonths,
   buildPaymentAmounts,
   clampSocioFee,
   buildShopBillingPeriodContextForMarkPaid,
@@ -216,7 +217,7 @@ export async function syncShopPaymentForPeriod(
     roster.coachingStartedOn,
     new Date(),
     paymentRows,
-    roster.loyaltyDiscountAfterYears
+    loyaltyWaitMonths(roster)
   );
   const registrations = await loadStudentPurchases(trainerId, authStudentId);
 

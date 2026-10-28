@@ -14,6 +14,7 @@ import {
   applyStoredLoyaltyDiscount,
   buildPaymentAmounts,
   clampSocioFee,
+  loyaltyWaitMonths,
   resolveMonthlyRate,
   type LoyaltyPaymentRow,
 } from "@/lib/shop-billing";
@@ -80,7 +81,7 @@ export async function ensurePendingPaymentForCurrentPeriod(
     roster.coachingStartedOn,
     new Date(),
     paymentRows,
-    roster.loyaltyDiscountAfterYears
+    loyaltyWaitMonths(roster)
   );
   const amounts = buildPaymentAmounts(monthlyRate, 0, clampSocioFee(roster.socioFee));
   const method = String(roster.paymentMethod ?? "mbway") || "mbway";
@@ -134,7 +135,7 @@ export async function ensurePendingPaymentForNextPeriodIfWindow(
     roster.coachingStartedOn,
     now,
     paymentRows,
-    roster.loyaltyDiscountAfterYears
+    loyaltyWaitMonths(roster)
   );
   const socioFee = clampSocioFee(roster.socioFee);
   if ((!Number.isFinite(monthlyRate) || monthlyRate <= 0) && socioFee <= 0) return false;

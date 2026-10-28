@@ -10,11 +10,11 @@ import {
 } from "@/lib/student-payment-due";
 import {
   applyStoredLoyaltyDiscount,
-  clampLoyaltyDiscountAfterYears,
   clampLoyaltyDiscountPercent,
   clampSocioFee,
   effectiveLoyaltyStartedOn,
   loyaltyDiscountEligible,
+  loyaltyWaitMonths,
   resolveMonthlyRate,
 } from "@/lib/shop-billing";
 
@@ -25,7 +25,7 @@ export type StudentBillingPlan = {
   monthlyRate: number;
   listMonthlyRate: number;
   loyaltyDiscountPercent: number;
-  loyaltyDiscountAfterYears: number;
+  loyaltyDiscountAfterMonths: number;
   loyaltyDiscountActive: boolean;
   socioFee: number;
   paymentMethod: string;
@@ -66,12 +66,12 @@ function planFromRoster(
     sessionsPerWeek: roster.sessionsPerWeek,
   });
   const loyaltyDiscountPercent = clampLoyaltyDiscountPercent(roster.loyaltyDiscountPercent);
-  const loyaltyDiscountAfterYears = clampLoyaltyDiscountAfterYears(roster.loyaltyDiscountAfterYears);
+  const loyaltyDiscountAfterMonths = loyaltyWaitMonths(roster);
   const loyaltyStartedOn = effectiveLoyaltyStartedOn(roster.coachingStartedOn, payments);
   const loyaltyDiscountActive = loyaltyDiscountEligible(
     loyaltyStartedOn,
     new Date(),
-    loyaltyDiscountAfterYears
+    loyaltyDiscountAfterMonths
   );
   return {
     billingStatus: String(roster.billingStatus ?? "inactive").trim() || "inactive",
@@ -80,7 +80,7 @@ function planFromRoster(
       Number.isFinite(sessionDurationMin) && sessionDurationMin > 0 ? sessionDurationMin : 60,
     listMonthlyRate,
     loyaltyDiscountPercent,
-    loyaltyDiscountAfterYears,
+    loyaltyDiscountAfterMonths,
     loyaltyDiscountActive,
     socioFee: clampSocioFee(roster.socioFee),
     monthlyRate: applyStoredLoyaltyDiscount(
@@ -89,7 +89,7 @@ function planFromRoster(
       loyaltyStartedOn,
       new Date(),
       undefined,
-      loyaltyDiscountAfterYears
+      loyaltyDiscountAfterMonths
     ),
     paymentMethod: String(roster.paymentMethod ?? "mbway").trim() || "mbway",
   };
