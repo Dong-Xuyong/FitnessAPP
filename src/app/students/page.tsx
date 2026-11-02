@@ -21,6 +21,7 @@ import { useI18n } from "@/lib/i18n";
 import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection } from "firebase/firestore";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
+import { firstMemberNumber, memberNumberMatchesQuery } from "@/lib/member-number";
 import {
   displayedRosterPaymentStatus,
   fetchRosterPaymentStatusMap,
@@ -110,7 +111,9 @@ export default function StudentsPage() {
         const row = s as Record<string, unknown>;
         const name = getStudentDisplayName(row, nameFallback).toLowerCase();
         const email = getStudentEmail(row).toLowerCase();
-        return name.includes(q) || email.includes(q);
+        const rosterRow = rosterByStudentId[String(s.id)] as Record<string, unknown> | undefined;
+        const memberNumber = firstMemberNumber(rosterRow?.memberNumber, row.memberNumber);
+        return name.includes(q) || email.includes(q) || memberNumberMatchesQuery(memberNumber, q);
       })
       .sort((a, b) => {
         const rowA = a as Record<string, unknown>;
@@ -123,7 +126,7 @@ export default function StudentsPage() {
         if (cmp !== 0) return cmp;
         return getStudentEmail(rowA).localeCompare(getStudentEmail(rowB), sortLocale, collatorOpts);
       });
-  }, [allStudents, user?.uid, q, t, sortLocale]);
+  }, [allStudents, rosterByStudentId, user?.uid, q, t, sortLocale]);
 
   return (
     <Navigation>
@@ -152,6 +155,7 @@ export default function StudentsPage() {
                 const rosterRow = rosterByStudentId[student.id] as Record<string, unknown> | undefined;
                 const displayName = getStudentDisplayName(row, t("unnamed"));
                 const email = getStudentEmail(row);
+                const memberNumber = firstMemberNumber(rosterRow?.memberNumber, row.memberNumber);
                 const privateNote =
                   typeof rosterRow?.coachingNotes === "string" ? rosterRow.coachingNotes.trim() : "";
                 const isBlocked = rosterRow?.blocked === true;
@@ -170,7 +174,7 @@ export default function StudentsPage() {
                         <AvatarImage src={(row.photoUrl as string) || `https://picsum.photos/seed/${student.id}/100/100`} />
                         <AvatarFallback>{initial}</AvatarFallback>
                       </Avatar>
-                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-start sm:items-center min-w-0">
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-start sm:items-center min-w-0">
                         <div className="min-w-0 sm:col-span-1 md:col-span-1">
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">
                             {t("name")}
@@ -181,6 +185,11 @@ export default function StudentsPage() {
                           {rosterRow && (
                             <Badge variant="outline" className="mt-1 text-[10px] uppercase tracking-wide">{t("roster")}</Badge>
                           )}
+                          {memberNumber ? (
+                            <Badge variant="outline" className="mt-1 font-mono text-[10px] tracking-wide md:hidden">
+                              {t("memberNumberShort")} {memberNumber}
+                            </Badge>
+                          ) : null}
                           {isBirthdayToday(rosterRow?.birthDate ?? row.birthDate) && (
                             <Badge
                               variant="outline"
@@ -222,6 +231,12 @@ export default function StudentsPage() {
                               <p className="text-sm text-muted-foreground line-clamp-2">{privateNote}</p>
                             </>
                           )}
+                        </div>
+                        <div className="hidden md:block text-center">
+                          <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">{t("memberNumber")}</p>
+                          <p className={`text-sm font-medium font-mono ${memberNumber ? "" : "text-muted-foreground"}`}>
+                            {memberNumber || "—"}
+                          </p>
                         </div>
                         <div className="hidden md:block text-center">
                           <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">{t("goal")}</p>

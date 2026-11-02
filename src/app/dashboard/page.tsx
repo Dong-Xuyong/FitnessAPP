@@ -26,6 +26,7 @@ import type { SessionSlotAttendance } from "@/lib/session-attendance-streak";
 import { maxAttendanceStreakForCandidates } from "@/lib/session-attendance-streak";
 import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { getStudentDisplayName, getStudentEmail } from "@/lib/student-display";
+import { memberNumberMatchesQuery, normalizeMemberNumber } from "@/lib/member-number";
 import {
   displayedRosterPaymentStatus,
   fetchRosterPaymentStatusMap,
@@ -199,7 +200,7 @@ function DashboardContent() {
         const row = student as StudentRow;
         const name = getStudentDisplayName(row, "").toLowerCase();
         const email = getStudentEmail(row).toLowerCase();
-        return name.includes(q) || email.includes(q);
+        return name.includes(q) || email.includes(q) || memberNumberMatchesQuery(row.memberNumber, q);
       });
     }
     if (dashboardPaymentFilter !== "all") {
@@ -511,6 +512,11 @@ function DashboardContent() {
                                         </p>
                                       )}
                                       <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                      {normalizeMemberNumber(student.memberNumber) ? (
+                                        <Badge variant="outline" className="text-[9px] h-5 font-mono tracking-wide">
+                                          {t("memberNumberShort")} {normalizeMemberNumber(student.memberNumber)}
+                                        </Badge>
+                                      ) : null}
                                       {isBirthday && (
                                         <Badge
                                           variant="outline"
