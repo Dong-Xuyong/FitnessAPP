@@ -449,6 +449,7 @@ service cloud.firestore {
 
     // Global Students Directory
     match /students/{studentId} {
+      // get and list. A signed-in student reads students/{auth.uid}, including memberNumber.
       allow read: if isSignedIn();
       // Students create their own profile. Member number is assigned later by the coach.
       allow create: if isOwner(studentId) && memberNumberAbsent();

@@ -26,6 +26,7 @@ import {
   parseOptionalMassPercent,
   parseOptionalVisceralFatScore,
 } from "@/lib/body-metric-input";
+import { normalizeMemberNumber } from "@/lib/member-number";
 
 const ALLOWED_GOALS = new Set(["muscle_gain", "weight_loss", "endurance", "general"]);
 const ALLOWED_SEX = new Set(["male", "female", "other"]);
@@ -43,6 +44,7 @@ export default function StudentProfilePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [trainerId, setTrainerId] = useState<string | null>(null);
+  const [memberNumber, setMemberNumber] = useState("");
   const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
   const [compositionOpen, setCompositionOpen] = useState(true);
@@ -103,6 +105,7 @@ export default function StudentProfilePage() {
               ? data.goalType
               : "muscle_gain";
           setTrainerId(data.trainerId || null);
+          setMemberNumber(normalizeMemberNumber(data.memberNumber));
           const fatMass =
             data.fatMassPercent != null && Number(data.fatMassPercent) > 0
               ? data.fatMassPercent
@@ -131,6 +134,7 @@ export default function StudentProfilePage() {
           });
         } else {
           setTrainerId(null);
+          setMemberNumber("");
           setFormData((prev) => ({
             ...prev,
             name: authUser.displayName || "",
@@ -423,6 +427,20 @@ export default function StudentProfilePage() {
                   required
                 />
               </div>
+
+              {memberNumber ? (
+                <div className="space-y-2">
+                  <Label htmlFor="memberNumber">{t("memberNumber")}</Label>
+                  <Input
+                    id="memberNumber"
+                    value={memberNumber}
+                    readOnly
+                    aria-readonly="true"
+                    tabIndex={0}
+                    className="font-mono bg-muted/40"
+                  />
+                </div>
+              ) : null}
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
