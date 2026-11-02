@@ -758,7 +758,13 @@ const translations = {
 
     // Students page
     allStudents: "All Students",
-    searchByNameOrEmail: "Search by name or email...",
+    searchByNameOrEmail: "Search by name, email, or member number...",
+    memberNumber: "Member number",
+    memberNumberShort: "No.",
+    memberNumberPlaceholder: "e.g. 0042",
+    memberNumberHint: "Optional. Must be unique in your roster.",
+    memberNumberTooLong: "Member number cannot be longer than 64 characters.",
+    memberNumberCheckFailed: "Could not check whether this member number is already in use. The profile was not saved.",
     name: "Name",
     blocked: "Blocked",
     noEmailOnFile: "No email on file",
@@ -1970,7 +1976,13 @@ const translations = {
 
     // Students page
     allStudents: "Todos os Alunos",
-    searchByNameOrEmail: "Pesquisar por nome ou email...",
+    searchByNameOrEmail: "Pesquisar por nome, email ou n.º de sócio...",
+    memberNumber: "N.º de sócio",
+    memberNumberShort: "N.º",
+    memberNumberPlaceholder: "ex. 0042",
+    memberNumberHint: "Opcional. Tem de ser único na sua lista.",
+    memberNumberTooLong: "O n.º de sócio não pode ter mais de 64 caracteres.",
+    memberNumberCheckFailed: "Não foi possível verificar se o n.º de sócio já existe. O perfil não foi guardado.",
     name: "Nome",
     blocked: "Bloqueado",
     noEmailOnFile: "Sem email registado",

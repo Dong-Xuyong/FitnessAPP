@@ -9,6 +9,11 @@ export interface Student {
   fitnessLevel: FitnessLevel;
   joinDate: string;
   avatarUrl?: string;
+  /**
+   * Optional gym member number, unique per coach (trimmed, compared case-insensitively).
+   * Stored on `personalTrainers/{coachId}/students/{studentId}` and mirrored on `students/{studentId}`.
+   */
+  memberNumber?: string;
 }
 
 export interface Exercise {

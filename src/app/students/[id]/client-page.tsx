@@ -38,6 +38,7 @@ import {
   ListOrdered,
   GripVertical,
   Info,
+  Hash,
 } from "lucide-react";
 import { Calendar as MonthCalendar } from "@/components/ui/calendar";
 import Link from "next/link";
@@ -126,6 +127,13 @@ import { normalizeVacationPeriods } from "@/lib/trainer-availability";
 import { BodyMetricsPanel } from "@/components/BodyMetricsPanel";
 import { isCoachBodyMetricSession } from "@/lib/coach-body-metrics";
 import { ageFromBirthDate, normalizeBirthDateInput } from "@/lib/body-metric-input";
+import {
+  MEMBER_NUMBER_MAX_LENGTH,
+  firstMemberNumber,
+  memberNumberTakenWarning,
+  normalizeMemberNumber,
+} from "@/lib/member-number";
+import { findStudentByCoachAndMemberNumber } from "@/lib/firestore/member-number";
 import {
   buildSuggestedRecordPayment,
   normalizedPaymentPaid,
@@ -1810,10 +1818,12 @@ export default function StudentDetailPage({ id }: { id: string }) {
   const [editStats, setEditStats] = useState({
     name: "",
     birthDate: "",
+    memberNumber: "",
     goalWeightKg: "",
     goalBodyFatPercent: "",
     goalType: "",
   });
+  const [memberNumberWarning, setMemberNumberWarning] = useState<string | null>(null);
   const [expandedAssignedPlanId, setExpandedAssignedPlanId] = useState<string | null>(null);
   const [localPlanOrder, setLocalPlanOrder] = useState<string[] | null>(null);
   const [editingAssignedExerciseKey, setEditingAssignedExerciseKey] = useState<string | null>(null);
@@ -2424,6 +2434,9 @@ export default function StudentDetailPage({ id }: { id: string }) {
         birthDate: editingHeaderProfile
           ? prev.birthDate
           : normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
+        memberNumber: editingHeaderProfile
+          ? prev.memberNumber
+          : firstMemberNumber(roster.memberNumber, global?.memberNumber),
         goalWeightKg: effectiveRoster.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (effectiveRoster as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
@@ -2440,6 +2453,9 @@ export default function StudentDetailPage({ id }: { id: string }) {
         birthDate: editingHeaderProfile
           ? prev.birthDate
           : normalizeBirthDateInput((globalStudent as Record<string, unknown>).birthDate),
+        memberNumber: editingHeaderProfile
+          ? prev.memberNumber
+          : normalizeMemberNumber((globalStudent as Record<string, unknown>).memberNumber),
         goalWeightKg: globalStudent.goalWeightKg?.toString() || "",
         goalBodyFatPercent:
           (globalStudent as { goalBodyFatPercent?: number }).goalBodyFatPercent != null
@@ -2481,6 +2497,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
           studentDisplayNameFromRecord(roster) ||
           studentDisplayNameFromRecord(global || {}),
         birthDate: normalizeBirthDateInput(roster.birthDate ?? global?.birthDate),
+        memberNumber: firstMemberNumber(roster.memberNumber, global?.memberNumber),
       }));
       return;
     }
@@ -2490,6 +2507,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
         ...prev,
         name: studentDisplayNameFromRecord(global),
         birthDate: normalizeBirthDateInput(global.birthDate),
+        memberNumber: normalizeMemberNumber(global.memberNumber),
       }));
     }
   }, [effectiveRoster, globalStudent]);
@@ -2565,8 +2583,76 @@ export default function StudentDetailPage({ id }: { id: string }) {
       return;
     }
 
+    const memberNumber = normalizeMemberNumber(editStats.memberNumber);
+    if (memberNumber.length > MEMBER_NUMBER_MAX_LENGTH) {
+      const message = t("memberNumberTooLong");
+      setMemberNumberWarning(message);
+      toast({
+        variant: "destructive",
+        title: t("error"),
+        description: message,
+      });
+      return;
+    }
+
     setIsSavingHeaderProfile(true);
     try {
+      const selfEmail = String(
+        (effectiveRoster as { email?: string } | null)?.email ||
+          (globalStudent as { email?: string } | null)?.email ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
+      const primaryRosterId = String((effectiveRoster as { id?: string } | null)?.id || id);
+      const excludeIds = new Set<string>([id, primaryRosterId]);
+      const rosterIdsToWrite = new Set<string>([primaryRosterId]);
+      for (const row of (allRoster || []) as Array<{ id?: string; userId?: string; email?: string }>) {
+        const rowId = typeof row.id === "string" ? row.id : "";
+        const rowUserId = typeof row.userId === "string" ? row.userId : "";
+        const rowEmail = String(row.email || "").trim().toLowerCase();
+        const sameStudent =
+          rowId === id ||
+          rowId === primaryRosterId ||
+          rowUserId === id ||
+          rowUserId === primaryRosterId ||
+          (selfEmail.length > 0 && rowEmail === selfEmail);
+        if (!sameStudent) continue;
+        if (rowId) {
+          excludeIds.add(rowId);
+          rosterIdsToWrite.add(rowId);
+        }
+        if (rowUserId) excludeIds.add(rowUserId);
+      }
+
+      let conflict: Awaited<ReturnType<typeof findStudentByCoachAndMemberNumber>> = null;
+      try {
+        conflict = await findStudentByCoachAndMemberNumber(db, user.uid, memberNumber, {
+          excludeIds: [...excludeIds],
+        });
+      } catch {
+        const message = t("memberNumberCheckFailed");
+        setMemberNumberWarning(message);
+        toast({
+          variant: "destructive",
+          title: t("error"),
+          description: message,
+        });
+        return;
+      }
+
+      if (conflict) {
+        const message = memberNumberTakenWarning(memberNumber, conflict.name);
+        setMemberNumberWarning(message);
+        toast({
+          variant: "destructive",
+          title: t("error"),
+          description: message,
+        });
+        return;
+      }
+      setMemberNumberWarning(null);
+
       const { firstName, lastName } = splitStudentName(trimmedName);
       const birthDate = normalizeBirthDateInput(editStats.birthDate);
       const derivedAge = birthDate ? ageFromBirthDate(birthDate) : null;
@@ -2576,20 +2662,36 @@ export default function StudentDetailPage({ id }: { id: string }) {
         firstName,
         lastName,
         birthDate: birthDate || null,
+        memberNumber: memberNumber ? memberNumber : deleteField(),
       };
       if (derivedAge != null) patch.age = derivedAge;
 
-      updateDocumentNonBlocking(studentRef, patch);
+      await updateDoc(doc(db, "personalTrainers", user.uid, "students", primaryRosterId), patch);
+      for (const rosterId of rosterIdsToWrite) {
+        if (rosterId === primaryRosterId) continue;
+        try {
+          await updateDoc(doc(db, "personalTrainers", user.uid, "students", rosterId), {
+            memberNumber: patch.memberNumber,
+          });
+        } catch (mirrorError) {
+          console.warn("Member number saved on the primary roster row, but a duplicate roster row was not updated", mirrorError);
+        }
+      }
 
       const globalUid = coachBodyMetricGlobalStudentId;
       if (globalUid) {
-        updateDocumentNonBlocking(doc(db, "students", globalUid), {
-          name: trimmedName,
-          firstName,
-          lastName,
-          birthDate: birthDate || null,
-          ...(derivedAge != null ? { age: derivedAge } : {}),
-        });
+        try {
+          await updateDoc(doc(db, "students", globalUid), {
+            name: trimmedName,
+            firstName,
+            lastName,
+            birthDate: birthDate || null,
+            memberNumber: memberNumber ? memberNumber : deleteField(),
+            ...(derivedAge != null ? { age: derivedAge } : {}),
+          });
+        } catch (mirrorError) {
+          console.warn("Member number saved on the roster, but the global student mirror failed", mirrorError);
+        }
       }
 
       setEditingHeaderProfile(false);
@@ -2597,7 +2699,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
         title: t("profileUpdated"),
         description: t("coachingDataSaved"),
       });
-    } catch (e) {
+    } catch {
       toast({
         variant: "destructive",
         title: "Error",
@@ -2783,6 +2885,24 @@ export default function StudentDetailPage({ id }: { id: string }) {
                         className="w-[11.5rem]"
                       />
                     </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="coach-student-header-memberNumber">{t("memberNumber")}</Label>
+                      <Input
+                        id="coach-student-header-memberNumber"
+                        value={editStats.memberNumber}
+                        onChange={(e) => {
+                          setMemberNumberWarning(null);
+                          setEditStats({ ...editStats, memberNumber: e.target.value });
+                        }}
+                        placeholder={t("memberNumberPlaceholder")}
+                        autoComplete="off"
+                        maxLength={MEMBER_NUMBER_MAX_LENGTH}
+                        disabled={isSavingHeaderProfile}
+                        className="w-[11.5rem] font-mono"
+                        aria-invalid={memberNumberWarning ? true : undefined}
+                        aria-describedby="coach-student-header-memberNumber-hint"
+                      />
+                    </div>
                     <Button
                       size="sm"
                       className="gap-1.5"
@@ -2801,6 +2921,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       variant="outline"
                       onClick={() => {
                         syncHeaderProfileFields();
+                        setMemberNumberWarning(null);
                         setEditingHeaderProfile(false);
                       }}
                       disabled={isSavingHeaderProfile}
@@ -2808,6 +2929,14 @@ export default function StudentDetailPage({ id }: { id: string }) {
                       {t("cancel")}
                     </Button>
                   </div>
+                  <p id="coach-student-header-memberNumber-hint" className="text-xs text-muted-foreground">
+                    {t("memberNumberHint")}
+                  </p>
+                  {memberNumberWarning ? (
+                    <p role="alert" className="text-sm font-medium text-destructive">
+                      {memberNumberWarning}
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <>
@@ -2839,6 +2968,7 @@ export default function StudentDetailPage({ id }: { id: string }) {
                         className="h-8 w-8 shrink-0"
                         onClick={() => {
                           syncHeaderProfileFields();
+                          setMemberNumberWarning(null);
                           setEditingHeaderProfile(true);
                         }}
                         aria-label={t("edit")}
@@ -2866,6 +2996,15 @@ export default function StudentDetailPage({ id }: { id: string }) {
                   ) : !portalOnly ? (
                     <p className="text-xs text-muted-foreground">{t("birthDate")}: —</p>
                   ) : null}
+                  {(normalizeMemberNumber(editStats.memberNumber) || !portalOnly) && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-2">
+                      <Hash className="h-3 w-3" />
+                      {t("memberNumber")}:{" "}
+                      <span className="font-mono text-foreground">
+                        {normalizeMemberNumber(editStats.memberNumber) || "—"}
+                      </span>
+                    </p>
+                  )}
                 </>
               )}
             </div>

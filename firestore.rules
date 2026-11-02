@@ -31,6 +31,37 @@ service cloud.firestore {
       return !(field in request.resource.data) || request.resource.data[field] == resource.data[field];
     }
 
+    /**
+     * Optional coach-assigned member number. Students cannot set it; coaches may.
+     * Uniqueness per coach is checked in the client before save (rules cannot scan the roster).
+     */
+    function memberNumberFieldOk() {
+      return !('memberNumber' in request.resource.data)
+        || request.resource.data.memberNumber == null
+        || (
+          request.resource.data.memberNumber is string
+          && request.resource.data.memberNumber.size() <= 64
+        );
+    }
+
+    function memberNumberAbsent() {
+      return !('memberNumber' in request.resource.data)
+        || request.resource.data.memberNumber == null
+        || (
+          request.resource.data.memberNumber is string
+          && request.resource.data.memberNumber.size() == 0
+        );
+    }
+
+    /** Students may not add, edit, or clear `memberNumber` (including via delete). */
+    function memberNumberFrozen() {
+      return (('memberNumber' in resource.data) == ('memberNumber' in request.resource.data))
+        && (
+          !('memberNumber' in resource.data)
+          || request.resource.data.memberNumber == resource.data.memberNumber
+        );
+    }
+
     // Allows a student to access trainer subcollection data stored under a different doc ID
     // (rosterDocId) by verifying it via their global student profile.
     function isLinkedStudent(personalTrainerId, studentId) {
@@ -419,10 +450,14 @@ service cloud.firestore {
     // Global Students Directory
     match /students/{studentId} {
       allow read: if isSignedIn();
-      allow create: if isOwner(studentId);
-      // Trainers can update to set trainerId / rosterDocId linking fields.
-      // Students may update their profile but not `blocked` / `blockedReason` (coach or Admin SDK only).
-      allow update: if isTrainer() || (isOwner(studentId) && isFieldUnchanged('blocked') && isFieldUnchanged('blockedReason'));
+      // Students create their own profile. Member number is assigned later by the coach.
+      allow create: if isOwner(studentId) && memberNumberAbsent();
+      // Trainers can update to set trainerId / rosterDocId / memberNumber linking fields.
+      // Students may update their profile but not `blocked` / `blockedReason` / `memberNumber`.
+      allow update: if memberNumberFieldOk() && (
+        isTrainer() ||
+        (isOwner(studentId) && isFieldUnchanged('blocked') && isFieldUnchanged('blockedReason') && memberNumberFrozen())
+      );
       allow delete: if false;
     }
 
@@ -592,14 +627,16 @@ service cloud.firestore {
         // Allow trainers to manage their students, and students to read/manage their own records
         allow get, list: if isOwner(personalTrainerId) || isOwner(studentId) || isLinkedStudent(personalTrainerId, studentId);
         
-        allow create: if (isOwner(personalTrainerId) && matchesPath('trainerId', personalTrainerId)) || 
-                      isOwner(studentId);
+        allow create: if memberNumberFieldOk() && (
+          (isOwner(personalTrainerId) && matchesPath('trainerId', personalTrainerId)) ||
+          (isOwner(studentId) && memberNumberAbsent())
+        );
                       
         // Ensure trainerId cannot be changed once established.
-        // Linked students may not change `blocked` / `blockedReason` on the roster doc.
-        allow update: if (isFieldUnchanged('trainerId')) && (
+        // Linked students may not change `blocked` / `blockedReason` / `memberNumber` on the roster doc.
+        allow update: if memberNumberFieldOk() && (isFieldUnchanged('trainerId')) && (
           isOwner(personalTrainerId) ||
-          (isOwner(studentId) && isFieldUnchanged('blocked') && isFieldUnchanged('blockedReason')) ||
+          (isOwner(studentId) && isFieldUnchanged('blocked') && isFieldUnchanged('blockedReason') && memberNumberFrozen()) ||
           linkedStudentBodyMetricsMerge(personalTrainerId, studentId)
         );
         
