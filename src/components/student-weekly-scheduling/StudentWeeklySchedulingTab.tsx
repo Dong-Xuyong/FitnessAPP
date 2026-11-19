@@ -207,6 +207,7 @@ export function StudentWeeklySchedulingTab({
       date: s.date ?? "",
       startTime: s.startTime ?? "",
       maxStudents: s.maxStudents ?? defaultMaxStudents,
+      ...(s.maxStudentsCustom ? { maxStudentsCustom: true } : {}),
       students: Array.isArray(s.students) ? s.students : [],
     }));
   }, [rawSlots, defaultMaxStudents]);

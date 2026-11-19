@@ -155,6 +155,7 @@ type SessionSlot = {
   date: string;        // "2026-04-10"
   startTime: string;   // "09:00"
   maxStudents: number;
+  maxStudentsCustom?: boolean;
   students: SlotStudent[];
   cancelledAt?: string;
 };
@@ -1654,12 +1655,13 @@ export default function AssignmentCalendarPage() {
   const maxForTime = useCallback(
     (
       time: string,
-      slot?: { maxStudents?: number | null; students?: readonly unknown[] } | null,
+      slot?: { maxStudents?: number | null; maxStudentsCustom?: boolean | null; students?: readonly unknown[] } | null,
       weekday: string = selectedDayKey
     ) =>
       displayedBlockMaxStudents({
         rulesActive: blockRules.length > 0,
         persistedMax: slot?.maxStudents,
+        persistedCustom: slot?.maxStudentsCustom,
         resolvedMax: settingsForTime(time, weekday).maxStudents,
         defaultMax: defaultMaxStudents,
         studentCount: slot?.students?.length ?? 0,
@@ -2732,6 +2734,7 @@ export default function AssignmentCalendarPage() {
       displayedBlockMaxStudents({
         rulesActive: blockRules.length > 0,
         persistedMax: existing?.maxStudents,
+        persistedCustom: existing?.maxStudentsCustom,
         resolvedMax: settingsForTime(time).maxStudents,
         defaultMax: defaultMaxStudents,
         studentCount: existing?.students?.length ?? 0,
@@ -2984,6 +2987,7 @@ export default function AssignmentCalendarPage() {
             date,
             startTime,
             maxStudents: maxS,
+            maxStudentsCustom: true,
             students: current?.students ?? [],
           };
           return { writes: [{ id: docId, slot: updated }], result: updated };
@@ -3696,10 +3700,19 @@ export default function AssignmentCalendarPage() {
               const resolvedMax = blockRules.length === 0 ? defaultMaxStudents : slotSettings.maxStudents;
               const shownDuration = durationForTime(managingSlot.startTime, slotWeekday);
               const maxS = slotMaxOverride || resolvedMax;
-              const persistedMax = managingSlot.slot?.maxStudents ?? resolvedMax;
+              const shownMax = displayedBlockMaxStudents({
+                rulesActive: blockRules.length > 0,
+                persistedMax: managingSlot.slot?.maxStudents,
+                persistedCustom: managingSlot.slot?.maxStudentsCustom,
+                resolvedMax: slotSettings.maxStudents,
+                defaultMax: defaultMaxStudents,
+                studentCount: slotStudents.length,
+              });
               const canSaveSlotMax =
                 !isCancelled &&
-                Math.min(20, Math.max(1, slotMaxOverride || resolvedMax)) !== persistedMax;
+                (Math.min(20, Math.max(1, slotMaxOverride || resolvedMax)) !== shownMax ||
+                  (managingSlot.slot?.maxStudentsCustom !== true &&
+                    managingSlot.slot?.maxStudents !== shownMax));
               const canAdd =
                 !isCancelled &&
                 slotStudents.length < maxS;
@@ -3756,7 +3769,7 @@ export default function AssignmentCalendarPage() {
                     {slotSettings.rule ? (
                       <p className="text-[11px] text-muted-foreground -mt-2">
                         Regra: {slotSettings.rule.durationMin} min · máx. {slotSettings.rule.maxStudents}
-                        {managingSlot.slot?.maxStudents != null &&
+                        {managingSlot.slot?.maxStudentsCustom &&
                         managingSlot.slot.maxStudents !== slotSettings.rule.maxStudents
                           ? " · este bloco já tem capacidade própria"
                           : ""}
@@ -4293,7 +4306,16 @@ export default function AssignmentCalendarPage() {
                                                 defaultDurationMin: slotDurationMin,
                                                 defaultMaxStudents,
                                               }).maxStudents;
-                                        setSlotMaxOverride(existingSlot?.maxStudents ?? resolvedMax);
+                                        setSlotMaxOverride(
+                                          displayedBlockMaxStudents({
+                                            rulesActive: blockRules.length > 0,
+                                            persistedMax: existingSlot?.maxStudents,
+                                            persistedCustom: existingSlot?.maxStudentsCustom,
+                                            resolvedMax,
+                                            defaultMax: defaultMaxStudents,
+                                            studentCount: existingSlot?.students?.length ?? 0,
+                                          })
+                                        );
                                       }
                                     }}
                                   >

@@ -400,11 +400,12 @@ export function StudentSchedulingCalendarBoard({
                 const shownDuration = blockRules.length > 0 ? durationAt(time) : slotDurationMin;
                 const capacityAt = (
                   slotTime: string,
-                  row?: { maxStudents?: number | null; students?: readonly unknown[] } | null
+                  row?: { maxStudents?: number | null; maxStudentsCustom?: boolean | null; students?: readonly unknown[] } | null
                 ) =>
                   displayedBlockMaxStudents({
                     rulesActive: blockRules.length > 0,
                     persistedMax: row?.maxStudents,
+                    persistedCustom: row?.maxStudentsCustom,
                     resolvedMax: resolveBlockSettings({
                       rules: blockRules,
                       weekday: selectedDayKey,

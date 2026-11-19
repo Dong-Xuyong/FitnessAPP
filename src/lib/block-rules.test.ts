@@ -440,3 +440,45 @@ describe("enrolled slot times", () => {
     assert.deepEqual(unionClockTimes(["09:00"], enrolled), ["09:00", "09:30"]);
   });
 });
+
+describe("coach-set capacity for one block (regression: change for next week not kept)", () => {
+  it("keeps a capacity the coach saved on an empty block while rules are active", () => {
+    // Rule says 1, coach saved 3 for next Friday's empty block.
+    assert.equal(
+      displayedBlockMaxStudents({
+        rulesActive: true,
+        persistedMax: 3,
+        persistedCustom: true,
+        resolvedMax: 1,
+        defaultMax: 4,
+        studentCount: 0,
+      }),
+      3
+    );
+    // Lowering below the rule works too.
+    assert.equal(
+      displayedBlockMaxStudents({
+        rulesActive: true,
+        persistedMax: 1,
+        persistedCustom: true,
+        resolvedMax: 4,
+        defaultMax: 4,
+        studentCount: 1,
+      }),
+      1
+    );
+  });
+
+  it("still lets the rule win over a generated (not custom) saved max", () => {
+    assert.equal(
+      displayedBlockMaxStudents({
+        rulesActive: true,
+        persistedMax: 4,
+        resolvedMax: 1,
+        defaultMax: 4,
+        studentCount: 0,
+      }),
+      1
+    );
+  });
+});
