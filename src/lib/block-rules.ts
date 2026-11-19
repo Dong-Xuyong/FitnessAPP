@@ -169,7 +169,7 @@ export function resolveBlockSettings(args: {
 /**
  * Prefer a saved capacity when it is a positive number.
  * Day views use `displayedBlockMaxStudents`, which ignores that saved value
- * on empty slots so a generated default does not hide the rule.
+ * on empty slots (unless the coach set it by hand) so a generated default does not hide the rule.
  */
 export function effectiveBlockMaxStudents(
   persistedMaxStudents: number | null | undefined,
@@ -192,6 +192,8 @@ export function effectiveBlockMaxStudents(
 export function displayedBlockMaxStudents(args: {
   rulesActive: boolean;
   persistedMax?: number | null;
+  /** True when the coach saved this block's capacity by hand ("Máx. alunos" → Guardar). */
+  persistedCustom?: boolean | null;
   resolvedMax: number;
   defaultMax: number;
   studentCount: number;
@@ -202,6 +204,12 @@ export function displayedBlockMaxStudents(args: {
   const resolved = Number(args.resolvedMax);
   const ruleMax = Number.isFinite(resolved) && resolved > 0 ? Math.floor(resolved) : 1;
   const count = Math.max(0, Math.floor(Number(args.studentCount) || 0));
+  // A capacity the coach set by hand for this block wins over the rule, as long as
+  // it still fits everyone enrolled. Generated docs never carry the flag.
+  const persisted = Number(args.persistedMax);
+  if (args.persistedCustom && Number.isFinite(persisted) && persisted >= 1 && persisted >= count) {
+    return Math.floor(persisted);
+  }
   if (count > ruleMax) return effectiveBlockMaxStudents(args.persistedMax, count);
   return ruleMax;
 }

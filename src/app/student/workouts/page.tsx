@@ -103,6 +103,7 @@ type SessionSlot = {
   date: string;
   startTime: string;
   maxStudents: number;
+  maxStudentsCustom?: boolean;
   students: SlotStudent[];
   cancelledAt?: string;
 };
@@ -649,10 +650,11 @@ export default function StudentWorkoutsPage() {
   );
 
   const maxAtTime = useCallback(
-    (time: string, slot?: { maxStudents?: number | null; students?: readonly unknown[] } | null) =>
+    (time: string, slot?: { maxStudents?: number | null; maxStudentsCustom?: boolean | null; students?: readonly unknown[] } | null) =>
       displayedBlockMaxStudents({
         rulesActive: blockRules.length > 0,
         persistedMax: slot?.maxStudents,
+        persistedCustom: slot?.maxStudentsCustom,
         resolvedMax: resolveBlockSettings({
           rules: blockRules,
           weekday: selectedDayKey,

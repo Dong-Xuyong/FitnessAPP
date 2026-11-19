@@ -42,6 +42,8 @@ export type SessionSlot = {
   students: SlotStudent[];
   /** ISO timestamp when the coach cancelled this block (no new bookings until reactivated). */
   cancelledAt?: string;
+  /** Set when the coach saved this block's capacity by hand; it then overrides the block rule. */
+  maxStudentsCustom?: boolean;
 };
 
 export function isSessionSlotCancelled(
@@ -191,7 +193,9 @@ export function planSessionSlotEnrollment(params: {
     // adopts the capacity requested for this block (the matching rule).
     // A slot that already has students keeps its saved capacity.
     const maxStudents =
-      students.length > 0 && Number.isFinite(persistedMax) && persistedMax > 0
+      (students.length > 0 || current?.maxStudentsCustom) &&
+      Number.isFinite(persistedMax) &&
+      persistedMax > 0
         ? persistedMax
         : requestedMax;
     if (students.length >= maxStudents) {

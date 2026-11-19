@@ -576,3 +576,24 @@ describe("orphan continuation recovery", () => {
     );
   });
 });
+
+describe("planSessionSlotEnrollment with a coach-set capacity", () => {
+  it("keeps the saved custom capacity on an empty block instead of the rule's", () => {
+    const current: SessionSlot = {
+      id: slotDocId("2026-11-27", "10:00"),
+      date: "2026-11-27",
+      startTime: "10:00",
+      maxStudents: 1,
+      maxStudentsCustom: true,
+      students: [],
+    };
+    const plan = planSessionSlotEnrollment({
+      blocks: [{ date: "2026-11-27", startTime: "10:00", maxStudents: 4 }],
+      currentSlots: [current],
+      student: { studentId: "s1", studentName: "A" },
+      studentIds: ["s1"],
+    });
+    assert.equal(plan.slots[0]!.maxStudents, 1);
+    assert.equal(plan.slots[0]!.maxStudentsCustom, true);
+  });
+});
